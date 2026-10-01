@@ -98,7 +98,7 @@ def collect_hessians(model, batches: list[torch.Tensor], quantize_layer=None):
 
         def acc(key, x):
             x2 = x.reshape(-1, x.shape[-1]).float()
-            Hs[key].add_((2 * x2.T @ x2).double().cpu())
+            Hs[key].add_((2 * x2.T @ x2).cpu().double())
 
         for x in xs:
             h = rms(x, n["in"])

@@ -1,0 +1,22 @@
+{
+  "name": "@rewire/tiny",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@jax-js/jax": "0.1.25",
+    "@rewire/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@webgpu/types": "^0.1.74",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3",
+    "webgpu": "^0.6.1"
+  }
+}

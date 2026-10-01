@@ -401,8 +401,10 @@ def generate(model: Model, prompt: list[int], ch: Changes, seeds: list[int], tur
     last = xf[:, -1].expand(B, -1)
     done = [False] * B
     toks = [[] for _ in range(B)]
+    p_first = (cache.length if cache is not None else 0) + len(prompt) - 1
     for step in range(cap):
         sc = model.scores(last, ch)
+        lp_all = torch.log_softmax(sc.float(), -1)
         picks = sample_rows(sc, seeds, turn, step, temperature)
         for b in range(B):
             if not done[b]:
@@ -417,7 +419,7 @@ def generate(model: Model, prompt: list[int], ch: Changes, seeds: list[int], tur
 
 
 def generate_recorded(model: Model, prompt: list[int], ch: Changes, seeds: list[int], turn: int = 0, cap: int = 64,
-                      guesses: bool = True, cache: Cache | None = None, temperature: float = 0.7):
+                      guesses: bool = True, cache: Cache | None = None, temperature: float = 0.7, step0: int = 0):
     """Like generate(), with pushes and floor guesses for every reply token, including the first."""
     stop = set(TOK["stop"])
     base = cache.clone() if cache is not None else Cache()
@@ -434,9 +436,11 @@ def generate_recorded(model: Model, prompt: list[int], ch: Changes, seeds: list[
     done = [False] * B
     toks = [[] for _ in range(B)]
     recs = [[] for _ in range(B)]
+    p_first = (cache.length if cache is not None else 0) + len(prompt) - 1
     for step in range(cap):
         sc = model.scores(last, ch)
-        picks = sample_rows(sc, seeds, turn, step, temperature)
+        lp_all = torch.log_softmax(sc.float(), -1)
+        picks = sample_rows(sc, seeds, turn, step0 + step, temperature)
         nxt = torch.tensor([p[0] for p in picks])
         u = model.push_vector(last, nxt.to(model.device), ch)
         emb = model.w.dictionary[ch.swap[last_input.to(model.device)]]
@@ -448,7 +452,8 @@ def generate_recorded(model: Model, prompt: list[int], ch: Changes, seeds: list[
             tid = picks[b][0]
             toks[b].append(tid)
             r = {"id": tid, "cand_ids": picks[b][1], "cand_probs": picks[b][2], "cut": picks[b][3],
-                 "pushes": pu[b].float().cpu().numpy()}
+                 "pushes": pu[b].float().cpu().numpy(), "lp1": float(lp_all[b, tid]),
+                 "concept": float(model.concept_push(u[b:b + 1], ch, p_first + step)[0])}
             if guesses:
                 r["guess_ids"] = gi[b].cpu().numpy()
                 r["guess_probs"] = gp[b].float().cpu().numpy()

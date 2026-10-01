@@ -138,7 +138,9 @@ def gptq_weights(base_w: Weights, group: int, clip: bool, calib) -> Weights:
     w = Weights(base=base_w)  # starts as the 16-bit model, replaced floor by floor
     w.quant_cfg = Quant("given", group, 16)
     w.packed = {}
-    mats4 = w.mats(4)
+    # floors not yet quantized stay at 16 bits while the Hessians of later floors are collected
+    w._mats = {4: [{m: base_w.orig[L][m].to(w.device, w.dtype) for m in MATS} for L in range(FLOORS)]}
+    mats4 = w._mats[4]
     groups_of = {"qkv": ("q", "k", "v"), "o": ("o",), "gu": ("gate", "up"), "down": ("down",)}
 
     def qlayer(L, key, H):
@@ -185,8 +187,8 @@ def main():
     cands.append(("rtnsym-g64", Quant("rtn-sym", 64, 16)))
     for g in (32, 64, 128):
         cands.append((f"clip-g{g}", Quant("clip", g, 16)))
-    cands += [("hqq-g64", "hqq", 64), ("hqq-g128", "hqq", 128), ("gptq-g64", "gptq", 64), ("gptq-g128", "gptq", 128),
-              ("gptqclip-g128", "gptqclip", 128)]
+    cands += [("hqq-g64", "hqq", 64), ("hqq-g128", "hqq", 128), ("gptq-g32", "gptq", 32), ("gptq-g64", "gptq", 64),
+              ("gptq-g128", "gptq", 128), ("gptqclip-g32", "gptqclip", 32), ("gptqclip-g64", "gptqclip", 64)]
     calib = None
     for c in cands:
         name = c[0]

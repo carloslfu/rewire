@@ -14,3 +14,4 @@ weights/
 bench/results/raw/
 .playwright/
 test-results/
+tiny/test/grad-case.json

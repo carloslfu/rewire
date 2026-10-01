@@ -1,6 +1,7 @@
 // The engine model: weights on the GPU, pipelines, and conversations that read and write tokens.
+import { encodeTable } from "./changes.ts";
 import { type ModelConfig, type TableLayout, tableLayout, TENSOR_ID } from "./config.ts";
-import { BU, bind, type Dispatch, encode, Pipelines, storage, upload } from "./gpu.ts";
+import { BU, bind, type Dispatch, download, encode, Pipelines, storage, upload } from "./gpu.ts";
 import * as K from "./kernels.ts";
 
 export interface FloorWeights {
@@ -114,8 +115,14 @@ export class Conversation {
   /** Per floor, each head's output and the memory block's output at the last position: [floors][heads + 1][width]. */
   readonly parts: GPUBuffer; readonly scores: GPUBuffer; readonly cand: GPUBuffer;
   readonly sampleOut: GPUBuffer; readonly pushes: GPUBuffer;
+  /** A word to use instead of the drawn one (a visitor's pick, or the comparison pass). */
+  readonly forced: GPUBuffer;
+  /** Mappable buffers that receive each step's results, read a few steps behind. */
+  readonly stage: GPUBuffer[] = [];
   private chunkPlan: Dispatch[];
   private stepPlan: Dispatch[];
+  private headA: Dispatch[] = [];
+  private headB: Dispatch[] = [];
   /** When set, the stream entering each floor and the final stream are copied here: [floors + 1][maxContext][width]. */
   capture?: GPUBuffer;
 
@@ -139,11 +146,16 @@ export class Conversation {
     this.parts = f(cfg.floors * (H + 1) * W, "parts");
     this.scores = f(cfg.vocabRows, "scores");
     this.cand = f(K.TOPK_SLICES * K.TOPK * 2, "cand");
-    this.sampleOut = f(42, "sample");
-    this.pushes = f(cfg.floors * (H + 1) + 1, "pushes");
-    this.setTable(new Uint32Array(model.lay.words));
+    this.sampleOut = f(48, "sample");
+    this.pushes = f(cfg.floors * (H + 1) + 2, "pushes");
+    this.forced = f(4, "forced");
+    for (let i = 0; i < RING; i++) {
+      this.stage.push(dev.createBuffer({ size: STAGE_BYTES(cfg), usage: BU.MAP_READ | BU.COPY_DST, label: `stage${i}` }));
+    }
+    this.setTable(encodeTable({}, cfg)); // the normal model until a change table is set
     this.chunkPlan = this.forwardPlan(8, false);
-    this.stepPlan = [...this.forwardPlan(1, true), ...this.headPlan()];
+    this.stepPlan = this.forwardPlan(1, true);
+    [this.headA, this.headB] = this.headPlans();
   }
 
   setTable(table: Uint32Array) {
@@ -175,7 +187,7 @@ export class Conversation {
   setCapture(buf: GPUBuffer) {
     this.capture = buf;
     this.chunkPlan = this.forwardPlan(8, false);
-    this.stepPlan = [...this.forwardPlan(1, true), ...this.headPlan()];
+    this.stepPlan = this.forwardPlan(1, true);
   }
 
   private captureAt(slot: number, rows: number): Dispatch[] {
@@ -224,21 +236,27 @@ export class Conversation {
     return plan;
   }
 
-  /** After a one-token forward: final norm, scores, top-k, sample, pushes. */
-  private headPlan(): Dispatch[] {
+  /**
+   * After a one-token forward. A: final norm, scores, top-k and the draw. B: the log-probability of the
+   * word and the pushes toward it. Between them a forced word can replace the drawn one.
+   */
+  private headPlans(): [Dispatch[], Dispatch[]] {
     const m = this.model, cfg = this.cfg, dev = this.dev, kc = m.kc;
-    const plan: Dispatch[] = [];
+    const a: Dispatch[] = [];
     const rms = m.pipe("rms", () => K.rmsKernel(kc));
-    plan.push({ pipeline: rms, group: bind(dev, rms, [this.x, m.w.finalNorm, this.SP, this.xn, this.rinv]), x: 1 });
-    plan.push(this.mm("dict", cfg.width, cfg.vocabRows, 1, 1, m.w.dict, this.xn, this.scores, m.dictUniform, { dict: true }));
+    a.push({ pipeline: rms, group: bind(dev, rms, [this.x, m.w.finalNorm, this.SP, this.xn, this.rinv]), x: 1 });
+    a.push(this.mm("dict", cfg.width, cfg.vocabRows, 1, 1, m.w.dict, this.xn, this.scores, m.dictUniform, { dict: true }));
     const tk = m.pipe("topk", () => K.topkPartialKernel(kc));
-    plan.push({ pipeline: tk, group: bind(dev, tk, [this.scores, this.SP, this.cand]), x: K.TOPK_SLICES, y: 1 });
+    a.push({ pipeline: tk, group: bind(dev, tk, [this.scores, this.SP, this.cand]), x: K.TOPK_SLICES, y: 1 });
     const sm = m.pipe("sample", () => K.sampleKernel(kc));
-    plan.push({ pipeline: sm, group: bind(dev, sm, [this.cand, this.SP, this.tok, this.sampleOut]), x: 1 });
+    a.push({ pipeline: sm, group: bind(dev, sm, [this.cand, this.SP, this.tok, this.sampleOut]), x: 1 });
+    const b: Dispatch[] = [];
+    const lse = m.pipe("lse", () => K.lseKernel(kc));
+    b.push({ pipeline: lse, group: bind(dev, lse, [this.scores, this.tok, this.SP, this.sampleOut]), x: 1 });
     const pk = m.pipe("push", () => K.pushKernel(kc));
-    plan.push({ pipeline: pk, group: bind(dev, pk, [this.tok, this.intok, m.w.dict, m.aux, this.rinv,
-      this.parts, this.ct, this.SP, this.pushes]), x: cfg.floors * (cfg.queryHeads + 1) + 1 });
-    return plan;
+    b.push({ pipeline: pk, group: bind(dev, pk, [this.tok, this.intok, m.w.dict, m.aux, this.rinv,
+      this.parts, this.ct, this.SP, this.pushes]), x: cfg.floors * (cfg.queryHeads + 1) + 2 });
+    return [a, b];
   }
 
   /** Read tokens into the cache (all but the last, which `step` reads). */
@@ -254,18 +272,334 @@ export class Conversation {
     }
   }
 
+  // ------------------------------------------------------------------ inspection (section 6.2, "Reads")
+
+  private insp?: { prog: (Dispatch | Copy)[]; buf: GPUBuffer; rows: GPUBuffer; per: number; off: Record<string, number> };
+
+  /** Everything one floor computes, for every floor, at one position: built once, then reused. */
+  private inspectProgram() {
+    if (this.insp) return this.insp;
+    const m = this.model, cfg = this.cfg, dev = this.dev, kc = m.kc;
+    const W = cfg.width, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, U = cfg.units, F = cfg.floors;
+    const sizes: [string, number][] = [["x", W], ["h", W], ["q_raw", H * D], ["k_raw", KV * D], ["v", KV * D], ["q", H * D],
+      ["k", KV * D], ["att", H * D], ["o", W], ["mid", W], ["h2", W], ["gate", U], ["up", U], ["act", U], ["mem", W]];
+    const off: Record<string, number> = {};
+    let per = 0;
+    for (const [k, n] of sizes) { off[k] = per; per += n; }
+    const buf = storage(dev, (per * F + 2 * W) * 4, "inspect");
+    const rows = storage(dev, F * 2 * H * cfg.maxContext * 4, "attention rows");
+    const g = storage(dev, U * 4, "gate only"), u = storage(dev, U * 4, "up only");
+    const prog: (Dispatch | Copy)[] = [];
+    const cp = (src: GPUBuffer, L: number, key: string, n: number) =>
+      prog.push({ copy: true, src, dst: buf, srcOffset: 0, dstOffset: (L * per + off[key]) * 4, size: n * 4 });
+    const embed = m.pipe("embed", () => K.embedKernel(kc));
+    prog.push({ pipeline: embed, group: bind(dev, embed, [this.intok, m.w.dict, this.ct, this.SP, this.x]), x: 1 });
+    const enter = m.pipe("enter", () => K.enterFloorKernel(kc));
+    const rope = m.pipe("rope", () => K.qkRopeKernel(kc));
+    const attn = m.pipe("attn-cap", () => K.attentionKernel(kc, true));
+    const ares = m.pipe("ares", () => K.attnResidualKernel(kc));
+    const mres = m.pipe("mres", () => K.memResidualKernel(kc));
+    const oh = m.pipe("oheads", () => K.oHeadsKernel(kc));
+    for (let L = 0; L < F; L++) {
+      const fw = m.w.floors[L];
+      const uni = m.floorUniforms[L];
+      prog.push({ pipeline: enter, group: bind(dev, enter, [this.x, fw.inNorm, this.ct, this.SP, this.h, uni]), x: 1 });
+      cp(this.x, L, "x", W); cp(this.h, L, "h", W);
+      prog.push(this.mm("q", W, H * D, 1, 1, fw.q, this.h, this.q, m.mmUniform(L, "q")));
+      prog.push(this.mm("k", W, KV * D, 1, 1, fw.k, this.h, this.k, m.mmUniform(L, "k")));
+      prog.push(this.mm("v", W, KV * D, 1, 1, fw.v, this.h, this.v, m.mmUniform(L, "v")));
+      cp(this.q, L, "q_raw", H * D); cp(this.k, L, "k_raw", KV * D); cp(this.v, L, "v", KV * D);
+      prog.push({ pipeline: rope, group: bind(dev, rope, [this.q, this.k, this.v, fw.qkNorm, m.rope, this.SP,
+        this.kcache[L], this.vcache[L], this.kout]), x: 1 });
+      cp(this.q, L, "q", H * D); cp(this.kout, L, "k", KV * D);
+      prog.push({ pipeline: attn, group: bind(dev, attn, [this.q, this.kcache[L], this.vcache[L], this.ct, this.SP, uni, this.att, rows]), x: 1, y: H });
+      cp(this.att, L, "att", H * D);
+      prog.push({ pipeline: oh, group: bind(dev, oh, [fw.o, this.att, this.o, this.ct, this.SP, m.mmUniform(L, "o"),
+        { buffer: this.parts, offset: L * (H + 1) * W * 4, size: H * W * 4 }]), x: Math.ceil(W / Math.floor(256 / H)) });
+      cp(this.o, L, "o", W);
+      prog.push({ pipeline: ares, group: bind(dev, ares, [this.x, this.o, fw.postNorm, this.ct, this.SP, uni, this.mid, this.h2]), x: 1 });
+      cp(this.mid, L, "mid", W); cp(this.h2, L, "h2", W);
+      prog.push(this.mm("g1", W, U, 1, 1, fw.gate, this.h2, g, m.mmUniform(L, "gate")));
+      prog.push(this.mm("u1", W, U, 1, 1, fw.up, this.h2, u, m.mmUniform(L, "up")));
+      cp(g, L, "gate", U); cp(u, L, "up", U);
+      prog.push(this.mm("gu", W, U, 1, 1, fw.gate, this.h2, this.act, m.mmUniform(L, "gate", "up"), { gateup: fw.up }));
+      cp(this.act, L, "act", U);
+      prog.push(this.mm("down", U, W, 1, 1, fw.down, this.act, this.m, m.mmUniform(L, "down")));
+      prog.push({ pipeline: mres, group: bind(dev, mres, [this.mid, this.m, this.ct, this.SP, uni, this.x, this.parts]), x: 1 });
+      cp(this.m, L, "mem", W);
+    }
+    prog.push({ copy: true, src: this.x, dst: buf, srcOffset: 0, dstOffset: per * F * 4, size: W * 4 });
+    const [a] = this.headPlans();
+    prog.push(a[0], a[1]);
+    prog.push({ copy: true, src: this.xn, dst: buf, srcOffset: 0, dstOffset: (per * F + W) * 4, size: W * 4 });
+    this.insp = { prog, buf, rows, per, off };
+    return this.insp;
+  }
+
   /**
-   * One step: read `input` (or, when undefined, the token the GPU sampled last) at the next position,
-   * then score, sample and push. Returns the encoder work submitted; results land in sampleOut/pushes.
+   * One pass at `position` reading `input`, with the cache holding everything before it: every value each
+   * floor computes, the attention rows, the final scores and the floor guesses. `target` is the word
+   * written there (for the unit pushes). The cache is unchanged afterwards.
    */
-  step(input: number | undefined, p: { seed: number; turn: number; step: number; temperature?: number }, after?: (enc: GPUCommandEncoder) => void) {
+  async inspect(position: number, input: number, target: number, host: InspectHost): Promise<Inspection> {
+    const cfg = this.cfg, dev = this.dev, m = this.model;
+    const W = cfg.width, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, U = cfg.units, F = cfg.floors;
+    const { prog, buf, rows, per, off } = this.inspectProgram();
+    const keep = this.length;
+    dev.queue.writeBuffer(this.intok, 0, new Uint32Array([input]));
+    this.writeParams({ T: 1, pos0: position, row: 0 });
+    const enc = dev.createCommandEncoder();
+    run(enc, prog);
+    dev.queue.submit([enc.finish()]);
+    this.length = keep;
+    const [raw, rowsRaw, scoresRaw, rinvRaw] = await Promise.all([download(dev, buf), download(dev, rows), download(dev, this.scores),
+      download(dev, this.rinv, 16)]);
+    const all = new Float32Array(raw);
+    const detail = new Map<string, Float32Array>();
+    const n = position + 1;
+    const rowsF = new Float32Array(rowsRaw);
+    const qk = host.qkNorm;
+    const table = host.table;
+    const fl = (i: number) => new Float32Array(table.buffer, table.byteOffset + i * 4, 1)[0];
+    for (let L = 0; L < F; L++) {
+      const g = (k: string, len: number) => all.slice(L * per + off[k], L * per + off[k] + len);
+      for (const [k, len] of [["x", W], ["h", W], ["q_raw", H * D], ["k_raw", KV * D], ["v", KV * D], ["q", H * D], ["k", KV * D],
+        ["att", H * D], ["o", W], ["mid", W], ["h2", W], ["gate", U], ["up", U], ["act", U], ["mem", W]] as [string, number][]) {
+        detail.set(`f${L}.${k}`, g(k, len));
+      }
+      detail.set(`f${L}.q_n`, headNorm(detail.get(`f${L}.q_raw`)!, qk[L].subarray(0, D), H, D, cfg.eps));
+      detail.set(`f${L}.k_n`, headNorm(detail.get(`f${L}.k_raw`)!, qk[L].subarray(D, 2 * D), KV, D, cfg.eps));
+      const probs = new Float32Array(H * n), sc = new Float32Array(H * n);
+      for (let h = 0; h < H; h++) {
+        for (let j = 0; j < n; j++) {
+          probs[h * n + j] = rowsF[((L * 2) * H + h) * cfg.maxContext + j];
+          const s = rowsF[((L * 2 + 1) * H + h) * cfg.maxContext + j];
+          sc[h * n + j] = s < -1e38 ? -Infinity : s;
+        }
+      }
+      detail.set(`f${L}.probs`, probs);
+      detail.set(`f${L}.scores`, sc);
+    }
+    detail.set("final.x", all.slice(per * F, per * F + W));
+    detail.set("final.xn", all.slice(per * F + W, per * F + 2 * W));
+    const scores = new Float32Array(scoresRaw);
+    const top = topK(scores, cfg.vocabReal, 64);
+    detail.set("final.top_scores", Float32Array.from(top.map((i) => scores[i])));
+    detail.set("final.top_ids", Float32Array.from(top));
+    // unit pushes: u = (dict[target] - mean row) * w_final * rinv, then each floor's down columns dotted with u
+    const rinv = new Float32Array(rinvRaw)[0];
+    const row = await this.dictRow(target);
+    const uv = new Float32Array(W);
+    for (let i = 0; i < W; i++) uv[i] = (row[i] - host.meanRow[i]) * host.finalNorm[i] * rinv;
+    const dots = await this.columnDots(uv);
+    for (let L = 0; L < F; L++) {
+      const act = detail.get(`f${L}.act`)!;
+      const a = fl(m.lay.floor + L), mm = fl(m.lay.mem + L);
+      const up = new Float32Array(U);
+      for (let j = 0; j < U; j++) up[j] = act[j] * dots[L * U + j] * mm * a;
+      detail.set(`f${L}.unit_push`, up);
+    }
+    const guesses = await this.floorGuesses(detail, 5);
+    return { detail, guesses };
+  }
+
+  private dictRowPipe?: { ids: GPUBuffer; out: GPUBuffer; group: GPUBindGroup; pipeline: GPUComputePipeline };
+  /** One dictionary row, through this conversation's swap map. */
+  async dictRow(id: number): Promise<Float32Array> {
+    const m = this.model, dev = this.dev;
+    if (!this.dictRowPipe) {
+      const pipeline = m.pipe("dictrow", () => K.dictRowKernel(m.kc));
+      const ids = storage(dev, 16, "row id"), out = storage(dev, this.cfg.width * 4, "row");
+      this.dictRowPipe = { ids, out, pipeline, group: bind(dev, pipeline, [m.w.dict, this.ct, ids, out]) };
+    }
+    const p = this.dictRowPipe;
+    dev.queue.writeBuffer(p.ids, 0, new Uint32Array([id]));
+    const enc = dev.createCommandEncoder();
+    encode(enc, [{ pipeline: p.pipeline, group: p.group, x: 1 }]);
+    dev.queue.submit([enc.finish()]);
+    return new Float32Array(await download(dev, p.out));
+  }
+
+  private colPipe?: { u: GPUBuffer; out: GPUBuffer; list: Dispatch[] };
+  private async columnDots(u: Float32Array): Promise<Float32Array> {
+    const m = this.model, dev = this.dev, cfg = this.cfg, U = cfg.units;
+    if (!this.colPipe) {
+      const pipeline = m.pipe("coldot", () => K.colDotKernel(m.kc));
+      const ub = storage(dev, cfg.width * 4, "u"), out = storage(dev, cfg.floors * U * 4, "unit dots");
+      const list = m.w.floors.map((fw, L) => ({ pipeline, group: bind(dev, pipeline, [fw.down, ub, this.ct,
+        { buffer: out, offset: L * U * 4, size: U * 4 }]), x: Math.ceil(U / 64) }));
+      this.colPipe = { u: ub, out, list };
+    }
+    dev.queue.writeBuffer(this.colPipe.u, 0, u);
+    const enc = dev.createCommandEncoder();
+    encode(enc, this.colPipe.list);
+    dev.queue.submit([enc.finish()]);
+    return new Float32Array(await download(dev, this.colPipe.out));
+  }
+
+  private guessPipe?: { inp: GPUBuffer; xn: GPUBuffer; rinv: GPUBuffer; scores: GPUBuffer; list: Dispatch[] };
+  /** What each floor's output would say: the final normalization and the dictionary, top k per floor. */
+  private async floorGuesses(detail: Map<string, Float32Array>, k: number): Promise<{ id: number; p: number }[][]> {
+    const m = this.model, dev = this.dev, cfg = this.cfg, W = cfg.width, F = cfg.floors, V = cfg.vocabRows;
+    if (!this.guessPipe) {
+      const inp = storage(dev, F * W * 4, "guess in"), xn = storage(dev, F * W * 4, "guess xn"), rinv = storage(dev, F * 4, "guess rinv");
+      const scores = storage(dev, F * V * 4, "guess scores");
+      const rms = m.pipe("rms", () => K.rmsKernel(m.kc));
+      const list: Dispatch[] = [{ pipeline: rms, group: bind(dev, rms, [inp, m.w.finalNorm, this.SP, xn, rinv]), x: F },
+        this.mm("dict", W, V, 8, F, m.w.dict, xn, scores, m.dictUniform, { dict: true })];
+      this.guessPipe = { inp, xn, rinv, scores, list };
+    }
+    const g = this.guessPipe;
+    const streams = new Float32Array(F * W);
+    for (let L = 0; L < F; L++) streams.set(L < F - 1 ? detail.get(`f${L + 1}.x`)! : detail.get("final.x")!, L * W);
+    dev.queue.writeBuffer(g.inp, 0, streams);
+    this.writeParams({ T: F, pos0: 0 });
+    const enc = dev.createCommandEncoder();
+    encode(enc, g.list);
+    dev.queue.submit([enc.finish()]);
+    const sc = new Float32Array(await download(dev, g.scores));
+    const out: { id: number; p: number }[][] = [];
+    for (let L = 0; L < F; L++) {
+      const row = sc.subarray(L * V, L * V + V);
+      let mx = -Infinity;
+      for (let i = 0; i < cfg.vocabReal; i++) if (row[i] > mx) mx = row[i];
+      let sum = 0;
+      for (let i = 0; i < cfg.vocabReal; i++) sum += Math.exp(row[i] - mx);
+      out.push(topK(row, cfg.vocabReal, k).map((id) => ({ id, p: Math.exp(row[id] - mx) / sum })));
+    }
+    return out;
+  }
+
+  /** Forget everything from position n on (the cache keeps its bytes; later reads overwrite them). */
+  rewind(n: number) {
+    this.length = Math.min(this.length, n);
+  }
+
+  /**
+   * One step: read `input` (or, when undefined, the word the GPU drew last) at the next position, then
+   * score, draw and push. With `force`, that word is used instead of the drawn one (the candidates still
+   * show the real distribution). With `slot`, the results are copied to that staging buffer for `result`.
+   */
+  step(input: number | undefined, p: { seed: number; turn: number; step: number; temperature?: number; force?: number; slot?: number },
+    after?: (enc: GPUCommandEncoder) => void) {
     const enc = this.dev.createCommandEncoder();
     if (input === undefined) enc.copyBufferToBuffer(this.tok, 0, this.intok, 0, 4);
     else this.dev.queue.writeBuffer(this.intok, 0, new Uint32Array([input]));
     this.writeParams({ T: 1, pos0: this.length, row: 0, seed: p.seed, turn: p.turn, step: p.step, temperature: p.temperature });
-    encode(enc, this.stepPlan);
+    encode(enc, [...this.stepPlan, ...this.headA]);
+    if (p.force !== undefined) {
+      this.dev.queue.writeBuffer(this.forced, 0, new Uint32Array([p.force]));
+      enc.copyBufferToBuffer(this.forced, 0, this.tok, 0, 4);
+    }
+    encode(enc, this.headB);
+    if (p.slot !== undefined) this.copyResults(enc, p.slot);
     after?.(enc);
     this.dev.queue.submit([enc.finish()]);
     this.length += 1;
   }
+
+  /** Comparison: read `input`, then the log-probability of `target` and the pushes toward it (no draw). */
+  compareStep(input: number, target: number, slot: number) {
+    const enc = this.dev.createCommandEncoder();
+    this.dev.queue.writeBuffer(this.intok, 0, new Uint32Array([input]));
+    this.dev.queue.writeBuffer(this.forced, 0, new Uint32Array([target]));
+    this.writeParams({ T: 1, pos0: this.length, row: 0 });
+    encode(enc, [...this.stepPlan, ...this.headA.slice(0, 2)]);
+    enc.copyBufferToBuffer(this.forced, 0, this.tok, 0, 4);
+    encode(enc, this.headB);
+    this.copyResults(enc, slot);
+    this.dev.queue.submit([enc.finish()]);
+    this.length += 1;
+  }
+
+  private copyResults(enc: GPUCommandEncoder, slot: number) {
+    const st = this.stage[slot % RING];
+    enc.copyBufferToBuffer(this.sampleOut, 0, st, 0, 48 * 4);
+    enc.copyBufferToBuffer(this.tok, 0, st, 48 * 4, 16);
+    enc.copyBufferToBuffer(this.pushes, 0, st, 52 * 4, (this.cfg.floors * (this.cfg.queryHeads + 1) + 2) * 4);
+  }
+
+  /** Results of the step copied to `slot`. Call in submission order; at most RING steps behind. */
+  async result(slot: number): Promise<StepResult> {
+    const st = this.stage[slot % RING];
+    await st.mapAsync(1);
+    const u = new Uint32Array(st.getMappedRange().slice(0));
+    st.unmap();
+    const f = new Float32Array(u.buffer);
+    const P = this.cfg.floors * (this.cfg.queryHeads + 1) + 1;
+    return {
+      drawn: u[0], token: u[48], cut: u[1], ids: u.slice(2, 22), probs: f.slice(22, 42), lp1: f[42],
+      pushes: f.slice(52, 52 + P), concept: f[52 + P],
+    };
+  }
 }
+
+export const RING = 4;
+const STAGE_BYTES = (cfg: ModelConfig) => (52 + cfg.floors * (cfg.queryHeads + 1) + 2) * 4;
+
+export interface StepResult {
+  /** The word the draw picked. */
+  drawn: number;
+  /** The word used (the drawn one, or the forced one). */
+  token: number;
+  cut: number;
+  ids: Uint32Array;
+  probs: Float32Array;
+  lp1: number;
+  pushes: Float32Array;
+  concept: number;
+}
+
+export interface Copy { copy: true; src: GPUBuffer; dst: GPUBuffer; srcOffset: number; dstOffset: number; size: number }
+
+/** Dispatches in compute passes, with buffer copies between passes. */
+export function run(enc: GPUCommandEncoder, prog: (Dispatch | Copy)[]) {
+  let batch: Dispatch[] = [];
+  for (const p of prog) {
+    if ("copy" in p) {
+      if (batch.length) { encode(enc, batch); batch = []; }
+      enc.copyBufferToBuffer(p.src, p.srcOffset, p.dst, p.dstOffset, p.size);
+    } else batch.push(p);
+  }
+  if (batch.length) encode(enc, batch);
+}
+
+export interface InspectHost {
+  /** Per floor: the query normalization weights then the key normalization weights. */
+  qkNorm: Float32Array[];
+  meanRow: Float32Array;
+  finalNorm: Float32Array;
+  /** The encoded change table this conversation runs under. */
+  table: Uint32Array;
+}
+
+export interface Inspection {
+  detail: Map<string, Float32Array>;
+  guesses: { id: number; p: number }[][];
+}
+
+function headNorm(x: Float32Array, w: Float32Array, heads: number, D: number, eps: number): Float32Array {
+  const out = new Float32Array(x.length);
+  for (let h = 0; h < heads; h++) {
+    let ss = 0;
+    for (let i = 0; i < D; i++) ss += x[h * D + i] ** 2;
+    const r = 1 / Math.sqrt(ss / D + eps);
+    for (let i = 0; i < D; i++) out[h * D + i] = x[h * D + i] * r * w[i];
+  }
+  return out;
+}
+
+/** Indices of the k largest values among the first n, ties by lower index. */
+export function topK(v: Float32Array, n: number, k: number): number[] {
+  const best: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (best.length < k || v[i] > v[best[best.length - 1]]) {
+      let j = best.length < k ? best.length : k - 1;
+      if (best.length < k) best.push(i); else best[j] = i;
+      while (j > 0 && v[best[j]] > v[best[j - 1]]) { [best[j], best[j - 1]] = [best[j - 1], best[j]]; j--; }
+    }
+  }
+  return best;
+}
+
+export { download };

@@ -1,0 +1,23 @@
+[
+ {
+  "id": "alice",
+  "title": "Alice's Adventures in Wonderland",
+  "author": "Lewis Carroll",
+  "source": "Project Gutenberg eBook #11",
+  "chars": 59940
+ },
+ {
+  "id": "pride",
+  "title": "Pride and Prejudice",
+  "author": "Jane Austen",
+  "source": "Project Gutenberg eBook #1342",
+  "chars": 59968
+ },
+ {
+  "id": "sonnets",
+  "title": "Shakespeare's Sonnets",
+  "author": "William Shakespeare",
+  "source": "Project Gutenberg eBook #1041",
+  "chars": 59439
+ }
+]

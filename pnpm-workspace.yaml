@@ -4,5 +4,5 @@ packages:
   - tiny
   - bench
 allowBuilds:
-  esbuild: set this to true or false
-  webgpu: set this to true or false
+  esbuild: true
+  webgpu: true

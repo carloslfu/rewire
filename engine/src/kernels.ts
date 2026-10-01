@@ -451,6 +451,7 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
     }
     sc[j] = s;
     mx = max(mx, s);
+    ${capture ? `rows[((F.floor * 2u + 1u) * ${H}u + h) * ${maxCtx}u + j] = s;` : ""}
   }
   red[li] = mx;
   workgroupBarrier();
@@ -476,7 +477,7 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
   let total = red[0];
   workgroupBarrier();
   let inv = select(0.0, 1.0 / total, total > 0.0);
-  ${capture ? `for (var j = li; j < n; j += 256u) { rows[h * ${maxCtx}u + j] = sc[j] * inv; }` : ""}
+  ${capture ? `for (var j = li; j < n; j += 256u) { rows[((F.floor * 2u) * ${H}u + h) * ${maxCtx}u + j] = sc[j] * inv; }` : ""}
   // value mix: 256 threads = 2 halves x 128 dims... dims as pairs: thread covers one pair for one half of the keys
   let pair = li % ${HALF}u;
   let part = li / ${HALF}u;
@@ -758,7 +759,14 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
   let t = swapped(tok[0]);
   let r = rinv[sp(9)];
   var acc = 0.0;
-  if (p == 0u) {
+  if (p == ${F * (H + 1) + 1}u) {
+    // the concept's own push: it was added to the stream entering its floor
+    let pos = sp(1) + sp(9);
+    if (ct[4] != 0xffffffffu && pos >= ct[6]) {
+      let scale = ctf(5u);
+      for (var i = li; i < ${W}u; i += 256u) { acc += scale * ctf(L_CONCEPT + i) * (dict_at(t, i) - aux[i]) * aux[${W}u + i] * r; }
+    }
+  } else if (p == 0u) {
     let it = swapped(intok[sp(9)]);
     for (var i = li; i < ${W}u; i += 256u) { acc += dict_at(it, i) * (dict_at(t, i) - aux[i]) * aux[${W}u + i] * r; }
   } else {
@@ -797,5 +805,88 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
   if (t >= sp(0)) { return; }
   let base = (F.floor * ${c.cfg.maxContext}u + sp(1) + t) * ${W}u;
   for (var i = li; i < ${W}u; i += 256u) { cap[base + i] = x[t * ${W}u + i]; }
+}`;
+}
+
+
+/** Log-probability at temperature 1 of tok[0] (sampled or forced): out[42] = scores[tok] - logsumexp(scores). */
+export function lseKernel(c: KernelConsts) {
+  return /* wgsl */ `
+@group(0) @binding(0) var<storage, read> scores: array<f32>;
+@group(0) @binding(1) var<storage, read> tok: array<u32>;
+@group(0) @binding(2) var<uniform> SP: array<vec4u, 4>;
+fn sp(i: u32) -> u32 { return SP[i / 4u][i % 4u]; }
+@group(0) @binding(3) var<storage, read_write> out: array<u32>;
+var<workgroup> red: array<f32, 256>;
+@compute @workgroup_size(256)
+fn main(@builtin(local_invocation_index) li: u32) {
+  let n = sp(10);
+  var mx = -3.4e38;
+  for (var i = li; i < n; i += 256u) { mx = max(mx, scores[i]); }
+  red[li] = mx;
+  workgroupBarrier();
+  for (var s = 128u; s > 0u; s >>= 1u) {
+    if (li < s) { red[li] = max(red[li], red[li + s]); }
+    workgroupBarrier();
+  }
+  let m = red[0];
+  workgroupBarrier();
+  var sum = 0.0;
+  for (var i = li; i < n; i += 256u) { sum += exp(scores[i] - m); }
+  red[li] = sum;
+  workgroupBarrier();
+  for (var s = 128u; s > 0u; s >>= 1u) {
+    if (li < s) { red[li] += red[li + s]; }
+    workgroupBarrier();
+  }
+  if (li == 0u) { out[42] = bitcast<u32>(scores[tok[0]] - m - log(red[0])); }
+}
+// ${c.cfg.vocabReal}`;
+}
+
+/** One dictionary row (through the swap map) as floats: the words-in panel. Row id in ids[0]. */
+export function dictRowKernel(c: KernelConsts) {
+  const W = c.cfg.width;
+  return /* wgsl */ `
+@group(0) @binding(0) var<storage, read> dict: array<u32>;
+@group(0) @binding(1) var<storage, read> ct: array<u32>;
+@group(0) @binding(2) var<storage, read> ids: array<u32>;
+@group(0) @binding(3) var<storage, read_write> out: array<f32>;
+${header(c)}
+${dictRead(c)}
+@compute @workgroup_size(256)
+fn main(@builtin(local_invocation_index) li: u32) {
+  let t = swapped(ids[0]);
+  for (var i = li; i < ${W}u; i += 256u) { out[i] = dict_at(t, i); }
+}`;
+}
+
+/**
+ * For each memory unit j of one floor: the down projection's column j dotted with u (unit pushes, before
+ * the unit's activity). Down is [width, units] row-major with groups along the units.
+ */
+export function colDotKernel(c: KernelConsts) {
+  const W = c.cfg.width, U = c.cfg.units, G = c.cfg.group;
+  const f32w = c.cfg.floorBits === 32;
+  const codeWords = (W * U) / 8;
+  const at = f32w
+    ? `bitcast<f32>(Wd[i * ${U}u + j])`
+    : `(pp.y + pp.x * ctf(L_BITS + ((Wd[i * ${U / 8}u + j / 8u] >> (4u * (j % 8u))) & 15u)))`;
+  return /* wgsl */ `
+@group(0) @binding(0) var<storage, read> Wd: array<u32>;
+@group(0) @binding(1) var<storage, read> u: array<f32>;
+@group(0) @binding(2) var<storage, read> ct: array<u32>;
+@group(0) @binding(3) var<storage, read_write> out: array<f32>;
+${header(c)}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3u) {
+  let j = gid.x;
+  if (j >= ${U}u) { return; }
+  var acc = 0.0;
+  for (var i = 0u; i < ${W}u; i++) {
+    ${f32w ? "" : `let pp = unpack2x16float(Wd[${codeWords}u + i * ${U / G}u + j / ${G}u]);`}
+    acc += ${at} * u[i];
+  }
+  out[j] = acc;
 }`;
 }

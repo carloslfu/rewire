@@ -108,6 +108,10 @@ def write(w: Weights, out_dir: Path, quant_meta: dict, rho: list[float], atlas: 
         "atlas": atlas,
         "concepts": concept_meta,
     }
+    keep = {f["name"] for f in files}
+    for old in out_dir.glob("*.bin"):  # files of an earlier conversion into the same directory
+        if old.name not in keep:
+            old.unlink()
     text = json.dumps(manifest, indent=1)
     (out_dir / "manifest.json").write_text(text)
     manifest["hash"] = hashlib.sha256(text.encode()).hexdigest()

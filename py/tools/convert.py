@@ -59,14 +59,21 @@ def main():
     ap.add_argument("--dict-bits", type=int, default=8)
     ap.add_argument("--extras", default=None)
     ap.add_argument("--metrics", default=None, help="the quant lab JSON for this format")
+    ap.add_argument("--from", dest="src", default=None, help="reuse an already converted model's weights (adds extras only)")
     a = ap.parse_args()
     t = time.time()
-    base = Weights()
-    w = quantize(base, a.method, a.group, a.dict_bits)
+    old_metrics = {}
+    if a.src:
+        w, old = manifest.read(Path(a.src))
+        a.method, a.group, a.dict_bits = old["quantization"]["method"], old["config"]["group"], old["config"]["dict_bits"]
+        old_metrics = old["quantization"].get("metrics", {})
+    else:
+        base = Weights()
+        w = quantize(base, a.method, a.group, a.dict_bits)
     extras = json.loads(Path(a.extras).read_text()) if a.extras else {}
     rho = extras.get("rho") or measure_rho(Model(w), json.loads((DATA / "everyday.json").read_text())[:50])
     concepts = {cid: [torch.tensor(v) for v in vecs] for cid, vecs in extras.get("concept_vectors", {}).items()}
-    metrics = json.loads(Path(a.metrics).read_text()) if a.metrics else {}
+    metrics = json.loads(Path(a.metrics).read_text()) if a.metrics else old_metrics
     fid = f"{a.method}-g{a.group}-d{a.dict_bits}"
     out = ARTIFACTS / "weights" / fid
     man = manifest.write(w, out, {"method": a.method, "metrics": metrics}, rho, extras.get("atlas", {}), concepts,
