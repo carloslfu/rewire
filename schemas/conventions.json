@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "model": {
+    "repo": "Qwen/Qwen3-0.6B",
+    "commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+    "license": "Apache-2.0",
+    "floors": 28,
+    "width": 1024,
+    "query_heads": 16,
+    "kv_heads": 8,
+    "head_size": 128,
+    "memory_units": 3072,
+    "vocab_rows": 151936,
+    "vocab_real": 151669,
+    "rope_theta": 1000000.0,
+    "rms_eps": 1e-06,
+    "tied_dictionary": true
+  },
+  "tokens": {
+    "endoftext": 151643,
+    "im_start": 151644,
+    "im_end": 151645,
+    "think": 151667,
+    "end_think": 151668,
+    "stop": [
+      151645,
+      151643
+    ],
+    "start_marker_position": 0
+  },
+  "chat": {
+    "system_prompt": "Answer in one or two short sentences.",
+    "reply_cap": 64,
+    "continue_cap": 64,
+    "context_cap_desktop": 1024,
+    "context_cap_phone": 512,
+    "thinking": false,
+    "template_rule": "Turn 1 is [im_start] 'system\\n' + system [im_end] '\\n' [im_start] 'user\\n' + message [im_end] '\\n' [im_start] 'assistant\\n' [think] '\\n\\n' [end_think] '\\n\\n'. Text between markers is tokenized as plain text with special tokens disabled. A later turn appends exactly the generated tokens, then [im_end] if the reply did not end with it, then '\\n' [im_start] 'user\\n' + message [im_end] '\\n' [im_start] 'assistant\\n' [think] '\\n\\n' [end_think] '\\n\\n'. History is never rendered again."
+  },
+  "sampling": {
+    "temperature": 0.7,
+    "top_k": 20,
+    "top_p": 0.8,
+    "compare_temperature": 1.0,
+    "pcg": "pcg(x) = s = x*747796405 + 2891336453; w = ((s >> ((s >> 28) + 4)) ^ s) * 277803737; return (w >> 22) ^ w, all in wrapping u32",
+    "draw": "h = pcg(pcg(pcg(seed) ^ turn) ^ step); u = (h >> 8) * 2^-24",
+    "procedure": "Mask ids >= vocab_real. Divide scores by temperature. Keep the top_k by score (ties by lower id). Softmax in float32 over the kept scores: subtract the max, exp, sum in kept order. Sort by probability descending, ties by lower id. Keep the shortest prefix whose cumulative probability reaches top_p (at least one). Renormalize by the kept sum. Pick the first candidate whose cumulative probability exceeds u times the kept sum; if none, the last kept."
+  },
+  "changes": {
+    "head_multipliers": 448,
+    "memory_multipliers": 28,
+    "floor_multipliers": 28,
+    "concept_width": 1024,
+    "max_swaps": 16,
+    "max_hidden": 16,
+    "max_zeroed": 8,
+    "knob_stops": {
+      "flip": -1,
+      "off": 0,
+      "normal": 1,
+      "x2": 2,
+      "x5": 5
+    },
+    "floor_rule": "middle = x + a * attention(x); output = middle + a * memory(middle)",
+    "head_rule": "the head's output (its mix of values, 128 numbers) is scaled before the output projection",
+    "memory_rule": "the memory block's output (after the down projection) is scaled",
+    "hidden_rule": "{key, from}: every head on every floor skips key position `key` for query positions >= `from`; a query left with nothing to look at outputs zero",
+    "concept_rule": "adds strength * rho[floor] * v to the stream entering `floor` at every position after the system turn; v has unit length",
+    "swap_rule": "exchanges two token ids at the dictionary lookup and in every read of the dictionary (scores, floor guesses, pushes, candidates)",
+    "zeroed_rule": "subtracts weight * input after the multiply, for one weight inside a floor",
+    "bits_rule": "a 16-entry table per bit width maps each 4-bit code to one of 2^bits evenly spaced levels between the group's lowest and highest level (codes 0 and 15); the dictionary keeps its precision",
+    "bit_tables": {
+      "4": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "3": "t[c] = round(c * 7 / 15) * 15 / 7",
+      "2": "t[c] = round(c * 3 / 15) * 15 / 3"
+    },
+    "push_rule": "push of a part toward word t = (part output, already scaled by its multipliers and the floor multiplier) * final_norm_weight / rms(final stream at that position) . (dictionary[t] - mean of the real dictionary rows). The 476 parts (28 floors x (16 heads + 1 memory block)) plus the dictionary row's own push add up to t's score minus the mean score over real ids.",
+    "push_order": "dictionary row first, then for each floor 0..27: heads 0..15, then the memory block"
+  },
+  "numbering": "Data uses zero-based floors, heads and positions. The interface shows floors and heads from 1, with the zero-based index in the details."
+}

@@ -1,0 +1,16 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+.DS_Store
+# generated, never committed
+artifacts/
+py/.cache/
+*.safetensors
+traces/
+weights/
+bench/results/raw/
+.playwright/
+test-results/

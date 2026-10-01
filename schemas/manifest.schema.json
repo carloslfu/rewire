@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rewire/manifest.schema.json",
+  "title": "Weights manifest",
+  "description": "Describes one converted model (section 7.4). Every cached weight file and every recording is checked against this manifest's hash.",
+  "type": "object",
+  "required": ["format_version", "model", "commit", "license", "config", "quantization", "tensors", "files", "chat", "sampling", "rho", "bit_tables", "atlas", "concepts"],
+  "properties": {
+    "format_version": {"const": 1},
+    "model": {"type": "string"},
+    "commit": {"type": "string"},
+    "license": {"type": "string"},
+    "notice": {"type": "string"},
+    "config": {"type": "object"},
+    "quantization": {"type": "object", "required": ["method", "group", "dictionary_bits", "metrics"], "properties": {"method": {"type": "string"}, "group": {"type": "integer"}, "dictionary_bits": {"enum": [4, 6, 8, 16]}, "metrics": {"type": "object"}}},
+    "tensors": {"type": "array", "items": {"type": "object", "required": ["name", "shape", "kind", "file", "offset", "bytes"], "properties": {
+      "name": {"type": "string"},
+      "shape": {"type": "array", "items": {"type": "integer"}},
+      "kind": {"enum": ["q4", "q8", "f16", "f32"], "description": "q4/q8: row-major [out, in], groups along the input, 8 (or 4) codes per u32 word, then one u32 per group holding scale and offset as two half floats"},
+      "group": {"type": "integer"},
+      "file": {"type": "string"},
+      "offset": {"type": "integer"},
+      "bytes": {"type": "integer"},
+      "codes_bytes": {"type": "integer"}
+    }}},
+    "files": {"type": "array", "items": {"type": "object", "required": ["name", "sha256", "bytes"], "properties": {"name": {"type": "string"}, "sha256": {"type": "string"}, "bytes": {"type": "integer", "maximum": 16777216}}}},
+    "chat": {"type": "object"},
+    "sampling": {"type": "object"},
+    "rho": {"type": "array", "items": {"type": "number"}, "minItems": 28, "maxItems": 28},
+    "bit_tables": {"type": "object"},
+    "atlas": {"type": "object"},
+    "concepts": {"type": "array", "items": {"type": "object", "required": ["id", "label", "best_floor", "working", "breaking", "vector_file", "vector_offset"]}}
+  }
+}

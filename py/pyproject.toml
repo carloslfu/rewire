@@ -1,0 +1,25 @@
+[project]
+name = "rewire-py"
+version = "0.1.0"
+description = "Rewire's Python reference, quantization lab, curation checks and recording writer"
+requires-python = ">=3.12"
+dependencies = [
+  "torch>=2.6",
+  "transformers>=4.56",
+  "safetensors>=0.4",
+  "numpy>=2.0",
+  "huggingface_hub>=0.30",
+  "pyarrow>=17",
+  "tqdm>=4.66",
+  "jsonschema>=4.23",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

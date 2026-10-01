@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rewire/recording.schema.json",
+  "title": "Recording header",
+  "description": "The JSON header of a recording (section 7.4). The file is: 4 bytes 'RWRC', u32 header length, the UTF-8 JSON header, padding to 4 bytes, then one fixed-size binary record per generated token. Each record: u32 id, u32 piece index into header.pieces, 20 x (u32 id, f16 prob, f16 pad), 477 x f16 pushes (push_order in conventions), padding to 4 bytes, 28 x 5 x (u32 id, f16 prob, f16 pad) floor guesses, f16 cut index, f16 temperature.",
+  "type": "object",
+  "required": ["format_version", "manifest_hash", "producer", "seed", "changes", "messages", "turns", "pieces"],
+  "properties": {
+    "format_version": {"const": 1},
+    "manifest_hash": {"type": "string"},
+    "producer": {"enum": ["python", "engine"]},
+    "seed": {"type": "integer"},
+    "changes": {"$ref": "changes.schema.json"},
+    "messages": {"type": "array", "items": {"type": "string"}},
+    "turns": {"type": "array", "items": {"type": "object", "required": ["prompt_tokens", "first_record", "records"], "properties": {"prompt_tokens": {"type": "array", "items": {"type": "integer"}}, "first_record": {"type": "integer"}, "records": {"type": "integer"}}}},
+    "pieces": {"type": "array", "items": {"type": "string"}},
+    "featured": {"type": "array", "items": {"type": "object", "required": ["record", "file"], "properties": {"record": {"type": "integer"}, "file": {"type": "string"}}}}
+  }
+}

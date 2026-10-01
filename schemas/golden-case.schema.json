@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rewire/golden-case.schema.json",
+  "title": "Golden trace case",
+  "description": "A golden trace case file (section 7.4). Tensors live in a safetensors file next to it: stream_{floor} [positions, 1024] f32 for floor 0..28 (28 is the final stream), k_{floor} and v_{floor} [positions, 8, 128] f16, top_scores [positions, 64] f32, top_ids [positions, 64] i32, and full intermediates at three positions.",
+  "type": "object",
+  "required": ["name", "manifest_hash", "tokens", "changes", "seed", "intermediate_positions"],
+  "properties": {
+    "name": {"type": "string"},
+    "manifest_hash": {"type": "string"},
+    "tokens": {"type": "array", "items": {"type": "integer"}},
+    "changes": {"$ref": "changes.schema.json"},
+    "seed": {"type": "integer"},
+    "intermediate_positions": {"type": "array", "items": {"type": "integer"}, "maxItems": 3},
+    "generated": {"type": "array", "items": {"type": "integer"}}
+  }
+}

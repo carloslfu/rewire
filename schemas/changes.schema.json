@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rewire/changes.schema.json",
+  "title": "Changes",
+  "description": "The changes applied to a model run (section 7.2). Zero-based floors, heads, positions and token ids. An empty object is the normal model.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "heads": {"type": "array", "maxItems": 448, "items": {"type": "object", "additionalProperties": false, "required": ["floor", "head", "mult"], "properties": {"floor": {"type": "integer", "minimum": 0, "maximum": 27}, "head": {"type": "integer", "minimum": 0, "maximum": 15}, "mult": {"type": "number"}}}},
+    "memory": {"type": "array", "maxItems": 28, "items": {"type": "object", "additionalProperties": false, "required": ["floor", "mult"], "properties": {"floor": {"type": "integer", "minimum": 0, "maximum": 27}, "mult": {"type": "number"}}}},
+    "floors": {"type": "array", "maxItems": 28, "items": {"type": "object", "additionalProperties": false, "required": ["floor", "mult"], "properties": {"floor": {"type": "integer", "minimum": 0, "maximum": 27}, "mult": {"type": "number"}}}},
+    "concept": {"type": ["object", "null"], "additionalProperties": false, "required": ["id", "floor", "strength"], "properties": {"id": {"type": "string"}, "floor": {"type": "integer", "minimum": 0, "maximum": 27}, "strength": {"type": "number"}}},
+    "swaps": {"type": "array", "maxItems": 16, "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 0, "maximum": 151668}}},
+    "hidden": {"type": "array", "maxItems": 16, "items": {"type": "object", "additionalProperties": false, "required": ["key", "from"], "properties": {"key": {"type": "integer", "minimum": 0}, "from": {"type": "integer", "minimum": 0}}}},
+    "zeroed": {"type": "array", "maxItems": 8, "items": {"type": "object", "additionalProperties": false, "required": ["floor", "tensor", "row", "col"], "properties": {"floor": {"type": "integer", "minimum": 0, "maximum": 27}, "tensor": {"enum": ["q", "k", "v", "o", "gate", "up", "down"]}, "row": {"type": "integer", "minimum": 0}, "col": {"type": "integer", "minimum": 0}}}},
+    "bits": {"enum": [4, 3, 2]}
+  }
+}
