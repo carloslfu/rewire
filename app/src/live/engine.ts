@@ -106,6 +106,10 @@ export class EngineClient {
   loadTiny(params: Float32Array, config: TinyConfig): Promise<{ floors: number; heads: number }> {
     return this.call({ t: "tiny", params, config });
   }
+  /** A head's full attention map over the conversation (n x n, row = query position). */
+  attentionMap(conv: ConvId, changes: ChangeSpec, tokens: number[], floor: number, head: number): Promise<Float32Array> {
+    return this.call({ t: "map", conv, changes, tokens, floor, head });
+  }
   /** Speed bench on the loaded model (medians of five runs). */
   bench(): Promise<Record<string, number>> {
     return this.call({ t: "bench" });

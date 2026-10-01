@@ -67,6 +67,17 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       case "pieces": return done(m.id, m.ids.map((i) => need(tok).piece(i)));
       case "tiny": return done(m.id, await loadTiny(m.params, m.config));
       case "bench": return done(m.id, await bench());
+      case "map": {
+        const r = await locked(m.conv, async () => {
+          contextCheck(m.tokens.length);
+          setTable(m.conv, m.changes, conceptFrom(m.tokens));
+          const s = cur()[m.conv];
+          const map = await s.c.attentionMap(m.tokens, m.floor, m.head, m.changes.hidden ?? []);
+          s.tokens = m.tokens.slice();
+          return map;
+        });
+        return post({ t: "done", id: m.id, result: r }, [r.buffer as ArrayBuffer]);
+      }
       case "use": which = m.model; return done(m.id, true);
       case "write": return done(m.id, await locked(m.job.conv, () => write(m.job, m.id)));
       case "compare": return done(m.id, await locked(m.conv, () => compare(m.conv, m.changes, m.history, m.reply, m.version)));

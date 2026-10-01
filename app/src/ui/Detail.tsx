@@ -1,7 +1,7 @@
 // The detail panel (section 5.2): always what the tapped part is, its real numbers, and its control.
 import { useEffect, useMemo, useState } from "react";
 import type { FloorDetail } from "../model/types.ts";
-import { chipsWith, floorDetail, liveEngine, pathData, pick, piece, setFocus, stepAction } from "../state/actions.ts";
+import { attentionMap, chipsWith, floorDetail, liveEngine, pathData, pick, piece, setFocus, stepAction } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { fmt, pct, signed } from "./color.ts";
@@ -239,6 +239,7 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
                 <p className="note">Where head {head + 1} looks from this word, out of {n} earlier positions.</p>
               </div>
             )}
+            <FullMap c={c} floor={floor} head={head} />
           </>
         )}
       </section>
@@ -249,6 +250,32 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
         <p className="note" style={{ marginTop: 6 }}>Off sets its output to zero. Studies often substitute its average output instead, so effects here can be larger than published ones.</p>
       </section>
     </>
+  );
+}
+
+function FullMap({ c, floor, head }: { c: Chosen; floor: number; head: number }) {
+  const mode = useStore((s) => s.mode);
+  const [res, setRes] = useState<{ map: Float32Array; tokens: number[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setRes(null), [c.ref.turn, c.ref.side, c.ref.index, floor, head]);
+  if (mode !== "live") return null;
+  if (!res) return (
+    <button type="button" className="btn small" style={{ marginTop: 8 }} disabled={busy}
+      onClick={() => { setBusy(true); void attentionMap(c.ref, floor, head).then((r) => { setRes(r); setBusy(false); }, () => setBusy(false)); }}>
+      {busy ? "Computing…" : S.attentionMap}
+    </button>
+  );
+  const n = res.tokens.length;
+  const from = Math.max(0, n - 48); // the last 48 positions stay readable
+  const sub = new Float32Array((n - from) * (n - from));
+  for (let t = from; t < n; t++) for (let j = from; j < n; j++) sub[(t - from) * (n - from) + (j - from)] = res.map[t * n + j];
+  return (
+    <div style={{ marginTop: 10 }}>
+      <h3>{S.attentionMap}</h3>
+      <p className="note">Each row is a word looking back at earlier words{from ? ` (the last ${n - from} of ${n} positions)` : ""}. Darker means more attention.</p>
+      <Strip values={sub} rows={n - from} scale={1} label={`Attention of head ${head + 1} on floor ${floor + 1}`}
+        names={(r, k) => `"${piece(res.tokens[from + r])}" looks at "${piece(res.tokens[from + k])}"`} height={Math.min(320, (n - from) * 6)} />
+    </div>
   );
 }
 

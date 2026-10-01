@@ -197,11 +197,15 @@ export class Conversation {
     return [{ pipeline: p, group: bind(this.dev, p, [this.x, this.SP, m.slotUniform(slot), this.capture]), x: rows }];
   }
 
+  /** Where the chunk plan splits after floor L's rotation (the attention map keeps queries there). */
+  private ropeAt: number[] = [];
+
   private forwardPlan(TB: number, single: boolean): Dispatch[] {
     const m = this.model, cfg = this.cfg, dev = this.dev, kc = m.kc;
     const W = cfg.width, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, U = cfg.units;
     const rows = single ? 1 : CHUNK;
     const plan: Dispatch[] = [];
+    if (!single) this.ropeAt = [];
     const embed = m.pipe("embed", () => K.embedKernel(kc));
     plan.push({ pipeline: embed, group: bind(dev, embed, [this.intok, m.w.dict, this.ct, this.SP, this.x]), x: rows });
     const enter = m.pipe("enter", () => K.enterFloorKernel(kc));
@@ -220,6 +224,7 @@ export class Conversation {
       plan.push(this.mm("v", W, KV * D, TB, rows, fw.v, this.h, this.v, m.mmUniform(L, "v")));
       plan.push({ pipeline: rope, group: bind(dev, rope, [this.q, this.k, this.v, fw.qkNorm, m.rope, this.SP,
         this.kcache[L], this.vcache[L], this.kout]), x: rows });
+      if (!single) this.ropeAt[L] = plan.length;
       plan.push({ pipeline: attn, group: bind(dev, attn, [this.q, this.kcache[L], this.vcache[L], this.ct, this.SP, uni, this.att]), x: rows, y: H });
       if (single) {
         plan.push({ pipeline: oh, group: bind(dev, oh, [fw.o, this.att, this.o, this.ct, this.SP, m.mmUniform(L, "o"),
@@ -466,6 +471,63 @@ export class Conversation {
       let sum = 0;
       for (let i = 0; i < cfg.vocabReal; i++) sum += Math.exp(row[i] - mx);
       out.push(topK(row, cfg.vocabReal, k).map((id) => ({ id, p: Math.exp(row[id] - mx) / sum })));
+    }
+    return out;
+  }
+
+  /**
+   * A head's full attention map over `tokens` (section 4.2: one tap further than the attention lines).
+   * Re-reads the conversation once, keeping every position's rotated queries on `floor`, then computes the
+   * map on the CPU from those queries and the cached keys, with the conversation's hidden words applied.
+   * Returns n x n probabilities (row = query position). The cache ends up holding `tokens`.
+   */
+  async attentionMap(tokens: number[], floor: number, head: number, hidden: { key: number; from: number }[] = []): Promise<Float32Array> {
+    const cfg = this.cfg, dev = this.dev, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, n = tokens.length;
+    const qAll = storage(dev, n * H * D * 4, "map queries");
+    const split = this.ropeAt[floor];
+    this.length = 0;
+    for (let i = 0; i < n; i += CHUNK) {
+      const part = tokens.slice(i, i + CHUNK);
+      dev.queue.writeBuffer(this.intok, 0, new Uint32Array(part));
+      this.writeParams({ T: part.length, pos0: this.length });
+      const enc = dev.createCommandEncoder();
+      encode(enc, this.chunkPlan.slice(0, split));
+      enc.copyBufferToBuffer(this.q, 0, qAll, i * H * D * 4, part.length * H * D * 4);
+      encode(enc, this.chunkPlan.slice(split));
+      dev.queue.submit([enc.finish()]);
+      this.length += part.length;
+    }
+    const [qRaw, kRaw] = await Promise.all([download(dev, qAll), download(dev, this.kcache[floor])]);
+    qAll.destroy();
+    const q = new Float32Array(qRaw), kc = new Uint32Array(kRaw);
+    const kvh = Math.floor(head / (H / KV)), HALF = D / 2, maxCtx = cfg.maxContext;
+    const half = (b: number) => {
+      const s = b & 0x8000 ? -1 : 1, e = (b >> 10) & 31, m = b & 1023;
+      return e === 0 ? s * m * 2 ** -24 : e === 31 ? (m ? NaN : s * Infinity) : s * (1 + m / 1024) * 2 ** (e - 15);
+    };
+    const keys = new Float32Array(n * D);
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < HALF; i++) {
+        const w = kc[(kvh * maxCtx + j) * HALF + i];
+        keys[j * D + 2 * i] = half(w & 0xffff);
+        keys[j * D + 2 * i + 1] = half(w >>> 16);
+      }
+    }
+    const out = new Float32Array(n * n);
+    const sc = new Float64Array(n);
+    for (let t = 0; t < n; t++) {
+      let mx = -Infinity;
+      for (let j = 0; j <= t; j++) {
+        if (hidden.some((h) => h.key === j && t >= h.from)) { sc[j] = -Infinity; continue; }
+        let d = 0;
+        for (let i = 0; i < D; i++) d += q[(t * H + head) * D + i] * keys[j * D + i];
+        sc[j] = d / Math.sqrt(D);
+        if (sc[j] > mx) mx = sc[j];
+      }
+      if (mx === -Infinity) continue;
+      let sum = 0;
+      for (let j = 0; j <= t; j++) { const e = sc[j] === -Infinity ? 0 : Math.exp(sc[j] - mx); sc[j] = e; sum += e; }
+      for (let j = 0; j <= t; j++) out[t * n + j] = sc[j] / sum;
     }
     return out;
   }

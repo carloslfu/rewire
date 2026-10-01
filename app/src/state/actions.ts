@@ -528,6 +528,17 @@ export function floorDetail(w: WordRef): Promise<FloorDetail | null> {
   return p;
 }
 
+/** A head's full attention map for the word's reply, up to and including the word's position (live only). */
+export async function attentionMap(w: WordRef, floor: number, head: number): Promise<{ map: Float32Array; tokens: number[] } | null> {
+  const s = store.get();
+  const t = s.turns[w.turn];
+  const r = w.side === "normal" ? t?.normal : t?.changed;
+  if (!engine || s.mode !== "live" || !r || r.stale) return null;
+  const tokens = [...historyBefore(w.turn, w.side), ...r.toks.slice(0, w.index).map((x) => x.id)];
+  const map = await engine.attentionMap(w.side === "normal" ? 0 : 2, r.changes, tokens, floor, head);
+  return { map, tokens };
+}
+
 export function selectWord(w: WordRef | null, focus?: Focus) {
   store.set((s) => ({ word: w, follow: false, focus: focus ?? (s.focus.kind === "head" || s.focus.kind === "memory" || s.focus.kind === "floor" ? s.focus : { kind: "word" }), sheet: true }));
 }

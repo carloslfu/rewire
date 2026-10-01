@@ -19,6 +19,7 @@ export type ToWorker = { id: number } & (
   | { t: "tiny"; params: Float32Array; config: TinyConfig }
   | { t: "use"; model: "qwen" | "tiny" }
   | { t: "bench" }
+  | { t: "map"; conv: ConvId; changes: ChangeSpec; tokens: number[]; floor: number; head: number }
 );
 
 export type FromWorker =
