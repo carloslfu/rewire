@@ -95,7 +95,9 @@ def publish_files(out: Path, man: dict, metrics: dict):
     src = model_dir()
     for f in ("tokenizer.json", "tokenizer_config.json", "LICENSE"):
         if (src / f).exists():
-            shutil.copy(src / f, out / f)
+            # The Hugging Face cache keeps files read-only; copy bytes, not modes, and replace any earlier copy.
+            (out / f).unlink(missing_ok=True)
+            shutil.copyfile(src / f, out / f)
     q = man["quantization"]
     base16 = json.loads((ARTIFACTS / "quantlab" / "base16.json").read_text()) if (ARTIFACTS / "quantlab" / "base16.json").exists() else {}
     fmt = lambda v, f: (f.format(v) if isinstance(v, (int, float)) else "not measured")  # noqa: E731

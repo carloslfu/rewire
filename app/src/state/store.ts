@@ -11,7 +11,7 @@ export type DeviceState =
   | { kind: "no-webgpu" }
   | { kind: "slow"; seconds: number }
   | { kind: "crashed" }
-  | { kind: "offer"; seconds: number }
+  | { kind: "offer"; seconds: number; bytes: number | null }
   | { kind: "downloading"; loaded: number; total: number; paused: boolean; seconds: number }
   | { kind: "loading"; seconds: number }
   | { kind: "ready"; seconds: number }

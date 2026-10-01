@@ -4,7 +4,7 @@ import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react
 import { backToQwen, onPieces } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
-import { Conversation } from "./Conversation.tsx";
+import { Conversation, FinishedReplies } from "./Conversation.tsx";
 import { Detail } from "./Detail.tsx";
 import { Chips, Composer, DeviceBar, PathList, StepCard, WhatsReal } from "./Panels.tsx";
 import { Tower } from "./Tower.tsx";
@@ -44,6 +44,7 @@ export function App() {
       </header>
       <DeviceBar />
       <div className="sr-only" aria-live="polite">{busy ? "" : announce}</div>
+      <FinishedReplies />
       {tiny ? (
         <Suspense fallback={<p className="col">…</p>}><Tiny /></Suspense>
       ) : (

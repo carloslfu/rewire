@@ -584,7 +584,24 @@ export async function checkDevice(force = false) {
   if (!r.webgpu) return setDevice({ kind: "no-webgpu" });
   if (r.seconds > 4 && !force) return setDevice({ kind: "slow", seconds: r.seconds });
   if (r.seconds <= 2 && !isPhone() && !force) return startDownload(r.seconds);
-  setDevice({ kind: "offer", seconds: r.seconds });
+  setDevice({ kind: "offer", seconds: r.seconds, bytes: await downloadBytes() });
+}
+
+function weightsBase() {
+  return (import.meta.env.VITE_WEIGHTS_URL as string | undefined) ?? `${location.origin}/weights/`;
+}
+
+/** What "Get the model" will download: the weight files plus the tokenizer (null if the host can't say). */
+async function downloadBytes(): Promise<number | null> {
+  try {
+    const base = weightsBase();
+    const m = (await (await fetch(`${base}manifest.json`)).json()) as { total_bytes?: number };
+    const tok = await fetch(`${base}tokenizer.json`, { method: "HEAD" });
+    const n = Number(m.total_bytes ?? 0) + Number(tok.headers.get("content-length") ?? 0);
+    return n > 0 ? n : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function startDownload(seconds = 0) {
@@ -603,8 +620,7 @@ export async function startDownload(seconds = 0) {
     /* ignore */
   }
   try {
-    const base = (import.meta.env.VITE_WEIGHTS_URL as string | undefined) ?? `${location.origin}/weights/`;
-    const info = await engine.load(base, isPhone());
+    const info = await engine.load(weightsBase(), isPhone());
     if (path && info.manifestHash !== path.manifest_hash) console.warn("recordings and weights come from different manifests");
     setDevice({ kind: "ready", seconds });
     store.set({ mode: "live", announce: S.ready });

@@ -1,5 +1,5 @@
 // The step card, change chips, composer, device line, path list and "What's real here".
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { applyChips, chipsWith, checkDevice, freshStart, openStep, pauseDownload, replayAlternative, send, setFocus, shippingSteps,
   startDownload, stepAction, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
@@ -203,11 +203,11 @@ export function DeviceBar() {
     case "no-webgpu": return <div className="devicebar" role="status">{S.noWebgpu}</div>;
     case "slow": return <div className="devicebar" role="status">{S.slow} <button type="button" className="linkish" onClick={() => void checkDevice(true)}>{S.tryAnyway}</button></div>;
     case "crashed": return <div className="devicebar" role="status">{S.crashed} <button type="button" className="linkish" onClick={() => void checkDevice(true)}>{S.tryAnyway}</button></div>;
-    case "offer": return <div className="devicebar" role="status">{S.offer(350)} <button type="button" className="btn" onClick={() => void startDownload(d.seconds)}>{S.download}</button></div>;
+    case "offer": return <div className="devicebar" role="status">{S.offer(d.bytes ? mb(d.bytes) : null)} <button type="button" className="btn" onClick={() => void startDownload(d.seconds)}>{S.download}</button></div>;
     case "downloading":
       return (
         <div className="devicebar" role="status">
-          <span>{S.downloading(mb(d.loaded), mb(d.total) || 350)}</span>
+          <span>{S.downloading(mb(d.loaded), mb(d.total))}</span>
           <span className="bar" aria-hidden="true"><i style={{ width: `${d.total ? (100 * d.loaded) / d.total : 0}%` }} /></span>
           <button type="button" className="btn quiet" onClick={() => pauseDownload(!d.paused)}>{d.paused ? S.resume : S.pause}</button>
         </div>
@@ -223,30 +223,40 @@ export function DeviceBar() {
 export function PathList() {
   const open = useStore((s) => s.pathOpen);
   const step = useStore((s) => s.step);
-  if (!open) return null;
-  const steps = shippingSteps();
+  const ref = useRef<HTMLDialogElement>(null);
+  // A native modal dialog: the browser traps focus, closes on Escape and returns focus to the opener.
+  useEffect(() => {
+    const d = ref.current;
+    if (!d) return;
+    if (open && !d.open) d.showModal();
+    if (!open && d.open) d.close();
+  }, [open]);
+  const steps = open ? shippingSteps() : [];
   return (
-    <div className="overlay" onClick={() => store.set({ pathOpen: false })}>
-      <nav className="drawer" aria-label={S.pathTitle} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2>{S.pathTitle}</h2>
-          <button type="button" className="btn quiet" onClick={() => store.set({ pathOpen: false })}>{S.close}</button>
-        </div>
-        <p className="note" style={{ marginTop: 4 }}>{S.pathIntro}</p>
-        <ol>
-          {steps.map((s, i) => (
-            <li key={s.n}>
-              <a href={`#step-${s.n}`} aria-current={s.n === step ? "step" : undefined}
-                onClick={(e) => { e.preventDefault(); void openStep(s.n); }}>
-                <span className="n">{i + 1}</span>
-                <span>{COPY[s.slug]?.title ?? s.slug}</span>
-              </a>
-            </li>
-          ))}
-        </ol>
-        <WhatsReal />
-      </nav>
-    </div>
+    <dialog ref={ref} className="drawer" aria-labelledby="path-title" onClose={() => store.set({ pathOpen: false })}
+      onClick={(e) => { if (e.target === e.currentTarget) store.set({ pathOpen: false }); }}>
+      {open && (
+        <nav aria-label={S.pathTitle}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h2 id="path-title">{S.pathTitle}</h2>
+            <button type="button" className="btn quiet" onClick={() => store.set({ pathOpen: false })}>{S.close}</button>
+          </div>
+          <p className="note" style={{ marginTop: 4 }}>{S.pathIntro}</p>
+          <ol>
+            {steps.map((s, i) => (
+              <li key={s.n}>
+                <a href={`#step-${s.n}`} aria-current={s.n === step ? "step" : undefined}
+                  onClick={(e) => { e.preventDefault(); void openStep(s.n); }}>
+                  <span className="n">{i + 1}</span>
+                  <span>{COPY[s.slug]?.title ?? s.slug}</span>
+                </a>
+              </li>
+            ))}
+          </ol>
+          <WhatsReal />
+        </nav>
+      )}
+    </dialog>
   );
 }
 

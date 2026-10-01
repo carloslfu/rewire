@@ -113,7 +113,8 @@ export function Tower({ compact }: { compact?: boolean }) {
       {!c && <p className="note" style={{ marginBottom: 8 }}>{S.towerNone}</p>}
       {view === "difference" && <p className="note" style={{ marginBottom: 8 }}>{S.diffNote}</p>}
       <div className={`tower${compact ? " compact" : ""}`} ref={gridRef} onKeyDown={onKey} role="group" aria-label={S.tower}
-        style={{ gridTemplateColumns: `minmax(36px, 54px) repeat(${HEADS}, minmax(10px, ${HEADS > 8 ? 24 : 48}px)) 8px minmax(36px, 60px)` }}>
+        // fixed side columns, so the head cells grow to the 24px target size before anything else takes the space
+        style={{ gridTemplateColumns: `32px repeat(${HEADS}, minmax(10px, ${HEADS > 8 ? 24 : 48}px)) 8px 36px` }}>
         <span aria-hidden="true" />
         <button type="button" className={`wide${isOn({ kind: "words-out" }) ? " on" : ""}`} onClick={() => setFocus({ kind: "words-out" })}>
           <span>{S.wordsOut}</span>
@@ -133,7 +134,7 @@ export function Tower({ compact }: { compact?: boolean }) {
         <span className="num">{signed(scale)}</span>
         <span>{view === "push" ? "push toward the word" : "changed minus normal"}</span>
       </div>
-      <p className="caption">{S.towerCaption}</p>
+      <p className="caption">{S.towerCaption(model)}</p>
     </div>
   );
 }

@@ -215,6 +215,11 @@ def stage_step4(C: Ctx):
 LISTS = [["whale", "pencil", "ember", "socket", "violin", "harbor"], ["cobalt", "lantern", "meadow", "anchor", "fiddle", "glacier"],
          ["orbit", "pepper", "canyon", "velvet", "hammer", "comet"], ["tulip", "marble", "rocket", "saddle", "fossil", "lemon"],
          ["ladder", "pigeon", "cactus", "ribbon", "walnut", "beacon"], ["kettle", "zebra", "garnet", "pillow", "trumpet", "acorn"]]
+# Real words survive losing the copying heads (step5_search.py: at most 1 of 6 lists breaks). A made-up word is several
+# word pieces, and finishing one means finding where it appeared and copying what came next: the copying heads' job.
+MADE_UP = [["blorp", "quinzel", "frasket", "mivvle", "torquin", "splandor"], ["zabble", "crindle", "vossik", "plumtar", "dreef", "skonnet"],
+           ["wexley", "bramtic", "oolong", "fizzard", "trelm", "quapper"], ["gindle", "murrax", "sploon", "tavvik", "crumbet", "yoffle"],
+           ["pellox", "drimble", "snarvit", "quoggle", "lufftin", "brazzle"], ["mopsy", "kreltch", "vandoon", "frumple", "zinnick", "tobbler"]]
 
 
 def stage_atlas(C: Ctx):
@@ -245,8 +250,8 @@ def stage_step5(C: Ctx):
     off = {"heads": [{"floor": L, "head": h, "mult": 0} for L, h in heads]}
     roff = {"heads": [{"floor": L, "head": h, "mult": 0} for L, h in rand]}
     per = []
-    for words in LISTS:
-        msg = "Repeat these words in the same order: " + ", ".join(words) + "."
+    for words in MADE_UP:
+        msg = "Repeat these made-up words in the same order: " + ", ".join(words) + "."
         ok = list_ok(words)
         n = C.replies(msg, {}, loss=False)
         o = C.replies(msg, off, loss=False)
@@ -482,14 +487,18 @@ def stage_step10(C: Ctx):
         n = C.replies(msg, {})
         b3 = C.replies(msg, {"bits": 3})
         b2 = C.replies(msg, {"bits": 2})
-        per.append({"prompt": msg, "stated": count(b2, lambda r: r["broken"]), "control": count(b3, lambda r: r["broken"]),
+        # The rule is about 2 bits (4 levels) against the normal model; 3 bits is described, not required.
+        both = [i for i in range(len(n)) if b2[i]["broken"] and not n[i]["broken"]]
+        pref = [i for i in both if b3[i]["broken"]] or both
+        per.append({"prompt": msg, "stated": count(b2, lambda r: r["broken"]), "b3_broken": count(b3, lambda r: r["broken"]),
                     "b3_loss": float(np.mean([r["signs"]["loss"] for r in b3])), "n_loss": float(np.mean([r["signs"]["loss"] for r in n])),
+                    "b2_loss": float(np.mean([r["signs"]["loss"] for r in b2])),
                     "contrast": count(n, lambda r: not r["broken"]),
-                    "seed": next((n[i]["seed"] for i in range(20) if b2[i]["broken"] and b3[i]["broken"] and not n[i]["broken"]), None),
+                    "seed": n[pref[0]]["seed"] if pref else None,
                     "examples": {"b3": slim(b3, 2), "b2": slim(b2, 2)}})
-        print("  step10", msg, per[-1]["control"], per[-1]["stated"], per[-1]["contrast"], flush=True)
+        print("  step10", msg, per[-1]["b3_broken"], per[-1]["stated"], per[-1]["contrast"], flush=True)
     j = judge(per)
-    b3_breaks = sum(1 for p in per if p["control"] >= NEED_SEEDS) >= NEED_PROMPTS
+    b3_breaks = sum(1 for p in per if p["b3_broken"] >= NEED_SEEDS) >= NEED_PROMPTS
     return {"per_prompt": per, **j, "at3": "breaks" if b3_breaks else "worse"}
 
 

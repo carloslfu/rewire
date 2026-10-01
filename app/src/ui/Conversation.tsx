@@ -1,5 +1,5 @@
 // The conversation: each turn's normal reply, and once forked, the changed reply beside it (section 4.3).
-import { Fragment, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import type { Reply, Side, Turn } from "../model/types.ts";
 import { continueReply, piece, selectWord, undoPick } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
@@ -51,10 +51,31 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
   const toks = reply.toks;
   const moved = changed && reply.done && !reply.stale ? whatMoved(turn) : null;
   const inspectable = !reply.stale;
+  // One Tab stop per reply; arrow keys move between its words (roving tabindex, like the tower).
+  const textRef = useRef<HTMLDivElement>(null);
+  const [cursor, setCursor] = useState(-1);
+  const shown = toks.map((t, i) => (STOP.has(t.id) ? -1 : i)).filter((i) => i >= 0);
+  const selHere = word && word.turn === k && word.side === side ? word.index : -1;
+  const roving = shown.includes(selHere) ? selHere : shown.includes(cursor) ? cursor : shown[0];
+  const onKey = (e: React.KeyboardEvent) => {
+    const btns = [...(textRef.current?.querySelectorAll<HTMLButtonElement>("button.tok") ?? [])];
+    const at = btns.indexOf(document.activeElement as HTMLButtonElement);
+    if (at < 0) return;
+    let j = at;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") j = Math.min(btns.length - 1, at + 1);
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") j = Math.max(0, at - 1);
+    else if (e.key === "Home") j = 0;
+    else if (e.key === "End") j = btns.length - 1;
+    else return;
+    e.preventDefault();
+    btns[j].focus();
+    setCursor(Number(btns[j].dataset.i));
+  };
   return (
     <div className={`reply${changed ? " changed" : ""}${reply.stale ? " stale" : ""}`}>
       {label && <div className="who">{label}</div>}
-      <div className="text">
+      <div className="text" ref={textRef} onKeyDown={inspectable ? onKey : undefined}
+        role={inspectable ? "group" : undefined} aria-label={inspectable ? S.replyWords : undefined}>
         {toks.map((t, i) => {
           if (STOP.has(t.id)) return null;
           const sel = word && word.turn === k && word.side === side && word.index === i;
@@ -65,7 +86,7 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
           if (!inspectable) return <Fragment key={i}>{txt}</Fragment>;
           return (
             <button key={i} type="button" className={`tok${sel ? " sel" : ""}${under ? " under" : ""}${t.picked ? " picked" : ""}${reply.featured?.includes(i) ? " featured" : ""}`}
-              aria-pressed={!!sel}
+              data-i={i} tabIndex={i === roving ? 0 : -1} aria-pressed={!!sel}
               aria-label={under ? `${txt.trim()}: the changed model gives it ${pct(pc!)}` : undefined}
               title={under ? `Normal ${pct(pn)}, changed ${pct(pc!)}` : undefined}
               onClick={() => selectWord({ turn: k, side, index: i })}>
@@ -96,6 +117,22 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
       </div>
     </div>
   );
+}
+
+/** Screen readers hear finished replies, not each streamed word (section 5.5). */
+export function FinishedReplies() {
+  const turns = useStore((s) => s.turns);
+  const busy = useStore((s) => s.busy);
+  let text = "";
+  const t = turns[turns.length - 1];
+  if (!busy && t) {
+    const words = (r: Reply) => r.toks.filter((x) => !STOP.has(x.id)).map((x) => piece(x.id)).join("").trim();
+    const parts: string[] = [];
+    if (t.normal.done) parts.push(t.changed ? `${S.normal}: ${words(t.normal)}` : words(t.normal));
+    if (t.changed?.done && !t.changed.stale) parts.push(`${S.changedBy(describe(t.changed.changes, t.normal.read))}. ${words(t.changed)}`);
+    text = parts.join(" ");
+  }
+  return <div className="sr-only" aria-live="polite">{text}</div>;
 }
 
 /** When the words come out the same, say what moved instead (section 4.3). */

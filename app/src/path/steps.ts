@@ -91,7 +91,8 @@ export const COPY: Record<string, StepCopy> = {
     title: "Turn off the copying heads",
     question: "These heads, found by testing, help it continue patterns. What happens without them?",
     action: "Turn off the copying heads",
-    why: (f) => `Without its ${f.count ?? "copying"} copying heads it loses the list, while turning off as many random heads does not.`,
+    why: (f) => `Without its ${f.count ?? "copying"} copying heads it garbles the made-up words, while turning off as many random heads does not. ` +
+      "A made-up word comes in several pieces. To finish one, the model looks back to where the word appeared and copies what came next: that is what these heads do.",
     term: "induction",
   },
   "step-6": {
@@ -127,7 +128,7 @@ export const COPY: Record<string, StepCopy> = {
     question: "Each weight inside its floors can take 16 values. How few can it live with?",
     action: "Cut the levels",
     why: (f) => (f.at3 === "breaks" ? "At 8 levels it already breaks, and at 4 it is nonsense: every weight lands far from its real value." :
-      "At 8 levels it gets much worse, and at 4 it is nonsense: every weight lands far from its real value."),
+      "At 8 levels it still writes sentences, but they make less sense. At 4 levels it is nonsense: every weight lands far from its real value."),
     term: "bits",
     suggestions: ["What is a good name for a dog?", "How do I make lemonade?"],
   },

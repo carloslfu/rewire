@@ -6,7 +6,7 @@ import { defineConfig, type Plugin } from "vite";
 // In development the converted weights are served from artifacts/weights/<id>/ at /weights/.
 // In production they come from Hugging Face (VITE_WEIGHTS_URL); they are never part of the build.
 function localWeights(): Plugin {
-  const root = resolve(__dirname, "..", "artifacts", "weights");
+  const root = resolve(import.meta.dirname, "..", "artifacts", "weights");
   return {
     name: "rewire-local-weights",
     configureServer(server) {
