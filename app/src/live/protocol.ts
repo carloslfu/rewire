@@ -25,7 +25,7 @@ export type ToWorker = { id: number } & (
 export type FromWorker =
   | { t: "progress"; loaded: number; total: number }
   | { t: "lost" }
-  | { t: "tok"; id: number; tok: Tok }
+  | { t: "tok"; id: number; tok: Tok; pieces?: [number, string][] }
   | { t: "done"; id: number; result: unknown }
   | { t: "error"; id: number; message: string };
 

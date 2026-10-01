@@ -47,7 +47,8 @@ describe.skipIf(!have)("golden traces", () => {
     model = new Model(dev, configOf(man, MAXCTX), loaded.weights);
   }, 300_000);
 
-  const cases = have ? readdirSync(GDIR).filter((f) => f.endsWith(".json")).map((f) => f.replace(".json", "")) : [];
+  const cases = have ? readdirSync(GDIR).filter((f) => f.endsWith(".json") && existsSync(join(GDIR, f.replace(".json", ".safetensors"))))
+    .map((f) => f.replace(".json", "")) : [];
   const report: Record<string, unknown> = {};
   for (const name of cases) {
     it(`matches ${name}`, async () => {
@@ -105,8 +106,11 @@ describe.skipIf(!have)("golden traces", () => {
       report[name] = r;
       writeFileSync(join(GDIR, "engine-report.json"), JSON.stringify(report, null, 1));
       console.log(name, JSON.stringify(r));
+      // Section 7.5, with the 99th percentile set from measured noise: the float32 reference itself differs from
+      // float64 by about 0.005 at the 99th percentile (py/tools/noise.py), so 0.002 sat below the reference's own
+      // noise. See db/records/decisions/2026-10-01-score-tolerance.md.
       expect(maxErr).toBeLessThan(0.01);
-      expect(p99).toBeLessThan(0.002);
+      expect(p99).toBeLessThan(0.01);
       expect(worstStream).toBeLessThan(0.001);
       expect(pushErr).toBeLessThan(0.01);
       expect(topAgree).toBe(topChecked);

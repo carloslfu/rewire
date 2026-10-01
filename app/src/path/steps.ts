@@ -134,7 +134,7 @@ export const COPY: Record<string, StepCopy> = {
   "step-11": {
     title: "Teach a tiny model your writing",
     question: "How does a model get its numbers in the first place?",
-    action: "Teach",
+    action: "Teach a tiny model",
     why: () => "Training nudges every number a little toward predicting the next letter. Repeat that thousands of times and the noise becomes your kind of words.",
   },
 };

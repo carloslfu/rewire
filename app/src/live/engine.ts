@@ -38,6 +38,8 @@ export class EngineClient {
   private seq = 1;
   private pending = new Map<number, Pending>();
   onProgress?: (loaded: number, total: number) => void;
+  /** Texts of word pieces that arrive with written words. */
+  onPieces?: (pieces: [number, string][]) => void;
   onLost?: () => void;
 
   constructor() {
@@ -54,7 +56,10 @@ export class EngineClient {
     if (m.t === "lost") return this.onLost?.();
     const p = this.pending.get(m.id);
     if (!p) return;
-    if (m.t === "tok") return p.onTok?.(m.tok);
+    if (m.t === "tok") {
+      if (m.pieces) this.onPieces?.(m.pieces);
+      return p.onTok?.(m.tok);
+    }
     this.pending.delete(m.id);
     if (m.t === "error") p.reject(new Error(m.message));
     else p.resolve(m.result);

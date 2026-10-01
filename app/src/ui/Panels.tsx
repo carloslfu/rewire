@@ -118,7 +118,7 @@ function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) 
     case "madeup":
       return <button type="button" className="btn change" disabled={disabled} onClick={() => void stepAction()}>{copy.action}</button>;
     case "tiny":
-      return <button type="button" className="btn primary" onClick={() => store.set({ tiny: true })}>{S.tiny.open}</button>;
+      return <button type="button" className="btn primary" onClick={() => store.set({ tiny: true })}>{copy.action}</button>;
   }
 }
 

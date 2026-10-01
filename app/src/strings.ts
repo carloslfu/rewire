@@ -17,7 +17,7 @@ export const S = {
     "Live: every number on screen is computed by Qwen3-0.6B on this device, in its 4-bit form. Nothing you type leaves the device.",
     "Replay: the numbers were computed the same way on another computer and recorded. Nothing is illustrative.",
     "Lighting shows each part's direct push toward a word, holding the final normalization's scale fixed. Parts that work through later floors can stay pale.",
-    "The 4-bit model is somewhat weaker than the original 16-bit one. Its measured gap is in the model card.",
+    "The live model stores its weights in 4 bits, so it is somewhat weaker than the original 16-bit Qwen3-0.6B: on everyday replies it ranks the same word first 84% of the time, its perplexity on Wikipedia text is 8% higher, and it still knows 97% of the facts the original knows.",
     "A changed model can say false or offensive things. Every changed reply names its changes.",
   ],
 

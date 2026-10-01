@@ -427,7 +427,8 @@ async function write(job: WriteJob, id: number): Promise<{ ended: boolean; cance
     };
     if (received === 1 && job.force !== undefined) t.picked = true;
     toks.push(t.id);
-    post({ t: "tok", id, tok: t }, [t.pushes.buffer as ArrayBuffer]);
+    const pieces = which === "qwen" && tok ? [t.id, ...t.cands.map((x) => x.id)].map((i): [number, string] => [i, tok!.piece(i)]) : undefined;
+    post({ t: "tok", id, tok: t, pieces }, [t.pushes.buffer as ArrayBuffer]);
     if (which === "qwen" && STOP.has(t.id)) ended = true;
   };
   for (let i = 0; i < cap && !ended; i++) {

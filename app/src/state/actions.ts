@@ -108,7 +108,8 @@ function pushTok(turn: number, side: Side, tok: Tok) {
   const s = store.get();
   // While writing, the tower follows the newest word (the changed side when there is one) until the visitor taps a word.
   const t = s.turns[turn];
-  if (s.follow && (side === "changed" || !t.changed || t.changed.done)) {
+  const isStop = tok.id === 151645 || tok.id === 151643;
+  if (s.follow && !isStop && (side === "changed" || !t.changed || t.changed.done)) {
     const r = side === "normal" ? t.normal : t.changed!;
     store.set({ word: { turn, side, index: r.toks.length - 1 } });
   }
@@ -595,6 +596,7 @@ export async function startDownload(seconds = 0) {
     if (loaded >= total && total > 0) setDevice({ kind: "loading", seconds });
   };
   engine.onLost = () => store.set({ announce: "The GPU was reset; the model is reloading." });
+  engine.onPieces = (p) => addPieces(p);
   try {
     localStorage.setItem(CRASH_FLAG, "1");
   } catch {
