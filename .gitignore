@@ -15,3 +15,8 @@ bench/results/raw/
 .playwright/
 test-results/
 tiny/test/grad-case.json
+
+# dbmd transient runtime locks
+db/**/.index.lock
+db/.index.lock
+db/.dbmd.transaction.lock
