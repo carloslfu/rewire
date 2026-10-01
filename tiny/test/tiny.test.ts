@@ -33,8 +33,8 @@ describe("tiny model", () => {
     const { x, y } = batch(0, 2, cfg.context);
     const r = ropeTables(cfg);
     const [l, g] = valueAndGrad((p: np.Array, xx: np.Array, yy: np.Array, c: np.Array, s: np.Array) => loss(cfg, p, xx, yy, c, s))(
-      np.array(P0), np.array(x, { dtype: np.int32 }).reshape([2, cfg.context]), np.array(y, { dtype: np.int32 }).reshape([2, cfg.context]),
-      np.array(r.cos).reshape([cfg.context, cfg.headSize]), np.array(r.sin).reshape([cfg.context, cfg.headSize])) as unknown as [np.Array, np.Array];
+      np.array(P0.slice()), np.array(x.slice(), { dtype: np.int32 }).reshape([2, cfg.context]), np.array(y.slice(), { dtype: np.int32 }).reshape([2, cfg.context]),
+      np.array(r.cos.slice()).reshape([cfg.context, cfg.headSize]), np.array(r.sin.slice()).reshape([cfg.context, cfg.headSize])) as unknown as [np.Array, np.Array];
     const lv = (await l.data())[0];
     const gd = Array.from((await g.data()) as Float32Array);
     expect(Number.isFinite(lv)).toBe(true);

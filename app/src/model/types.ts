@@ -57,10 +57,14 @@ export interface Reply {
   pickedAt?: number;
   /** A replay-only device asked for a change that was not recorded. */
   missing?: boolean;
+  /** Recorded words with full floor detail (replay). */
+  featured?: number[];
 }
 
 export interface Turn {
   user: string;
+  /** The seed both sides draw with (a recording's own, or the page's). */
+  seed?: number;
   normal: Reply;
   changed?: Reply;
 }

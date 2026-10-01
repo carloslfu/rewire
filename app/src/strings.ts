@@ -1,9 +1,12 @@
+import { type ModelInfo, n } from "./model/info.ts";
+
 // All copy in one place (English first; Spanish later is a translation of this file).
 // Plain words first, the standard term beside them (section 4.2).
 
 export const S = {
   title: "Rewire",
   orientation: "Qwen3-0.6B, a small open chat AI that runs on your device. Tap any part to see or change it.",
+  tinyOrientation: "The tiny model you just trained, running on your device. Type the start of a sentence; tap any part to see or change it.",
   replay: "Replay",
   live: "Live",
   replayHint: "These are recordings of real runs on this model.",
@@ -43,6 +46,7 @@ export const S = {
   cont: "Continue",
   send: "Send",
   placeholderLive: "Ask it about Paris or Rome",
+  placeholderTiny: "Start a sentence for it to continue",
   placeholderReplay: "Typing needs the model on this device. Pick a recorded question:",
   whatItReads: "What the model actually reads",
   hideReads: "Hide",
@@ -50,7 +54,7 @@ export const S = {
   thinkingOff: "Thinking is off: the reply starts after an empty thinking block.",
   youPicked: "You picked this word",
   undo: "Undo",
-  stopped: "Stopped at 64 word pieces.",
+  stopped: (n: number, piece: string) => `Stopped at ${n} ${piece}s.`,
   sameWords: (word: string, a: number, b: number) =>
     b < a ? `Same words, less sure: "${word}" fell from ${a}% to ${b}%.` : `Same words, more sure: "${word}" rose from ${a}% to ${b}%.`,
   sameNumbers: "Same words and nearly the same probabilities: this change barely matters for this reply.",
@@ -118,23 +122,25 @@ export const S = {
     lens: ["Floor guess", "logit lens"],
     steering: ["Concept", "steering vector"],
   } as Record<string, [string, string]>,
-  def: {
-    word: "A word piece the model wrote. It was drawn from the candidates below.",
-    token: "Text is cut into word pieces before the model reads it. This model knows 151,669 of them.",
-    dictionary: "Each word piece has a row of 1,024 numbers in the dictionary. The same table turns numbers back into words at the end.",
-    stream: "1,024 numbers per word that every floor reads and adds to.",
-    floor: "One of 28 floors. Each reads the stream, runs 16 heads and a memory block, and adds their results back.",
-    head: "One of 16 heads on this floor. It looks back at earlier words and brings some of their numbers forward. Pairs of heads share their keys and values.",
-    memory: "One per floor, with 3,072 units. It transforms each word's numbers on its own. Studies find stored associations here, but where facts live is still debated.",
-    unit: "One of the 3,072 units in a memory block.",
+  def: (m: ModelInfo) => ({
+    word: `A ${m.piece} the model wrote. It was drawn from the candidates below.`,
+    token: m.id === "tiny" ? "The tiny model reads one letter at a time; its dictionary has 97 of them."
+      : "Text is cut into word pieces before the model reads it. This model knows 151,669 of them.",
+    dictionary: `Each ${m.piece} has a row of ${n(m.width)} numbers in the dictionary. The same table turns numbers back into ${m.piece}s at the end.`,
+    stream: `${n(m.width)} numbers per ${m.piece} that every floor reads and adds to.`,
+    floor: `One of ${m.floors} floors. Each reads the stream, runs ${m.heads} heads and a memory block, and adds their results back.`,
+    head: `One of ${m.heads} heads on this floor. It looks back at earlier ${m.piece}s and brings some of their numbers forward. Pairs of heads share their keys and values.`,
+    memory: `One per floor, with ${n(m.units)} units. It transforms each ${m.piece}'s numbers on its own. Studies find stored associations here, but where facts live is still debated.`,
+    unit: `One of the ${n(m.units)} units in a memory block.`,
     lens: "What the model would say if it stopped at that floor. Guesses on early floors are unreliable.",
     concept: "A direction in the stream, found from example sentences. Adding it pushes every later word toward the concept.",
-    out: "The final normalization, then a score for every one of the 151,669 pieces, the probabilities, and the choice.",
+    out: `The final normalization, then a score for every one of the ${n(m.vocab)} ${m.piece}s, the probabilities, and the choice.`,
     bits: "Each weight inside the floors is stored with 4 bits: 16 possible values in each small group of weights. Fewer bits means coarser numbers. The dictionary keeps its precision.",
     temperature: "How the next word is picked, not the model. Scores are divided by the temperature: higher means more surprising picks.",
-    push: "Its direct push toward the chosen word: its output, scaled by the final normalization, dotted with the word's dictionary row minus the average row.",
+    push: `Its direct push toward the chosen ${m.piece}: its output, scaled by the final normalization, dotted with the ${m.piece}'s dictionary row minus the average row.`,
     position: "Position enters by rotating queries and keys, not by adding a vector.",
-  },
+  }),
+
   candidates: "Candidates",
   candidatesNote: (k: number) => `The draw used the top ${k} after the cut (top-p 0.8).`,
   cut: "cut",
@@ -153,7 +159,7 @@ export const S = {
   breakingEstimate: "estimated on this floor",
   temperatureLabel: "Temperature",
   temperatureNote: "The model's own numbers stay the same; only the pick changes.",
-  noDetail: "Full floor detail is recorded for the highlighted words. Live, every word has it.",
+  noDetail: "Full floor detail is recorded for the words with a dotted underline. Live, every word has it.",
   inspecting: "Computing every step for this word…",
   goToUnit: "Go to unit",
   topUnitsPush: "Units pushing hardest toward the word",

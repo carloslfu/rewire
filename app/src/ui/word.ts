@@ -2,9 +2,17 @@
 import type { Forced, Reply, Tok, Turn, WordRef } from "../model/types.ts";
 import type { State } from "../state/store.ts";
 
-export const HEADS = 16;
-export const FLOORS = 28;
-export const P_PER_FLOOR = HEADS + 1;
+import type { ModelInfo } from "../model/info.ts";
+
+// Dimensions of the model on screen (live bindings, updated when the model changes).
+export let HEADS = 16;
+export let FLOORS = 28;
+export let P_PER_FLOOR = HEADS + 1;
+export function setDims(m: ModelInfo) {
+  HEADS = m.heads;
+  FLOORS = m.floors;
+  P_PER_FLOOR = m.heads + 1;
+}
 
 export const headIndex = (floor: number, head: number) => 1 + floor * P_PER_FLOOR + head;
 export const memIndex = (floor: number) => 1 + floor * P_PER_FLOOR + HEADS;
@@ -66,7 +74,7 @@ export function hardestFloors(v: Float32Array): [number, number] {
     return s;
   });
   let best = 0, at = 0;
-  const W = 6;
+  const W = Math.min(6, Math.max(1, Math.round(FLOORS / 4)));
   for (let a = 0; a + W <= FLOORS; a++) {
     const s = per.slice(a, a + W).reduce((x, y) => x + y, 0);
     if (s > best) { best = s; at = a; }

@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { start } from "./state/actions.ts";
+import { store } from "./state/store.ts";
 import { App } from "./ui/App.tsx";
 import "./styles.css";
 
@@ -10,3 +11,4 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 void start();
+if (import.meta.env.DEV) (globalThis as unknown as { __rewire: unknown }).__rewire = { store };

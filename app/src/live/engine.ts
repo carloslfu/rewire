@@ -1,6 +1,7 @@
 // The page's side of the engine worker (section 6.2): one worker, three conversations (normal,
 // changed, and the underline pass), versioned jobs so newer changes skip older work.
 import type { Cand, ChangeSpec, FloorDetail, Forced, Tok } from "../model/types.ts";
+import type { TinyConfig } from "@rewire/tiny/src/model.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
 
 export type ConvId = 0 | 1 | 2;
@@ -100,6 +101,18 @@ export class EngineClient {
   }
   inspect(conv: ConvId, changes: ChangeSpec, tokens: number[], target: number): Promise<{ detail: FloorDetail; guesses: Cand[][] }> {
     return this.call({ t: "inspect", conv, changes, tokens, target });
+  }
+  /** Hands the trained tiny model to the engine (its 32-bit path). */
+  loadTiny(params: Float32Array, config: TinyConfig): Promise<{ floors: number; heads: number }> {
+    return this.call({ t: "tiny", params, config });
+  }
+  /** Speed bench on the loaded model (medians of five runs). */
+  bench(): Promise<Record<string, number>> {
+    return this.call({ t: "bench" });
+  }
+  /** Which model the following jobs use. */
+  use(model: "qwen" | "tiny"): Promise<boolean> {
+    return this.call({ t: "use", model });
   }
   /** Average dictionary row and a token's row (the words-in panel). */
   dictRow(id: number, changes: ChangeSpec): Promise<Float32Array> {

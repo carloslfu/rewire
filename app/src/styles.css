@@ -170,6 +170,7 @@ p { margin: 0; }
 .tok.sel { background: color-mix(in oklab, var(--focus) 22%, transparent); outline: 1px solid var(--focus); }
 .tok.under { text-decoration: underline wavy var(--changed); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 .tok.picked { box-shadow: inset 0 -2px 0 var(--fg); }
+.tok.featured { text-decoration: underline dotted var(--faint); text-underline-offset: 4px; }
 .tok.cursor::after { content: "▍"; color: var(--faint); }
 .reply .foot { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
 .reply .moved { margin-top: 6px; font-size: 13px; }
@@ -196,7 +197,7 @@ button.piece { cursor: pointer; }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--fg); color: var(--bg); }
 .seg.change button[aria-checked="true"]:not([data-v="1"]) { background: var(--changed); color: #fff; }
-.tower { display: grid; grid-template-columns: 54px repeat(16, 24px) 8px 60px; gap: 1px; align-items: stretch; }
+.tower { display: grid; gap: 1px; align-items: stretch; max-width: 100%; }
 .tower .lbl {
   font-size: 11px; color: var(--faint); display: flex; align-items: center; justify-content: flex-end; padding-right: 6px;
   border: 0; background: none; min-height: 23px; font-variant-numeric: tabular-nums;
@@ -210,7 +211,7 @@ button.piece { cursor: pointer; }
 .tower .cell.edit.off { background-image: repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in oklab, var(--changed) 45%, transparent) 4px 5px); }
 .tower .cell.atlas::after { content: ""; position: absolute; right: 2px; top: 2px; width: 4px; height: 4px; border-radius: 50%; background: var(--fg); opacity: 0.55; }
 .tower .row-edit { color: var(--changed); font-weight: 700; }
-.tower .wide { grid-column: 2 / span 18; border: 1px solid var(--line); background: var(--panel); border-radius: 4px; min-height: 30px;
+.tower .wide { grid-column: 2 / -1; border: 1px solid var(--line); background: var(--panel); border-radius: 4px; min-height: 30px;
   display: flex; align-items: center; justify-content: space-between; padding: 2px 8px; font-size: 13px; gap: 8px; }
 .tower .wide .v { padding: 1px 6px; border-radius: 4px; }
 .tower .flowing { animation: flow 0.35s ease-out both; }
@@ -222,7 +223,6 @@ button.piece { cursor: pointer; }
 .bits-label { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; font-size: 13px; padding: 2px 8px; min-height: 28px; font-weight: 600; }
 .bits-label.edit { border-color: var(--changed); color: var(--changed); }
 @media (max-width: 899px) {
-  .tower { grid-template-columns: 40px repeat(16, minmax(10px, 1fr)) 4px minmax(28px, 2fr); }
   .tower.compact .cell, .tower.compact .lbl { min-height: 9px; font-size: 0; }
   .tower.compact .lbl { pointer-events: none; }
 }

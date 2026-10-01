@@ -10,9 +10,15 @@ importers:
 
   app:
     dependencies:
+      '@jax-js/jax':
+        specifier: 0.1.25
+        version: 0.1.25
       '@rewire/engine':
         specifier: workspace:*
         version: link:../engine
+      '@rewire/tiny':
+        specifier: workspace:*
+        version: link:../tiny
       react:
         specifier: ^19.3.0
         version: 19.3.0
@@ -82,6 +88,9 @@ importers:
       '@webgpu/types':
         specifier: ^0.1.74
         version: 0.1.74
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

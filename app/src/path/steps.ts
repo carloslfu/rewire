@@ -53,6 +53,8 @@ export interface StepCopy {
   /** One plain line after trying. */
   why: (f: Record<string, string | number>) => string;
   term?: string;
+  /** Questions to tap once the model runs live, with the step's change still on. */
+  suggestions?: string[];
 }
 
 export const COPY: Record<string, StepCopy> = {
@@ -62,6 +64,7 @@ export const COPY: Record<string, StepCopy> = {
     action: "Swap Paris and Rome",
     why: () => "It never saw \"Rome\". It read the numbers stored for Paris.",
     term: "dictionary",
+    suggestions: ["Why does Rome have the Eiffel Tower?", "What is Paris famous for?", "How far is Rome from Paris?"],
   },
   "step-2": {
     title: "One number out of 596 million",
@@ -75,6 +78,7 @@ export const COPY: Record<string, StepCopy> = {
     action: "Turn off a floor",
     why: (f) => `Without the first floor it speaks nonsense. Without floor ${f.middle ?? "14"} it barely changes: the floors after it make up for it.`,
     term: "floor",
+    suggestions: ["What is the tallest mountain on Earth?", "Name three colors of the rainbow."],
   },
   "step-4": {
     title: "Hide the start marker",
@@ -96,6 +100,7 @@ export const COPY: Record<string, StepCopy> = {
     action: "Turn up the concept",
     why: () => "The concept is a direction in the stream. A little steers the topic; too much drowns out everything else, so it loops, rambles or switches language.",
     term: "steering",
+    suggestions: ["Give me a tip for a job interview.", "Describe your perfect weekend."],
   },
   "step-7": {
     title: "Where does the answer form?",
@@ -115,6 +120,7 @@ export const COPY: Record<string, StepCopy> = {
     question: "What if it had picked a different word?",
     action: "Use its third choice",
     why: () => "Nothing inside it changed. It writes by picking from probabilities, so one different pick changes the rest.",
+    suggestions: ["Write a two-sentence story about a fox.", "Write a short poem about rain."],
   },
   "step-10": {
     title: "Squeeze the numbers",
@@ -123,6 +129,7 @@ export const COPY: Record<string, StepCopy> = {
     why: (f) => (f.at3 === "breaks" ? "At 8 levels it already breaks, and at 4 it is nonsense: every weight lands far from its real value." :
       "At 8 levels it gets much worse, and at 4 it is nonsense: every weight lands far from its real value."),
     term: "bits",
+    suggestions: ["What is a good name for a dog?", "How do I make lemonade?"],
   },
   "step-11": {
     title: "Teach a tiny model your writing",

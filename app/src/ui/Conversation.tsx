@@ -43,6 +43,7 @@ function TurnView({ turn, k, last, live }: { turn: Turn; k: number; last: boolea
 
 function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: number; side: Side; turn: Turn; last: boolean; live: boolean }) {
   const word = useStore((s) => s.word);
+  const model = useStore((s) => s.model);
   const compare = side === "normal" ? turn.changed?.compare : undefined;
   const changed = side === "changed";
   const label = !changed ? (turn.changed ? S.normal : null)
@@ -63,7 +64,7 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
           const txt = piece(t.id);
           if (!inspectable) return <Fragment key={i}>{txt}</Fragment>;
           return (
-            <button key={i} type="button" className={`tok${sel ? " sel" : ""}${under ? " under" : ""}${t.picked ? " picked" : ""}`}
+            <button key={i} type="button" className={`tok${sel ? " sel" : ""}${under ? " under" : ""}${t.picked ? " picked" : ""}${reply.featured?.includes(i) ? " featured" : ""}`}
               aria-pressed={!!sel}
               aria-label={under ? `${txt.trim()}: the changed model gives it ${pct(pc!)}` : undefined}
               title={under ? `Normal ${pct(pn)}, changed ${pct(pc!)}` : undefined}
@@ -88,7 +89,7 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
         )}
         {reply.done && !reply.ended && !reply.stale && last && (
           <>
-            <span>{S.stopped}</span>
+            <span>{S.stopped(reply.toks.length, model.piece)}</span>
             {live && <button type="button" className="btn" onClick={() => void continueReply()}>{S.cont}</button>}
           </>
         )}

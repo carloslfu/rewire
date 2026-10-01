@@ -94,6 +94,9 @@ export function ropeTables(c: TinyConfig): { cos: Float32Array; sin: Float32Arra
 }
 
 type A = np.Array;
+/** Typed arrays as jax-js expects them (backed by a plain ArrayBuffer). */
+const f32 = (a: ArrayLike<number>): Float32Array<ArrayBuffer> => new Float32Array(a);
+const i32 = (a: ArrayLike<number>) => Int32Array.from(a) as Int32Array<ArrayBuffer>;
 
 function rms(x: A, w: A, eps: number): A {
   const ms = x.ref.mul(x.ref).mean(-1, { keepdims: true });
@@ -112,7 +115,7 @@ function rotHalf(x: A, D: number): A {
  */
 export function forward(c: TinyConfig, P: A, x: A, cos: A, sin: A): A {
   const { tensors } = layout(c);
-  const W = c.width, H = c.heads, KV = c.kvHeads, D = c.headSize;
+  const H = c.heads, KV = c.kvHeads, D = c.headSize;
   const [B, T] = x.shape;
   const get = (name: string) => {
     const t = tensors.find((u) => u.name === name)!;
@@ -166,7 +169,7 @@ export interface Trainer {
 
 /** Adam outside the compiled gradient step, over the one flat array. */
 export function adamTrainer(c: TinyConfig, init: Float32Array, opts = { lr: 3e-3, b1: 0.9, b2: 0.99, eps: 1e-8 }): Trainer {
-  let P = np.array(init);
+  let P = np.array(f32(init));
   let m = np.zeros([init.length]);
   let v = np.zeros([init.length]);
   let t = 0;
@@ -184,8 +187,8 @@ export function adamTrainer(c: TinyConfig, init: Float32Array, opts = { lr: 3e-3
   return {
     async step(x, y, batch) {
       t++;
-      const xa = np.array(x, { dtype: np.int32 }).reshape([batch, T]);
-      const ya = np.array(y, { dtype: np.int32 }).reshape([batch, T]);
+      const xa = np.array(i32(x), { dtype: np.int32 }).reshape([batch, T]);
+      const ya = np.array(i32(y), { dtype: np.int32 }).reshape([batch, T]);
       const [l, g] = vg(P.ref, xa, ya, cos.ref, sin.ref) as unknown as [A, A];
       const lrT = opts.lr * Math.sqrt(1 - opts.b2 ** t) / (1 - opts.b1 ** t);
       const [p2, m2, v2] = update(P, m, v, g, np.array([lrT])) as unknown as [A, A, A];
@@ -209,9 +212,9 @@ export async function sgdStep(c: TinyConfig, init: Float32Array, x: Int32Array, 
   const rope = ropeTables(c);
   const cos = np.array(rope.cos.slice(0, T * c.headSize)).reshape([T, c.headSize]);
   const sin = np.array(rope.sin.slice(0, T * c.headSize)).reshape([T, c.headSize]);
-  const P = np.array(init);
-  const xa = np.array(x, { dtype: np.int32 }).reshape([1, T]);
-  const ya = np.array(y, { dtype: np.int32 }).reshape([1, T]);
+  const P = np.array(f32(init));
+  const xa = np.array(i32(x), { dtype: np.int32 }).reshape([1, T]);
+  const ya = np.array(i32(y), { dtype: np.int32 }).reshape([1, T]);
   const [l, g] = valueAndGrad((p: A, xx: A, yy: A, cs: A, sn: A) => loss(c, p, xx, yy, cs, sn))(P, xa, ya, cos, sin) as unknown as [A, A];
   const gd = new Float32Array((await g.data()) as Float32Array);
   const lv = (await l.data())[0] as number;
@@ -226,9 +229,58 @@ export async function nextProbs(c: TinyConfig, params: Float32Array, ids: number
   const rope = ropeTables(c);
   const cos = np.array(rope.cos.slice(0, T * c.headSize)).reshape([T, c.headSize]);
   const sin = np.array(rope.sin.slice(0, T * c.headSize)).reshape([T, c.headSize]);
-  const logits = forward(c, np.array(params), np.array(new Int32Array(ids), { dtype: np.int32 }).reshape([1, T]), cos, sin);
+  const logits = forward(c, np.array(f32(params)), np.array(i32(ids), { dtype: np.int32 }).reshape([1, T]), cos, sin);
   const last = nn.softmax(logits.slice(0, T - 1), -1);
   return new Float32Array((await last.data()) as Float32Array);
 }
 
 export { grad };
+
+/** Next-letter probabilities at every position [T, vocab] (the slow-motion view). */
+export async function allProbs(c: TinyConfig, params: Float32Array, ids: ArrayLike<number>): Promise<Float32Array> {
+  const T = ids.length;
+  const rope = ropeTables({ ...c, context: Math.max(T, 1) });
+  const cos = np.array(rope.cos.slice(0, T * c.headSize)).reshape([T, c.headSize]);
+  const sin = np.array(rope.sin.slice(0, T * c.headSize)).reshape([T, c.headSize]);
+  const logits = forward(c, np.array(f32(params)), np.array(i32(ids), { dtype: np.int32 }).reshape([1, T]), cos, sin);
+  const p = nn.softmax(logits.reshape([T, c.vocab]), -1);
+  return new Float32Array((await p.data()) as Float32Array);
+}
+
+/**
+ * Next-letter probabilities from one compiled forward pass over a fixed window. Shorter inputs are padded
+ * on the right, which is exact: attention is causal, so a position never sees the padding after it.
+ */
+export function sampler(c: TinyConfig) {
+  const T = c.context, D = c.headSize;
+  const rope = ropeTables(c);
+  const cos = np.array(rope.cos.slice(0, T * D)).reshape([T, D]);
+  const sin = np.array(rope.sin.slice(0, T * D)).reshape([T, D]);
+  const fwd = jit((P: A, x: A, cs: A, sn: A) => nn.softmax(forward(c, P, x, cs, sn), -1));
+  return {
+    /** Probabilities at every position of `ids` (at most T of them), [n, vocab]. P is not consumed. */
+    async all(P: A, ids: ArrayLike<number>): Promise<Float32Array> {
+      const n = Math.min(ids.length, T);
+      const x = new Int32Array(T);
+      x.set(Array.from(ids).slice(-n));
+      const out = fwd(P.ref, np.array(x, { dtype: np.int32 }).reshape([1, T]), cos.ref, sin.ref) as A;
+      const rows = out.slice(0, [0, n]);
+      return new Float32Array((await rows.data()) as Float32Array);
+    },
+    /** Probabilities of the letter after `ids`. */
+    async next(P: A, ids: ArrayLike<number>): Promise<Float32Array> {
+      const all = await this.all(P, Array.from(ids).slice(-T));
+      const n = Math.min(ids.length, T);
+      return all.slice((n - 1) * c.vocab, n * c.vocab);
+    },
+    dispose() {
+      cos.dispose();
+      sin.dispose();
+      fwd.dispose();
+    },
+  };
+}
+
+export function deviceParams(p: ArrayLike<number>): A {
+  return np.array(f32(p));
+}

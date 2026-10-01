@@ -1,4 +1,4 @@
-// The tower (section 4.2, level 1): 28 floors for the chosen word, each a row of 16 head cells and one
+// The tower (section 4.2, level 1): every floor for the chosen word, each a row of head cells and one
 // memory block, colored by its direct push toward that word. Every cell is a button: tap to see it.
 import { useMemo, useRef } from "react";
 import type { Focus } from "../model/types.ts";
@@ -16,6 +16,7 @@ export function Tower({ compact }: { compact?: boolean }) {
   const view = useStore((s) => s.view);
   const chips = useStore((s) => s.chips);
   const focus = useStore((s) => s.focus);
+  const model = useStore((s) => s.model);
   const c = useMemo(() => chosen({ turns, word, fork }), [turns, word, fork]);
   const vals = towerValues(c, view);
   const scale = vals ? maxAbs(vals) : 1;
@@ -97,9 +98,11 @@ export function Tower({ compact }: { compact?: boolean }) {
     <div>
       <div className="tower-head">
         <h2>{c ? (view === "push" ? S.towerFor(wq) : `${S.viewDiff}: "${wq}"`) : S.tower}</h2>
-        <button type="button" className={`bits-label${bits !== 4 ? " edit" : ""}`} onClick={() => setFocus({ kind: "bits" })}>
-          {S.bitsLabel(bits)}
-        </button>
+        {model.id === "qwen" ? (
+          <button type="button" className={`bits-label${bits !== 4 ? " edit" : ""}`} onClick={() => setFocus({ kind: "bits" })}>
+            {S.bitsLabel(bits)}
+          </button>
+        ) : <span className="note">32-bit weights</span>}
         <div className="seg" role="group" aria-label="Tower lighting">
           <button type="button" aria-pressed={view === "push"} onClick={() => store.set({ view: "push" })}>{S.viewPush}</button>
           <button type="button" aria-pressed={view === "difference"} disabled={!hasDiff} title={hasDiff ? S.diffNote : S.diffNone}
@@ -109,7 +112,8 @@ export function Tower({ compact }: { compact?: boolean }) {
       {summary && <p className="note" style={{ marginBottom: 8 }}>{summary}</p>}
       {!c && <p className="note" style={{ marginBottom: 8 }}>{S.towerNone}</p>}
       {view === "difference" && <p className="note" style={{ marginBottom: 8 }}>{S.diffNote}</p>}
-      <div className={`tower${compact ? " compact" : ""}`} ref={gridRef} onKeyDown={onKey} role="group" aria-label={S.tower}>
+      <div className={`tower${compact ? " compact" : ""}`} ref={gridRef} onKeyDown={onKey} role="group" aria-label={S.tower}
+        style={{ gridTemplateColumns: `minmax(36px, 54px) repeat(${HEADS}, minmax(10px, ${HEADS > 8 ? 24 : 48}px)) 8px minmax(36px, 60px)` }}>
         <span aria-hidden="true" />
         <button type="button" className={`wide${isOn({ kind: "words-out" }) ? " on" : ""}`} onClick={() => setFocus({ kind: "words-out" })}>
           <span>{S.wordsOut}</span>

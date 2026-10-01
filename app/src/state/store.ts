@@ -1,6 +1,7 @@
 // All state lives in one object in the page's memory (section 6.4). Nothing is saved to the device
 // except the model files and the crash flag.
 import { useSyncExternalStore } from "react";
+import { type ModelInfo, QWEN_INFO } from "../model/info.ts";
 import type { ChangeSpec, Focus, Turn, WordRef } from "../model/types.ts";
 
 export type Mode = "replay" | "live";
@@ -17,6 +18,8 @@ export type DeviceState =
   | { kind: "error"; message: string };
 
 export interface State {
+  /** The model on screen. */
+  model: ModelInfo;
   mode: Mode;
   device: DeviceState;
   /** The active changes (chips). */
@@ -30,6 +33,8 @@ export interface State {
   busy: boolean;
   /** The word whose numbers are shown. */
   word: WordRef | null;
+  /** The tower follows the word being written until the visitor taps one. */
+  follow: boolean;
   focus: Focus;
   /** Tower lighting: each part's push, or changed minus normal on the same words. */
   view: "push" | "difference";
@@ -47,9 +52,14 @@ export interface State {
   announce: string;
   /** Phone: the detail sheet is open. */
   sheet: boolean;
+  /** Qwen's mode while the tiny model is on screen. */
+  qwenMode?: Mode;
+  /** Speed bench results (?bench). */
+  bench?: Record<string, unknown>;
 }
 
 export const initial: State = {
+  model: QWEN_INFO,
   mode: "replay",
   device: { kind: "checking" },
   chips: {},
@@ -58,6 +68,7 @@ export const initial: State = {
   fork: -1,
   busy: false,
   word: null,
+  follow: true,
   focus: { kind: "word" },
   view: "push",
   temperature: 0.7,

@@ -20,7 +20,9 @@
     "vitest": "^5.0.3"
   },
   "dependencies": {
+    "@jax-js/jax": "0.1.25",
     "@rewire/engine": "workspace:*",
+    "@rewire/tiny": "workspace:*",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   }

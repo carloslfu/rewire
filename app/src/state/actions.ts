@@ -5,6 +5,10 @@ import { canonical, loadRecording, parseFeatured, type Recording, type RecordedR
 import type { Cand, ChangeSpec, FloorDetail, Focus, Reply, Side, Tok, Turn, WordRef } from "../model/types.ts";
 import { loadPath, type PathData, type StepData, stepChanges } from "../path/steps.ts";
 import { S } from "../strings.ts";
+import { setDims } from "../ui/word.ts";
+import { encode, letter } from "@rewire/tiny/src/data.ts";
+import { TINY, type TinyConfig } from "@rewire/tiny/src/model.ts";
+import { QWEN_INFO, TINY_INFO } from "../model/info.ts";
 import { type DeviceState, store } from "./store.ts";
 
 export const REPLY_CAP = 64;
@@ -16,6 +20,7 @@ const CRASH_FLAG = "rewire-live-session";
 const pieceText = new Map<number, string>();
 const pieceListeners = new Set<() => void>();
 export function piece(id: number): string {
+  if (store.get().model.id === "tiny") return letter(id);
   return pieceText.get(id) ?? "…";
 }
 export function onPieces(f: () => void) {
@@ -101,9 +106,10 @@ function patchReply(turn: number, side: Side, f: (r: Reply) => Reply) {
 function pushTok(turn: number, side: Side, tok: Tok) {
   patchReply(turn, side, (r) => ({ ...r, toks: [...r.toks, tok] }));
   const s = store.get();
-  // While writing, the tower follows the newest word unless the visitor picked one in another reply.
-  if (!s.word || (s.word.turn === turn && s.word.side === side) || s.busy) {
-    const r = side === "normal" ? s.turns[turn].normal : s.turns[turn].changed!;
+  // While writing, the tower follows the newest word (the changed side when there is one) until the visitor taps a word.
+  const t = s.turns[turn];
+  if (s.follow && (side === "changed" || !t.changed || t.changed.done)) {
+    const r = side === "normal" ? t.normal : t.changed!;
     store.set({ word: { turn, side, index: r.toks.length - 1 } });
   }
 }
@@ -128,7 +134,7 @@ export async function openStep(n: number | null) {
   claim("changed");
   const s = store.get();
   store.set({
-    step: n, stepTried: false, pathOpen: false, chips: {}, version: s.version + 1, turns: [], fork: -1, word: null,
+    step: n, stepTried: false, pathOpen: false, chips: {}, version: s.version + 1, turns: [], fork: -1, word: null, follow: true,
     focus: { kind: "word" }, view: "push", tiny: n !== null && stepData(n)?.control.kind === "tiny",
   });
   engine?.setVersion(store.get().version);
@@ -138,7 +144,7 @@ export async function openStep(n: number | null) {
   const rec = await recording(st.recording);
   const run = rec.find({}, st.message);
   if (!run) return;
-  await playRun(run, "normal", {});
+  await playRun(run, "normal", {}, rec);
   if (st.featured?.side === "normal") store.set({ word: { turn: 0, side: "normal", index: st.featured.index } });
 }
 
@@ -148,16 +154,17 @@ function setHash(n: number | null) {
 }
 
 /** Puts a recorded run into the conversation: as the normal side (a fresh turn) or as the changed side. */
-async function playRun(run: RecordedRun, side: Side, changes: ChangeSpec) {
+async function playRun(run: RecordedRun, side: Side, changes: ChangeSpec, rec?: Recording) {
   const job = claim(side);
   const turns = run.turns;
   for (let k = 0; k < turns.length; k++) {
     const t = turns[k];
+    const featured = rec?.header.featured.filter((f) => f.run === run.info.id && f.turn === k).map((f) => f.index);
     if (side === "normal") {
-      store.set((s) => ({ turns: [...s.turns, { user: run.info.messages[k], normal: emptyReply({}, t.read, "recording") }] }));
+      store.set((s) => ({ turns: [...s.turns, { user: run.info.messages[k], seed: run.info.seed, normal: { ...emptyReply({}, t.read, "recording"), featured } }] }));
     } else {
       store.set((s) => ({
-        turns: s.turns.map((x, i) => (i === k ? { ...x, changed: { ...emptyReply(changes, t.read, "recording"), compare: run.compare } } : x)),
+        turns: s.turns.map((x, i) => (i === k ? { ...x, changed: { ...emptyReply(changes, t.read, "recording"), compare: run.compare, featured } } : x)),
       }));
     }
     if (!(await play(k, side, t.toks, job, t.ended))) return false;
@@ -175,10 +182,10 @@ export async function replayAlternative(st: StepData, message: string) {
   claim("changed");
   const chips = store.get().chips;
   store.set({ turns: [], fork: isNeutral(chips) ? -1 : 0, word: null });
-  await playRun(normal, "normal", {});
+  await playRun(normal, "normal", {}, rec);
   if (isNeutral(chips)) return;
   const changed = rec.find(chips, message);
-  if (changed) await playRun(changed, "changed", chips);
+  if (changed) await playRun(changed, "changed", chips, rec);
   else store.set((s) => ({ turns: s.turns.map((t, i) => (i === 0 ? { ...t, changed: { ...emptyReply(chips, t.normal.read, "recording"), done: true, missing: true } } : t)) }));
 }
 
@@ -207,6 +214,12 @@ export async function stepAction(stop?: number) {
   const spec = stepChanges(c, stop);
   await applyChips(spec);
   store.set({ stepTried: true });
+  // then show where the change bites: the Difference view on the step's featured normal word
+  const after = store.get();
+  const f = st.featured;
+  if (!isNeutral(spec) && f?.side === "normal" && after.turns[0]?.changed?.compare && after.step === st.n) {
+    store.set({ word: { turn: 0, side: "normal", index: f.index }, view: "difference", follow: false });
+  }
 }
 
 // ---------------------------------------------------------------- changes and the fork rule
@@ -233,7 +246,7 @@ export async function applyChips(spec: ChangeSpec) {
     if (i < last) return t.changed ? { ...t, changed: { ...t.changed, stale: true } } : t;
     return { ...t, changed: emptyReply(spec, t.normal.read, store.get().mode === "live" ? "live" : "recording") };
   });
-  store.set({ chips: spec, version, turns, fork: last, busy: last >= 0 });
+  store.set({ chips: spec, version, turns, fork: last, busy: last >= 0, follow: true });
   if (last >= 0) await writeChanged(last, version);
 }
 
@@ -261,7 +274,8 @@ async function writeChanged(k: number, version: number) {
     const run = rec.find(s.chips, t.user);
     if (!current("changed", job)) return;
     if (run) {
-      patchReply(k, "changed", (r) => ({ ...r, source: "recording", compare: run.compare, read: run.turns[0].read }));
+      const featured = rec.header.featured.filter((f) => f.run === run.info.id && f.turn === 0).map((f) => f.index);
+      patchReply(k, "changed", (r) => ({ ...r, source: "recording", compare: run.compare, read: run.turns[0].read, featured }));
       await play(k, "changed", run.turns[0].toks, job, run.turns[0].ended);
       return;
     }
@@ -273,7 +287,7 @@ async function writeChanged(k: number, version: number) {
   if (!engine) return;
   const history = historyBefore(k, "changed");
   patchReply(k, "changed", (r) => ({ ...r, source: "live" }));
-  const res = await engine.write({ conv: 1, changes: s.chips, history, prefix: [], seed: s.seed, turn: k, cap: REPLY_CAP,
+  const res = await engine.write({ conv: 1, changes: s.chips, history, prefix: [], seed: t.seed ?? s.seed, turn: k, cap: REPLY_CAP,
     temperature: s.temperature, version }, (tok) => { if (current("changed", job)) pushTok(k, "changed", tok); });
   if (!current("changed", job) || res.cancelled) return;
   patchReply(k, "changed", (r) => ({ ...r, done: true, ended: res.ended }));
@@ -299,6 +313,7 @@ export async function send(message: string) {
   if (!text || !engine || store.get().mode !== "live") return;
   const s = store.get();
   if (s.busy) return;
+  if (s.model.id === "tiny") return sendTiny(message);
   const k = s.turns.length;
   const forked = !isNeutral(s.chips);
   const prevN = k ? s.turns[k - 1].normal.toks.map((x) => x.id) : null;
@@ -313,10 +328,59 @@ export async function send(message: string) {
   const fork = forked ? (s.fork >= 0 ? s.fork : k) : -1;
   store.set((st) => ({
     turns: [...st.turns, { user: text, normal: emptyReply({}, readN, "live"), changed: forked ? emptyReply(st.chips, readC, "live") : undefined }],
-    fork, busy: true, step: null, word: null,
+    fork, busy: true, word: null, follow: true,
   }));
-  setHash(null);
   await Promise.all([writeNormal(k), forked ? writeChangedLive(k) : Promise.resolve()]);
+}
+
+/** The tiny model continues the text you type (letters, no chat template). Each message starts fresh. */
+async function sendTiny(message: string) {
+  const s = store.get();
+  const read = Array.from(encode(message));
+  if (!read.length) return;
+  const forked = !isNeutral(s.chips);
+  claim("normal");
+  claim("changed");
+  store.set({
+    turns: [{ user: message, normal: emptyReply({}, read, "live"), changed: forked ? emptyReply(s.chips, read, "live") : undefined }],
+    fork: forked ? 0 : -1, busy: true, word: null,
+  });
+  await Promise.all([writeNormal(0, [], undefined, TINY_INFO.replyCap), forked ? writeChangedLive(0, [], undefined, TINY_INFO.replyCap) : Promise.resolve()]);
+}
+
+let tinyParams: Float32Array | null = null;
+
+/** Hands the trained tiny model to the engine and shows it in the same screen. */
+export async function openTiny(params: Float32Array) {
+  tinyParams = params;
+  if (!engine) {
+    const { EngineClient } = await import("../live/engine.ts");
+    engine = new EngineClient();
+  }
+  const cfg: TinyConfig = { ...TINY, vocab: TINY_INFO.vocab };
+  await engine.loadTiny(params.slice(), cfg);
+  await engine.use("tiny");
+  claim("normal");
+  claim("changed");
+  setDims(TINY_INFO);
+  const s = store.get();
+  store.set({ model: TINY_INFO, tiny: false, mode: "live", step: null, chips: {}, version: s.version + 1, turns: [], fork: -1, word: null,
+    focus: { kind: "word" }, view: "push", qwenMode: s.mode });
+  setHash(null);
+}
+
+export async function backToQwen() {
+  claim("normal");
+  claim("changed");
+  await engine?.use("qwen");
+  setDims(QWEN_INFO);
+  const s = store.get();
+  store.set({ model: QWEN_INFO, mode: s.qwenMode ?? s.mode, chips: {}, version: s.version + 1, turns: [], fork: -1, word: null, focus: { kind: "word" } });
+  await openStep(shippingSteps()[0]?.n ?? null);
+}
+
+export function hasTiny() {
+  return tinyParams !== null;
 }
 
 async function writeNormal(k: number, prefix: Tok[] = [], force?: number, cap = REPLY_CAP) {
@@ -324,7 +388,7 @@ async function writeNormal(k: number, prefix: Tok[] = [], force?: number, cap = 
   const s = store.get();
   const job = claim("normal");
   const history = historyBefore(k, "normal");
-  const res = await engine.write({ conv: 0, changes: {}, history, prefix: prefix.map((x) => x.id), force, seed: s.seed, turn: k, cap,
+  const res = await engine.write({ conv: 0, changes: {}, history, prefix: prefix.map((x) => x.id), force, seed: s.turns[k]?.seed ?? s.seed, turn: k, cap,
     temperature: s.temperature, version: -1 }, (tok) => { if (current("normal", job)) pushTok(k, "normal", tok); });
   if (!current("normal", job)) return;
   patchReply(k, "normal", (r) => ({ ...r, done: true, ended: res.ended }));
@@ -338,7 +402,7 @@ async function writeChangedLive(k: number, prefix: Tok[] = [], force?: number, c
   const job = claim("changed");
   const version = s.version;
   const history = historyBefore(k, "changed");
-  const res = await engine.write({ conv: 1, changes: s.chips, history, prefix: prefix.map((x) => x.id), force, seed: s.seed, turn: k,
+  const res = await engine.write({ conv: 1, changes: s.chips, history, prefix: prefix.map((x) => x.id), force, seed: s.turns[k]?.seed ?? s.seed, turn: k,
     cap, temperature: s.temperature, version }, (tok) => { if (current("changed", job)) pushTok(k, "changed", tok); });
   if (!current("changed", job) || res.cancelled) return;
   patchReply(k, "changed", (r) => ({ ...r, done: true, ended: res.ended }));
@@ -438,7 +502,7 @@ export function floorDetail(w: WordRef): Promise<FloorDetail | null> {
 }
 
 export function selectWord(w: WordRef | null, focus?: Focus) {
-  store.set((s) => ({ word: w, focus: focus ?? (s.focus.kind === "head" || s.focus.kind === "memory" || s.focus.kind === "floor" ? s.focus : { kind: "word" }), sheet: true }));
+  store.set((s) => ({ word: w, follow: false, focus: focus ?? (s.focus.kind === "head" || s.focus.kind === "memory" || s.focus.kind === "floor" ? s.focus : { kind: "word" }), sheet: true }));
 }
 
 export function setFocus(focus: Focus) {
@@ -504,6 +568,12 @@ export async function startDownload(seconds = 0) {
     if (path && info.manifestHash !== path.manifest_hash) console.warn("recordings and weights come from different manifests");
     setDevice({ kind: "ready", seconds });
     store.set({ mode: "live", announce: S.ready });
+    if (new URLSearchParams(location.search).has("bench")) {
+      const r = await engine.bench();
+      const out = { device_check_predicted_s: seconds, ...r, userAgent: navigator.userAgent };
+      console.log("REWIRE_BENCH", JSON.stringify(out));
+      store.set({ bench: out });
+    }
   } catch (e) {
     setDevice({ kind: "error", message: String((e as Error).message ?? e) });
     try {

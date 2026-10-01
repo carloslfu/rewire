@@ -30,8 +30,8 @@ describe("tiny model in the engine", () => {
     const ids = Array.from(text.slice(0, 24));
     const T = ids.length;
     const r = ropeTables({ ...cfg, context: T });
-    const logits = forward(cfg, np.array(P), np.array(new Int32Array(ids), { dtype: np.int32 }).reshape([1, T]),
-      np.array(r.cos).reshape([T, cfg.headSize]), np.array(r.sin).reshape([T, cfg.headSize]));
+    const logits = forward(cfg, np.array(new Float32Array(P)), np.array(new Int32Array(ids), { dtype: np.int32 }).reshape([1, T]),
+      np.array(r.cos.slice()).reshape([T, cfg.headSize]), np.array(r.sin.slice()).reshape([T, cfg.headSize]));
     const jx = (await logits.data()) as Float32Array;
     const wg = await import("webgpu");
     const dev = await getDevice(wg.create([]));

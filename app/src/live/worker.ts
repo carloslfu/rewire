@@ -7,6 +7,8 @@ import { download, getDevice, storage } from "@rewire/engine/src/gpu.ts";
 import { configOf, type FileEntry, loadWeights, type Manifest, sha256 } from "@rewire/engine/src/manifest.ts";
 import { type Conversation, type InspectHost, Model, RING, type Weights } from "@rewire/engine/src/model.ts";
 import { ChatTokenizer } from "@rewire/engine/src/tokenizer.ts";
+import { engineConfig, engineWeights } from "@rewire/tiny/src/engine.ts";
+import type { TinyConfig } from "@rewire/tiny/src/model.ts";
 import { canonical } from "../model/recording.ts";
 import type { Cand, Forced, Tok } from "../model/types.ts";
 import type { WriteJob } from "./engine.ts";
@@ -20,6 +22,9 @@ const STOP = new Set(STOP_TOKENS);
 
 let dev: GPUDevice | null = null;
 let model: Model | null = null;
+/** The tiny model, once trained and handed over: its own model and conversations on the same device. */
+let tiny: { model: Model; slots: Slot[]; host: Omit<InspectHost, "table"> } | null = null;
+let which: "qwen" | "tiny" = "qwen";
 let man: Manifest | null = null;
 let base = "";
 let phone = false;
@@ -60,6 +65,9 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       case "next": return done(m.id, need(tok).nextTurn(m.reply, m.message).slice(m.reply.length));
       case "plain": return done(m.id, need(tok).plain(m.text));
       case "pieces": return done(m.id, m.ids.map((i) => need(tok).piece(i)));
+      case "tiny": return done(m.id, await loadTiny(m.params, m.config));
+      case "bench": return done(m.id, await bench());
+      case "use": which = m.model; return done(m.id, true);
       case "write": return done(m.id, await locked(m.job.conv, () => write(m.job, m.id)));
       case "compare": return done(m.id, await locked(m.conv, () => compare(m.conv, m.changes, m.history, m.reply, m.version)));
       case "inspect": {
@@ -69,7 +77,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       }
       case "dictRow": return done(m.id, await locked(2, async () => {
         setTable(2, m.changes, 0);
-        return need(slots[2]).c.dictRow(m.tokenId);
+        return need(cur()[2]).c.dictRow(m.tokenId);
       }));
     }
   } catch (err) {
@@ -86,8 +94,16 @@ function need<T>(x: T | null | undefined): T {
   return x;
 }
 
+/** The conversations of the model in use. */
+function cur(): Slot[] {
+  return which === "tiny" ? need(tiny).slots : slots;
+}
+function curModel(): Model {
+  return which === "tiny" ? need(tiny).model : need(model);
+}
+
 function locked<T>(ci: number, f: () => Promise<T>): Promise<T> {
-  const s = need(slots[ci]);
+  const s = need(cur()[ci]);
   const p = s.lock.then(f, f);
   s.lock = p.catch(() => undefined);
   return p;
@@ -261,15 +277,97 @@ async function getFile(cache: Cache | null, f: FileEntry, onBytes: (got: number)
   return out.buffer;
 }
 
+// ------------------------------------------------------------------ the speed bench (Phase 0B, Phases 1 and 2)
+
+/** Medians of five runs on the loaded model: the device rule's workload, latency after a change, inspection. */
+async function bench() {
+  const mdl = need(model), s = slots[0], c = s.c;
+  const read = Array.from({ length: 299 }, (_, i) => 1000 + ((i * 7919) % 20000));
+  const median = (xs: number[]) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+  const runWrite = async (changes: ChangeSpec, n: number) => {
+    setTable(0, changes, 0);
+    s.tokens = [];
+    c.rewind(0);
+    const t0 = performance.now();
+    c.read(read);
+    let first = 0;
+    for (let i = 0; i < n; i++) {
+      c.step(i === 0 ? 7 : undefined, { seed: 1, turn: 0, step: i, slot: i });
+      if (i >= LAG) { await c.result(i - LAG); if (i - LAG === 0) first = performance.now() - t0; }
+    }
+    for (let i = Math.max(0, n - LAG); i < n; i++) { await c.result(i); if (i === 0) first = performance.now() - t0; }
+    const total = performance.now() - t0;
+    return { total, first };
+  };
+  // warm up every pipeline once
+  await runWrite({}, 8);
+  const normal: number[] = [], changed: number[] = [], firstChanged: number[] = [], writeOnly: number[] = [];
+  for (let r = 0; r < 5; r++) {
+    const a = await runWrite({}, 40);
+    normal.push(a.total);
+    const b = await runWrite({ heads: [{ floor: 3, head: 2, mult: 0 }], memory: [{ floor: 7, mult: 2 }] }, 40);
+    changed.push(b.total);
+    firstChanged.push(b.first);
+    // writing speed alone: 40 tokens after the 300 already read
+    setTable(0, {}, 0);
+    const t0 = performance.now();
+    for (let i = 0; i < 40; i++) {
+      c.step(i === 0 ? 7 : undefined, { seed: 2, turn: 0, step: i, slot: i });
+      if (i >= LAG) await c.result(i - LAG);
+    }
+    for (let i = 40 - LAG; i < 40; i++) await c.result(i);
+    writeOnly.push(performance.now() - t0);
+    c.rewind(0);
+  }
+  // inspection of one word at position 300
+  setTable(0, {}, 0);
+  c.rewind(0);
+  c.read(read);
+  const insp: number[] = [];
+  for (let r = 0; r < 3; r++) {
+    const t0 = performance.now();
+    await c.inspect(299, 7, 9, { ...need(host), table: s.table });
+    insp.push(performance.now() - t0);
+  }
+  s.tokens = [];
+  c.rewind(0);
+  const cfg = mdl.cfg;
+  const weights = need(man).total_bytes;
+  const kvPerConv = cfg.floors * 2 * cfg.kvHeads * cfg.maxContext * cfg.headSize * 2;
+  return {
+    read300write40_ms: median(normal), read300write40_changed_ms: median(changed), first_changed_word_ms: median(firstChanged),
+    write40_tokens_per_s: 40000 / median(writeOnly), inspect_ms: median(insp),
+    gpu_bytes_estimate: weights + 3 * kvPerConv + 17 * 1024 * 1024 * 2, max_context: cfg.maxContext,
+  };
+}
+
+// ------------------------------------------------------------------ the tiny model
+
+async function loadTiny(params: Float32Array, config: TinyConfig) {
+  dev ??= await getDevice(navigator.gpu);
+  if (tiny) for (const f of tiny.model.w.floors) for (const b of Object.values(f)) (b as GPUBuffer).destroy();
+  const cfg = engineConfig(config, 512);
+  const w = engineWeights(dev, config, params);
+  const m = new Model(dev, cfg, w);
+  const qkNorm = await Promise.all(w.floors.map(async (f) => new Float32Array(await download(dev!, f.qkNorm))));
+  tiny = {
+    model: m,
+    slots: [0, 1, 2].map(() => ({ c: m.conversation(), tokens: [], key: "{}", table: encodeTable({}, cfg), lock: Promise.resolve() })),
+    host: { qkNorm, meanRow: new Float32Array(await download(dev, w.meanRow)), finalNorm: new Float32Array(await download(dev, w.finalNorm)) },
+  };
+  return { floors: cfg.floors, heads: cfg.queryHeads };
+}
+
 // ------------------------------------------------------------------ conversations
 
 /** Points conversation ci at `changes`; a different table empties its cache. */
 function setTable(ci: number, changes: ChangeSpec, conceptFirst: number) {
-  const s = slots[ci];
+  const s = cur()[ci];
   const key = canonical(changes) + `@${conceptFirst}`;
   if (s.key === key) return;
-  const m = need(man), cfg = need(model).cfg;
-  s.table = encodeTable(changes, cfg, { vector: (id, L) => need(concepts.get(id))[L], rho: m.rho }, conceptFirst);
+  const cfg = curModel().cfg;
+  s.table = which === "tiny" ? encodeTable({ ...changes, concept: null }, cfg)
+    : encodeTable(changes, cfg, { vector: (id, L) => need(concepts.get(id))[L], rho: need(man).rho }, conceptFirst);
   s.c.setTable(s.table);
   s.key = key;
   s.tokens = [];
@@ -279,7 +377,7 @@ function setTable(ci: number, changes: ChangeSpec, conceptFirst: number) {
 /** Makes conversation ci's cache hold exactly `tokens`, reading only what differs. */
 function ensure(ci: number, changes: ChangeSpec, tokens: number[], conceptFirst: number) {
   setTable(ci, changes, conceptFirst);
-  const s = slots[ci];
+  const s = cur()[ci];
   let k = 0;
   while (k < s.tokens.length && k < tokens.length && s.tokens[k] === tokens[k]) k++;
   s.c.rewind(k);
@@ -290,19 +388,19 @@ function ensure(ci: number, changes: ChangeSpec, tokens: number[], conceptFirst:
 }
 
 function conceptFrom(tokens: number[]) {
-  return need(tok).systemEnd(tokens);
+  return which === "tiny" ? 0 : need(tok).systemEnd(tokens);
 }
 
 function contextCheck(n: number) {
-  if (n > need(model).cfg.maxContext) throw new Error("context-full");
+  if (n > curModel().cfg.maxContext) throw new Error("context-full");
 }
 
 async function write(job: WriteJob, id: number): Promise<{ ended: boolean; cancelled: boolean }> {
   const all = [...job.history, ...job.prefix];
-  const room = need(model).cfg.maxContext - all.length;
+  const room = curModel().cfg.maxContext - all.length;
   const cap = Math.min(job.cap, room);
   contextCheck(all.length);
-  const s = slots[job.conv];
+  const s = cur()[job.conv];
   ensure(job.conv, job.changes, all.slice(0, -1), conceptFrom(all));
   const c = s.c;
   const start = job.prefix.length;
@@ -319,7 +417,7 @@ async function write(job: WriteJob, id: number): Promise<{ ended: boolean; cance
     if (received === 1 && job.force !== undefined) t.picked = true;
     toks.push(t.id);
     post({ t: "tok", id, tok: t }, [t.pushes.buffer as ArrayBuffer]);
-    if (STOP.has(t.id)) ended = true;
+    if (which === "qwen" && STOP.has(t.id)) ended = true;
   };
   for (let i = 0; i < cap && !ended; i++) {
     if (stale()) { cancelled = true; break; }
@@ -346,7 +444,7 @@ async function compare(ci: number, changes: ChangeSpec, history: number[], reply
   if (!reply.length) return [];
   contextCheck(history.length + reply.length);
   ensure(ci, changes, history.slice(0, -1), conceptFrom(history));
-  const s = slots[ci], c = s.c;
+  const s = cur()[ci], c = s.c;
   const out: Forced[] = [];
   const inputs = [history[history.length - 1], ...reply.slice(0, -1)];
   let submitted = 0, received = 0;
@@ -367,7 +465,8 @@ async function compare(ci: number, changes: ChangeSpec, history: number[], reply
 async function inspect(ci: number, changes: ChangeSpec, tokens: number[], target: number) {
   contextCheck(tokens.length);
   ensure(ci, changes, tokens.slice(0, -1), conceptFrom(tokens));
-  const s = slots[ci];
-  return s.c.inspect(tokens.length - 1, tokens[tokens.length - 1], target, { ...need(host), table: s.table });
+  const s = cur()[ci];
+  const h = which === "tiny" ? need(tiny).host : need(host);
+  return s.c.inspect(tokens.length - 1, tokens[tokens.length - 1], target, { ...h, table: s.table });
 }
 

@@ -1,7 +1,7 @@
 // One screen (section 5.2): conversation on the left, the tower in the middle, the detail panel on the right.
 // On phones: conversation on top, the tower as a compact strip that expands, details in a bottom sheet.
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
-import { onPieces } from "../state/actions.ts";
+import { backToQwen, onPieces } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { Conversation } from "./Conversation.tsx";
@@ -24,6 +24,7 @@ export function App() {
   const sheet = useStore((s) => s.sheet);
   const announce = useStore((s) => s.announce);
   const busy = useStore((s) => s.busy);
+  const model = useStore((s) => s.model);
   const phone = usePhone();
   const [, setTick] = useState(0);
   const [towerOpen, setTowerOpen] = useState(false);
@@ -34,9 +35,10 @@ export function App() {
       <a className="skip" href="#conversation">{S.skip}</a>
       <header className="top">
         <span className="name">{S.title}</span>
-        <span className="orient">{S.orientation}</span>
+        <span className="orient">{model.id === "tiny" ? S.tinyOrientation : S.orientation}</span>
         <span className={`mode ${mode}`} title={mode === "live" ? S.liveHint : S.replayHint}>{mode === "live" ? S.live : S.replay}</span>
         <div className="top-actions">
+          {model.id === "tiny" && <button type="button" className="btn" onClick={() => void backToQwen()}>{S.tiny.back}</button>}
           <button type="button" className="btn" onClick={() => store.set({ pathOpen: true })}>{S.howItWorks}</button>
         </div>
       </header>

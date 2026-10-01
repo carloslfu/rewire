@@ -1,0 +1,17 @@
+# Cloudflare Pages response headers (section 6.6): scripts only from this site, no third-party embeds.
+# The model files come from Hugging Face, which redirects downloads to its storage hosts.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/recordings/*
+  Cache-Control: public, max-age=3600
+
+/texts/*
+  Cache-Control: public, max-age=86400

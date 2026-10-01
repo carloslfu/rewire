@@ -1,0 +1,28 @@
+Rewire: notices for the model, libraries and texts it uses
+==========================================================
+
+Rewire's own code is under the MIT License (see the repository's LICENSE file).
+
+Qwen3-0.6B (model weights and tokenizer)
+  Source: https://huggingface.co/Qwen/Qwen3-0.6B (commit c1899de289a04d12100db370d81485cdf75e47ca)
+  License: Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0
+  Notice: Quantized to 4 bits from Qwen/Qwen3-0.6B; not made or endorsed by the Qwen team.
+  The converted weights and the tokenizer files carry Qwen's LICENSE and this notice.
+
+Tokenizers.js (@huggingface/tokenizers 0.2.0), the tokenizer library inside Transformers.js
+  License: Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0
+
+jax-js (@jax-js/jax 0.1.25), which trains the tiny model
+  Copyright (c) Eric Zhang. License: MIT
+
+React and React DOM 19
+  Copyright (c) Meta Platforms, Inc. and affiliates. License: MIT
+
+Built-in training texts
+  Alice's Adventures in Wonderland (Lewis Carroll), Pride and Prejudice (Jane Austen) and Shakespeare's
+  Sonnets, from Project Gutenberg eBooks #11, #1342 and #1041. Public domain in the United States; the
+  Project Gutenberg headers and license text were removed, as its license allows.
+
+Lessons, not code
+  Transformer Explainer (Georgia Tech Polo Club) showed that a guided path and flow drawings help people
+  most; Rewire learned from it and does not use its code.

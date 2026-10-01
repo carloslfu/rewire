@@ -8,7 +8,7 @@ import { fmt, pct, signed } from "./color.ts";
 import { multOf, withMult } from "./describe.ts";
 import { Knob } from "./Knob.tsx";
 import { Strip } from "./Strip.tsx";
-import { type Chosen, chosen, headIndex, memIndex } from "./word.ts";
+import { type Chosen, chosen, HEADS, headIndex, memIndex } from "./word.ts";
 
 export function Detail() {
   const focus = useStore((s) => s.focus);
@@ -65,10 +65,12 @@ const wordText = (id: number) => {
 // ------------------------------------------------------------------ word
 
 function WordPanel({ c }: { c: Chosen | null }) {
+  const model = useStore((s) => s.model);
+  const D = S.def(model);
   const temperature = useStore((s) => s.temperature);
   if (!c) return (
     <>
-      <Head kicker={S.terms.token[0]} title={S.terms.token[0]} std={S.terms.token[1]} def={S.def.token} />
+      <Head kicker={S.terms.token[0]} title={S.terms.token[0]} std={S.terms.token[1]} def={D.token} />
       <NoWord />
     </>
   );
@@ -77,7 +79,7 @@ function WordPanel({ c }: { c: Chosen | null }) {
   const canPick = c.reply.done && !c.reply.stale;
   return (
     <>
-      <Head kicker={`${S.terms.token[0]} · ${S.terms.token[1]}`} title={`"${wordText(t.id)}"`} def={S.def.word} code={`id ${t.id}`} />
+      <Head kicker={model.id === "tiny" ? "Letter" : `${S.terms.token[0]} · ${S.terms.token[1]}`} title={`"${wordText(t.id)}"`} def={D.word} code={`id ${t.id}`} />
       <section>
         <div className="kicker">{S.numbers}</div>
         <dl className="kv">
@@ -190,6 +192,8 @@ function SwapControl({ id }: { id: number }) {
 // ------------------------------------------------------------------ head
 
 function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: number }) {
+  const model = useStore((s) => s.model);
+  const D = S.def(model);
   const chips = useStore((s) => s.chips);
   const view = useStore((s) => s.view);
   const { detail, loading } = useDetail(c);
@@ -202,14 +206,14 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
   const diff = c?.forced ? c.forced.pushes[headIndex(floor, head)] - (push ?? 0) : undefined;
   const mult = multOf(chips, "head", floor, head);
   const probs = detail?.get(`f${floor}.probs`);
-  const n = probs ? probs.length / 16 : 0;
+  const n = probs ? probs.length / HEADS : 0;
   const row = probs ? probs.subarray(head * n, head * n + n) : null;
   const top = row ? [...row].map((p, j) => ({ p, j })).sort((a, b) => b.p - a.p).slice(0, 8) : [];
   const ctx = c ? contextTokens(c) : [];
   return (
     <>
       <Head kicker={`${S.terms.head[0]} · ${S.terms.head[1]}`} title={`${S.headN(head + 1)} on ${S.floorN(floor + 1).toLowerCase()}`}
-        def={S.def.head} code={S.zeroBased(floor) + `, head ${head}`} />
+        def={D.head} code={S.zeroBased(floor) + `, head ${head}`} />
       {at && <p className="note" style={{ marginTop: -10, marginBottom: 14 }}>This is {at}, {S.foundByTesting}.</p>}
       <section>
         <div className="kicker">{S.numbers}</div>
@@ -219,7 +223,7 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
               <dt>Push</dt><dd className="num">{signed(push!)} toward "{wordText(c.tok.id)}"</dd>
               {diff !== undefined && <><dt>{view === "difference" ? "Difference" : "Changed minus normal"}</dt><dd className="num changed-text">{signed(diff)}</dd></>}
             </dl>
-            <p className="note" style={{ marginTop: 6 }}>{S.def.push}</p>
+            <p className="note" style={{ marginTop: 6 }}>{D.push}</p>
             <h3 style={{ marginTop: 12 }}>{S.attentionLines}</h3>
             {loading && <p className="note">{S.inspecting}</p>}
             {!loading && !row && <p className="note">{S.noDetail}</p>}
@@ -264,6 +268,8 @@ function contextTokens(c: Chosen): number[] {
 // ------------------------------------------------------------------ memory block
 
 function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
+  const model = useStore((s) => s.model);
+  const D = S.def(model);
   const chips = useStore((s) => s.chips);
   const { detail, loading } = useDetail(c);
   const push = c?.tok.pushes[memIndex(floor)];
@@ -275,7 +281,7 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
   return (
     <>
       <Head kicker={`${S.terms.mlp[0]} · ${S.terms.mlp[1]}`} title={`${S.memoryBlock} on ${S.floorN(floor + 1).toLowerCase()}`}
-        def={S.def.memory} code={S.zeroBased(floor)} />
+        def={D.memory} code={S.zeroBased(floor)} />
       <section>
         <div className="kicker">{S.numbers}</div>
         {!c ? <NoWord /> : (
@@ -302,7 +308,7 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
                 </div>
               </>
             )}
-            {act && <div style={{ marginTop: 10 }}><Strip values={act} label="All 3,072 units" /></div>}
+            {act && <div style={{ marginTop: 10 }}><Strip values={act} label={`All ${act.length.toLocaleString("en-US")} units`} /></div>}
           </>
         )}
       </section>
@@ -327,32 +333,34 @@ function Unit({ j, v, a }: { j: number; v?: number; a?: number }) {
 // ------------------------------------------------------------------ floor
 
 function FloorPanel({ c, floor }: { c: Chosen | null; floor: number }) {
+  const model = useStore((s) => s.model);
+  const D = S.def(model);
   const chips = useStore((s) => s.chips);
   const { detail, loading } = useDetail(c);
   const mult = multOf(chips, "floor", floor);
   const g = (k: string) => detail?.get(`f${floor}.${k}`);
-  const n = g("probs") ? g("probs")!.length / 16 : 0;
+  const n = g("probs") ? g("probs")!.length / HEADS : 0;
   const steps: { t: string; f: string; k: string; rows?: number; names?: (r: number, c: number) => string }[] = [
     { t: "The stream entering the floor", f: "x", k: "x" },
     { t: "Normalize the stream", f: "h = x / rms(x) · w_in", k: "h" },
-    { t: "Make queries (16 heads)", f: "q = W_q h", k: "q_raw", rows: 16, names: (r, i) => `head ${r + 1}, ${i + 1}` },
-    { t: "Make keys and values (8 shared)", f: "k = W_k h, v = W_v h", k: "k_raw", rows: 8, names: (r, i) => `key ${r + 1}, ${i + 1}` },
-    { t: "Normalize each head's queries and keys", f: "q ← q / rms(q) · w_q", k: "q_n", rows: 16, names: (r, i) => `head ${r + 1}, ${i + 1}` },
-    { t: "Rotate them by position", f: "q ← q·cos θp + rot(q)·sin θp", k: "q", rows: 16, names: (r, i) => `head ${r + 1}, ${i + 1}` },
-    { t: "Score each earlier word, divided by √128", f: "s_j = q · k_j / √128", k: "scores", rows: 16, names: (r, i) => `head ${r + 1}, position ${i}` },
-    { t: "Turn the scores into attention", f: "a_j = softmax(s)_j", k: "probs", rows: 16, names: (r, i) => `head ${r + 1}, position ${i}` },
-    { t: "Mix the values", f: "o_h = Σ a_j v_j", k: "att", rows: 16, names: (r, i) => `head ${r + 1}, ${i + 1}` },
+    { t: `Make queries (${HEADS} heads)`, f: "q = W_q h", k: "q_raw", rows: HEADS, names: (r, i) => `head ${r + 1}, ${i + 1}` },
+    { t: `Make keys and values (${HEADS / 2} shared)`, f: "k = W_k h, v = W_v h", k: "k_raw", rows: HEADS / 2, names: (r, i) => `key ${r + 1}, ${i + 1}` },
+    { t: "Normalize each head's queries and keys", f: "q ← q / rms(q) · w_q", k: "q_n", rows: HEADS, names: (r, i) => `head ${r + 1}, ${i + 1}` },
+    { t: "Rotate them by position", f: "q ← q·cos θp + rot(q)·sin θp", k: "q", rows: HEADS, names: (r, i) => `head ${r + 1}, ${i + 1}` },
+    { t: "Score each earlier word, divided by √128", f: "s_j = q · k_j / √128", k: "scores", rows: HEADS, names: (r, i) => `head ${r + 1}, position ${i}` },
+    { t: "Turn the scores into attention", f: "a_j = softmax(s)_j", k: "probs", rows: HEADS, names: (r, i) => `head ${r + 1}, position ${i}` },
+    { t: "Mix the values", f: "o_h = Σ a_j v_j", k: "att", rows: HEADS, names: (r, i) => `head ${r + 1}, ${i + 1}` },
     { t: "Combine the heads (output projection)", f: "o = W_o [o_1 … o_16]", k: "o" },
     { t: "Add the result to the stream", f: "middle = x + o", k: "mid" },
     { t: "Memory block: normalize", f: "h₂ = middle / rms(middle) · w_post", k: "h2" },
-    { t: "Project up to the gate (3,072)", f: "g = W_gate h₂", k: "gate" },
-    { t: "Project up again (3,072)", f: "u = W_up h₂", k: "up" },
+    { t: `Project up to the gate (${model.units.toLocaleString("en-US")})`, f: "g = W_gate h₂", k: "gate" },
+    { t: `Project up again (${model.units.toLocaleString("en-US")})`, f: "u = W_up h₂", k: "up" },
     { t: "Pass the gate through SiLU and multiply", f: "a = silu(g) · u", k: "act" },
-    { t: "Project back down to 1,024", f: "m = W_down a", k: "mem" },
+    { t: `Project back down to ${model.width.toLocaleString("en-US")}`, f: "m = W_down a", k: "mem" },
   ];
   return (
     <>
-      <Head kicker={`${S.terms.layer[0]} · ${S.terms.layer[1]}`} title={S.floorN(floor + 1)} def={S.def.floor} code={S.zeroBased(floor)} />
+      <Head kicker={`${S.terms.layer[0]} · ${S.terms.layer[1]}`} title={S.floorN(floor + 1)} def={D.floor} code={S.zeroBased(floor)} />
       <section>
         <div className="kicker">{S.numbers}</div>
         {!c ? <NoWord /> : loading ? <p className="note">{S.inspecting}</p> : !detail ? <p className="note">{S.noDetail}</p> : (
@@ -364,8 +372,8 @@ function FloorPanel({ c, floor }: { c: Chosen | null; floor: number }) {
                 <li key={s.k}>
                   <div>{s.t}</div>
                   <div className="formula">{s.f}</div>
-                  <Strip values={v} rows={s.k === "scores" || s.k === "probs" ? 16 : s.rows} label={s.t} names={s.names}
-                    height={s.k === "scores" || s.k === "probs" ? Math.min(160, 16 * 6) : undefined} />
+                  <Strip values={v} rows={s.rows} label={s.t} names={s.names}
+                    height={s.k === "scores" || s.k === "probs" ? Math.min(160, HEADS * 6) : undefined} />
                   {(s.k === "probs") && <p className="note">{n} positions; each row is one head.</p>}
                 </li>
               );
@@ -385,6 +393,8 @@ function FloorPanel({ c, floor }: { c: Chosen | null; floor: number }) {
 }
 
 function ConceptControl({ floor }: { floor: number }) {
+  const model = useStore((s) => s.model);
+  const D = S.def(model);
   const chips = useStore((s) => s.chips);
   const concepts = pathData()?.concepts ?? [];
   if (!concepts.length) return null;
@@ -392,7 +402,7 @@ function ConceptControl({ floor }: { floor: number }) {
   return (
     <div style={{ marginTop: 14 }}>
       <h3>{S.pushConcept}</h3>
-      <p className="note">{S.def.concept}</p>
+      <p className="note">{D.concept}</p>
       {concepts.map((k) => {
         const on = cur && cur.id === k.id && cur.floor === floor ? cur.strength : 0;
         const estimate = k.best_floor !== floor;
@@ -413,6 +423,8 @@ function ConceptControl({ floor }: { floor: number }) {
 // ------------------------------------------------------------------ words in and out
 
 function WordsInPanel({ c, position }: { c: Chosen | null; position?: number }) {
+  const model = useStore((s) => s.model);
+  const D = S.def(model);
   const chips = useStore((s) => s.chips);
   const turns = useStore((s) => s.turns);
   const mode = useStore((s) => s.mode);
@@ -444,14 +456,14 @@ function WordsInPanel({ c, position }: { c: Chosen | null; position?: number }) 
   return (
     <>
       <Head kicker={`${S.terms.embedding[0]} · ${S.terms.embedding[1]}`} title={id !== undefined ? `"${wordText(id)}"` : S.wordsIn}
-        def={S.def.dictionary} code={id !== undefined ? `id ${id}${pos !== undefined ? `, position ${pos}` : ""}` : undefined} />
+        def={D.dictionary} code={id !== undefined ? `id ${id}${pos !== undefined ? `, position ${pos}` : ""}` : undefined} />
       <section>
         <div className="kicker">{S.numbers}</div>
         {id === undefined ? <NoWord /> : (
           <>
             {values ? <Strip values={values} label={S.dictionaryRow(id)} /> : <p className="note">{S.noDetail}</p>}
             {c && position === undefined && <p className="note">Its own direct push toward "{wordText(c.tok.id)}": <span className="num">{signed(c.tok.pushes[0])}</span></p>}
-            <p className="note" style={{ marginTop: 6 }}>{S.def.position}</p>
+            <p className="note" style={{ marginTop: 6 }}>{D.position}</p>
           </>
         )}
       </section>
@@ -473,6 +485,8 @@ function WordsInPanel({ c, position }: { c: Chosen | null; position?: number }) 
 }
 
 function WordsOutPanel({ c }: { c: Chosen | null }) {
+  const model = useStore((s) => s.model);
+  const D = S.def(model);
   const temperature = useStore((s) => s.temperature);
   const mode = useStore((s) => s.mode);
   const { detail } = useDetail(c);
@@ -480,7 +494,7 @@ function WordsOutPanel({ c }: { c: Chosen | null }) {
   const ts = detail?.get("final.top_scores"), ti = detail?.get("final.top_ids");
   return (
     <>
-      <Head kicker={S.wordsOut} title={S.wordsOut} def={S.def.out} />
+      <Head kicker={S.wordsOut} title={S.wordsOut} def={D.out} />
       <section>
         <div className="kicker">{S.numbers}</div>
         {!c ? <NoWord /> : (
@@ -489,7 +503,7 @@ function WordsOutPanel({ c }: { c: Chosen | null }) {
             {xn && <><h3>After the final normalization</h3><Strip values={xn} label="normalized" /></>}
             {ts && ti && (
               <>
-                <h3 style={{ marginTop: 8 }}>Highest scores (of 151,669)</h3>
+                <h3 style={{ marginTop: 8 }}>Highest scores (of {model.vocab.toLocaleString("en-US")})</h3>
                 <table className="cands"><tbody>
                   {[...ts].slice(0, 10).map((s, i) => (
                     <tr key={i}><td>{wordText(ti[i])}</td><td className="p num">{fmt(s, 2)}</td></tr>
@@ -508,7 +522,7 @@ function WordsOutPanel({ c }: { c: Chosen | null }) {
         <label htmlFor="temp" className="small">{S.temperatureLabel} <span className="num">{temperature.toFixed(1)}</span></label>
         <input id="temp" type="range" min={0.1} max={2} step={0.1} value={temperature} disabled={mode !== "live"} style={{ width: "100%" }}
           onChange={(e) => store.set({ temperature: Number(e.target.value) })} />
-        <p className="note">{S.def.temperature} {S.temperatureNote}</p>
+        <p className="note">{D.temperature} {S.temperatureNote}</p>
       </section>
     </>
   );
@@ -517,6 +531,8 @@ function WordsOutPanel({ c }: { c: Chosen | null }) {
 // ------------------------------------------------------------------ bits
 
 function BitsPanel() {
+  const model = useStore((s) => s.model);
+  const D = S.def(model);
   const chips = useStore((s) => s.chips);
   const step = useStore((s) => s.step);
   const bits = chips.bits ?? 4;
@@ -526,7 +542,7 @@ function BitsPanel() {
   };
   return (
     <>
-      <Head kicker="Weights" title={`${bits} bits`} def={S.def.bits} />
+      <Head kicker="Weights" title={`${bits} bits`} def={D.bits} />
       <section>
         <div className="kicker">{S.control}</div>
         <div className="seg change" role="radiogroup" aria-label="Bits per weight">

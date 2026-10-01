@@ -148,6 +148,7 @@ export function Composer() {
   const mode = useStore((s) => s.mode);
   const busy = useStore((s) => s.busy);
   const step = useStore((s) => s.step);
+  const model = useStore((s) => s.model);
   const [text, setText] = useState("");
   const st = stepData(step);
   if (mode !== "live") {
@@ -162,11 +163,19 @@ export function Composer() {
       </div>
     );
   }
+  const suggest = model.id === "qwen" && st ? COPY[st.slug]?.suggestions ?? [] : [];
   return (
-    <form className="composer" onSubmit={(e) => { e.preventDefault(); const t = text; setText(""); void send(t); }}>
-      <input id="composer" value={text} onChange={(e) => setText(e.target.value)} placeholder={S.placeholderLive} aria-label="Message" disabled={busy} autoComplete="off" />
-      <button type="submit" className="btn primary" disabled={busy || !text.trim()}>{S.send}</button>
-    </form>
+    <div>
+      <form className="composer" onSubmit={(e) => { e.preventDefault(); const t = text; setText(""); void send(t); }}>
+        <input id="composer" value={text} onChange={(e) => setText(e.target.value)} placeholder={model.id === "tiny" ? S.placeholderTiny : S.placeholderLive} aria-label="Message" disabled={busy} autoComplete="off" />
+        <button type="submit" className="btn primary" disabled={busy || !text.trim()}>{S.send}</button>
+      </form>
+      {suggest.length > 0 && (
+        <div className="suggest">
+          {suggest.map((q) => <button key={q} type="button" className="btn" disabled={busy} onClick={() => void send(q)}>{q}</button>)}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -179,6 +188,8 @@ async function playAlternative(message: string) {
 
 export function DeviceBar() {
   const d = useStore((s) => s.device);
+  const bench = useStore((s) => s.bench);
+  if (bench) return <pre className="devicebar" id="bench" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(bench, null, 1)}</pre>;
   const mb = (n: number) => Math.round(n / 1e6);
   switch (d.kind) {
     case "checking": return <div className="devicebar" role="status">{S.checking}</div>;
