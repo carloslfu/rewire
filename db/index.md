@@ -1,14 +1,14 @@
 ---
 type: index
 scope: root
-updated: 2026-10-01T20:42:48.098230Z
+updated: 2026-10-01T20:46:22.833497Z
 ---
 
 # Knowledge base index
 
-## Records (34)
+## Records (35)
 - [[records/decisions/index|Decisions]] (4) — what was decided, on which evidence, and what would reverse it
 - [[records/devices/index|Devices]] (1) — the devices and browsers measurements ran on
 - [[records/measurements/index|Measurements]] (9) — what was measured, how, on which device, and whether it still stands
 - [[records/plan/index|Plan]] (10) — the state of each build phase and its exit check
-- [[records/run/index|Run]] (10) — raw tool output captured before a number was transcribed, by date
+- [[records/run/index|Run]] (11) — raw tool output captured before a number was transcribed, by date

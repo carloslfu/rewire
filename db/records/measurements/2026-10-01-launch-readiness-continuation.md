@@ -2,7 +2,7 @@
 type: measurement
 id: 01m3wjj5wwn11wd40ks4kkmx4g
 created: 2026-10-01T20:30:14.940644+00:00
-updated: 2026-10-01T20:42:48.098230+00:00
+updated: 2026-10-01T20:46:22.833497+00:00
 summary: 'Launch-readiness continuation: downloads, recovery and phone layout'
 date: 2026-10-01
 devices: '[[records/devices/dev-mac-m5-pro]]'
@@ -15,7 +15,7 @@ status: measured
 
 Evidence: [[records/run/2026/10/2026-10-01-continuation-checks]], [[records/run/2026/10/2026-10-01-release-preflight]], [[records/run/2026/10/2026-10-01-browser-fallbacks]] and [[records/run/2026/10/2026-10-01-phone-layout]].
 
-The current regression suite passes: 25 engine tests, 5 tiny-model tests and 16 app tests. The final production build and TypeScript checks pass. Nine golden engine cases remain within their existing tolerances; this continuation changes lifecycle and loading, not inference math.
+The current regression suite passes: 25 engine tests, 5 tiny-model tests and 17 app tests. The final production build and TypeScript checks pass. Nine golden engine cases remain within their existing tolerances; this continuation changes lifecycle and loading, not inference math.
 
 The release preflight checks all 23 chunks (373,100,544 weight bytes), tokenizer JSON, licenses and all ten path recordings against manifest `88f069237c4d548d41953cbd7f9e8a07b73abd94a104a433154939c4d5f81f61`. Total model download including tokenizers is 384,532,930 bytes. There are eleven path steps; the final one trains the tiny model.
 
@@ -32,3 +32,7 @@ Live tiny-model training and inference were also exercised under CSP. This is a 
 ## Additional Mac browser smoke observations
 
 [[records/run/2026/10/2026-10-01-mac-browser-smoke]] captures Safari reaching Live and generating the changed Eiffel Tower answer. The captured turn was still busy, so its terminal completion, parity and timing are not qualified. Firefox selected Replay through its speed gate in this loaded visit; a full Firefox interaction or stable performance qualification was not completed. These observations do not close the device matrix.
+
+## Explicit retry with a trained model
+
+[[records/run/2026/10/2026-10-01-trained-model-retry]] adds the failure-path regression: after automatic GPU recovery fails, the explicit retry restores the trained weights and active tiny model as well as the chat model. The final app tests and build pass.

@@ -79,3 +79,19 @@ it("does not loop if the replacement GPU is lost again", async () => {
   first.emit({ t: "lost" }); MockWorker.workers[1].emit({ t: "lost" });
   await flush(); expect(failure).toHaveBeenCalledOnce(); expect(MockWorker.workers).toHaveLength(2);
 });
+
+it("restores the trained model after an explicit retry of failed recovery", async () => {
+  const client = new EngineClient(), first = MockWorker.workers[0];
+  const training = client.loadTiny(new Float32Array([1, 2]), { ...TINY, vocab: 97 });
+  await flush(); first.finish("tiny"); await training;
+  const use = client.use("tiny"); await flush(); first.finish("use"); await use;
+  first.emit({ t: "lost" });
+  const broken = MockWorker.workers[1];
+  broken.emit({ t: "error", id: broken.messages[0].id, message: "No adapter" }); await flush();
+  const retry = client.load("https://weights/", false); await flush();
+  const final = MockWorker.workers[2]; final.finish("load", { manifestHash: "expected", contextCap: 1024, stored: true });
+  await flush(); expect(final.messages.some((m) => m.t === "tiny")).toBe(true);
+  final.finish("tiny"); await flush();
+  expect(final.messages.find((m) => m.t === "use")).toMatchObject({ model: "tiny" });
+  final.finish("use"); await expect(retry).resolves.toHaveProperty("stored", true);
+});

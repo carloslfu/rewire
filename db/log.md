@@ -76,3 +76,6 @@ Keep tiny training as a smoke observation rather than introducing an uncontrolle
 ## [2026-10-01 20:42] capture | records/run/2026/10/2026-10-01-mac-browser-smoke
 Preserved filtered native browser observations without claiming a complete Safari turn or a stable Firefox speed qualification.
 
+## [2026-10-01 20:46] capture | records/run/2026/10/2026-10-01-trained-model-retry
+Captured the explicit trained-model retry regression and final app suite/build.
+

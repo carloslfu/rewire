@@ -126,9 +126,14 @@ export class EngineClient {
   }
   async load(base: string, phone: boolean, expectedHash?: string): Promise<{ manifestHash: string; contextCap: number; stored: boolean }> {
     await this.recovery;
-    if (this.failed) { this.w.terminate(); this.startWorker(); this.failed = false; }
+    const replaced = this.failed;
+    if (replaced) { this.w.terminate(); this.startWorker(); this.failed = false; }
     this.loaded = { base, phone, expectedHash };
-    return this.call({ t: "load", ...this.loaded });
+    const info = await this.call<{ manifestHash: string; contextCap: number; stored: boolean }>({ t: "load", ...this.loaded });
+    if (replaced && this.trained) await this.call({ t: "tiny", ...this.trained });
+    if (replaced && this.model === "tiny") await this.call({ t: "use", model: "tiny" });
+    this.setVersion(this.version);
+    return info;
   }
   pause(paused: boolean) {
     this.w.postMessage({ t: "pause", id: 0, paused } as ToWorker);
