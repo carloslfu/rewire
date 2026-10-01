@@ -175,6 +175,33 @@ export async function sgdStep(c: TinyConfig, init: Float32Array, x: Int32Array, 
   return { params, grad: gd, loss: lv };
 }
 
+/**
+ * The slow-motion step: plain gradient descent on one example, with the largest of `sizes` that lowers its loss
+ * (a fixed size overshoots once the model is trained and makes the example worse).
+ */
+export async function slowStep(c: TinyConfig, init: Float32Array, x: Int32Array, y: Int32Array, sizes = [0.5, 0.25, 0.1, 0.05, 0.02, 0.01]):
+  Promise<{ params: Float32Array; grad: Float32Array; loss: number; lossAfter: number; lr: number }> {
+  // The view shows each right letter's probability, so the step must raise their average as well as lower the
+  // loss (the loss averages minus-log probabilities, and can fall while easy letters lose a little).
+  const meanRight = async (p: Float32Array) => {
+    const probs = await allProbs(c, p, x);
+    let s = 0;
+    for (let i = 0; i < y.length; i++) s += probs[i * c.vocab + y[i]];
+    return s / y.length;
+  };
+  const at = await sgdStep(c, init, x, y, 0);
+  const meanBefore = await meanRight(init);
+  let best: { params: Float32Array; lossAfter: number; lr: number } | null = null;
+  for (const lr of sizes) {
+    const params = new Float32Array(init.length);
+    for (let i = 0; i < init.length; i++) params[i] = init[i] - lr * at.grad[i];
+    const lossAfter = (await sgdStep(c, params, x, y, 0)).loss;
+    best = { params, lossAfter, lr };
+    if (lossAfter < at.loss && (await meanRight(params)) > meanBefore) break;
+  }
+  return { params: best!.params, grad: at.grad, loss: at.loss, lossAfter: best!.lossAfter, lr: best!.lr };
+}
+
 /** Next-letter probabilities after `ids` (the last position), for samples during training. */
 export async function nextProbs(c: TinyConfig, params: Float32Array, ids: number[]): Promise<Float32Array> {
   const T = ids.length;

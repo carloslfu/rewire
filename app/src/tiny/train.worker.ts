@@ -2,7 +2,7 @@
 // Trains the tiny model with jax-js on WebGPU, off the page's thread (section 4.5).
 import { defaultDevice, init } from "@jax-js/jax";
 import { decode, draw, encode, sampleBatch, VOCAB } from "@rewire/tiny/src/data.ts";
-import { adamTrainer, deviceParams, initParams, sampler, sgdStep, TINY, type TinyConfig, type Trainer } from "@rewire/tiny/src/model.ts";
+import { adamTrainer, deviceParams, initParams, sampler, slowStep, TINY, type TinyConfig, type Trainer } from "@rewire/tiny/src/model.ts";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -10,7 +10,7 @@ export type TinyIn =
   | { t: "start"; text: string; steps: number; batch: number; lr: number; seed: number }
   | { t: "stop" }
   | { t: "sample"; params: Float32Array; prompt: string; length: number; seed: number }
-  | { t: "slow"; params: Float32Array; example: string; lr: number };
+  | { t: "slow"; params: Float32Array; example: string };
 
 export type TinyOut =
   | { t: "ready"; device: string }
@@ -19,7 +19,7 @@ export type TinyOut =
   | { t: "sample"; step: number; text: string }
   | { t: "done"; params: Float32Array; steps: number; seconds: number }
   | { t: "sampled"; text: string }
-  | { t: "slow"; before: number[]; after: number[]; loss: number; lossAfter: number; params: Float32Array; grad: Float32Array;
+  | { t: "slow"; before: number[]; after: number[]; loss: number; lossAfter: number; lr: number; params: Float32Array; grad: Float32Array;
       probs: number[]; target: number; position: number }
   | { t: "error"; message: string };
 
@@ -91,7 +91,7 @@ self.onmessage = async (e: MessageEvent<TinyIn>) => {
       // one step of plain gradient descent on one example, and the probability of each right next letter before and after
       const ids = encode(m.example).slice(0, cfg.context + 1);
       const x = ids.slice(0, -1), y = ids.slice(1);
-      const res = await sgdStep({ ...cfg, context: x.length }, m.params, x, y, m.lr);
+      const res = await slowStep({ ...cfg, context: x.length }, m.params, x, y);
       const V = cfg.vocab;
       S ??= sampler(cfg);
       const P0 = deviceParams(m.params), P1 = deviceParams(res.params);
@@ -100,8 +100,7 @@ self.onmessage = async (e: MessageEvent<TinyIn>) => {
       const before = Array.from(y, (t, i) => pb[i * V + t]), after = Array.from(y, (t, i) => pa[i * V + t]);
       const position = x.length - 1;
       const last = pb.slice(position * V, position * V + V);
-      const after2 = await sgdStep({ ...cfg, context: x.length }, res.params, x, y, 0);
-      post({ t: "slow", before, after, loss: res.loss, lossAfter: after2.loss, params: res.params, grad: res.grad,
+      post({ t: "slow", before, after, loss: res.loss, lossAfter: res.lossAfter, lr: res.lr, params: res.params, grad: res.grad,
         probs: Array.from(last), target: y[position], position }, [res.params.buffer, res.grad.buffer]);
     }
   } catch (err) {

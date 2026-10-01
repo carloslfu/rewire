@@ -181,7 +181,7 @@ function SlowMotion({ params, corpus, worker }: { params: Float32Array; corpus: 
     wk.onmessage = (e: MessageEvent<TinyOut>) => {
       if (e.data.t === "slow") { setRes(e.data); wk.onmessage = prev; } else prev?.call(wk, e);
     };
-    wk.postMessage({ t: "slow", params: params.slice(), example, lr: 0.5 } satisfies TinyIn);
+    wk.postMessage({ t: "slow", params: params.slice(), example } satisfies TinyIn);
   };
   const ids = encode(example);
   const tensors = useMemo(() => layout({ ...TINY, vocab: VOCAB }).tensors, []);
@@ -190,7 +190,7 @@ function SlowMotion({ params, corpus, worker }: { params: Float32Array; corpus: 
   return (
     <section style={{ marginTop: 18 }}>
       <h3>{S.tiny.slowMotion}</h3>
-      <p className="note">{S.tiny.slowIntro} This view uses plain gradient descent, because Adam moves nearly every weight by the same amount on its first step and hides the pattern.</p>
+      <p className="note">{S.tiny.slowIntro} This view uses plain gradient descent, because Adam moves nearly every weight by the same amount on its first step and hides the pattern. The step size is the largest of a few tries that lowers this example's loss and raises the right letters' average probability.</p>
       <div className="row"><button type="button" className="btn" onClick={run}>Run one step on this example</button></div>
       <p className="sample">{example}</p>
       {res && (
@@ -202,7 +202,7 @@ function SlowMotion({ params, corpus, worker }: { params: Float32Array; corpus: 
           <button type="button" className="linkish small" aria-expanded={math} onClick={() => setMath(!math)}>{S.tiny.showMath}</button>
           {math && (
             <div style={{ marginTop: 8 }}>
-              <p className="note">The loss is minus the logarithm of the probability of each right letter, averaged: <span className="num">{res.loss.toFixed(3)}</span>.</p>
+              <p className="note">The loss is minus the logarithm of the probability of each right letter, averaged: <span className="num">{res.loss.toFixed(3)}</span>. Each weight then moves by its gradient times the step size, <span className="num">{res.lr}</span>, against the gradient.</p>
               <h3 style={{ marginTop: 8 }}>The error at the output, last letter</h3>
               <p className="note">Probabilities minus the right answer (1 for "{decode([res.target])}", 0 elsewhere). Training pushes the scores against this error.</p>
               <table className="cands"><tbody>
@@ -214,9 +214,9 @@ function SlowMotion({ params, corpus, worker }: { params: Float32Array; corpus: 
                 ))}
               </tbody></table>
               <h3 style={{ marginTop: 8 }}>The update to the dictionary ({VOCAB} letters × 128 numbers)</h3>
-              <Strip values={res.grad.slice(dictT.offset, dictT.offset + dictT.size).map((g) => -0.5 * g)} rows={VOCAB} label="update to the dictionary" height={160} />
+              <Strip values={res.grad.slice(dictT.offset, dictT.offset + dictT.size).map((g) => -res.lr * g)} rows={VOCAB} label="update to the dictionary" height={160} />
               <h3 style={{ marginTop: 8 }}>The update to floor 4's memory block (down projection)</h3>
-              <Strip values={res.grad.slice(downT.offset, downT.offset + downT.size).map((g) => -0.5 * g)} rows={128} label="update to the down projection" height={160} />
+              <Strip values={res.grad.slice(downT.offset, downT.offset + downT.size).map((g) => -res.lr * g)} rows={128} label="update to the down projection" height={160} />
             </div>
           )}
         </>

@@ -187,8 +187,8 @@ export const S = {
   tiny: {
     title: "Teach a tiny model your writing",
     intro: "A model with the same design as Qwen3-0.6B, about 750 times smaller, learns to imitate a text in front of you. It reads letters instead of word pieces.",
-    paste: "Paste some of your writing (it stays on this device)",
-    builtIn: "Or pick a built-in text",
+    paste: "Or paste some of your own writing (it stays on this device)",
+    builtIn: "Pick a built-in text",
     teach: "Teach",
     stop: "Stop",
     loss: "Loss",

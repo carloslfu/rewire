@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { init, numpy as np, valueAndGrad } from "@jax-js/jax";
 import { beforeAll, describe, expect, it } from "vitest";
-import { adamTrainer, initParams, layout, loss, ropeTables, TINY, type TinyConfig } from "../src/model.ts";
+import { adamTrainer, deviceParams, initParams, layout, loss, ropeTables, sampler, slowStep, TINY, type TinyConfig } from "../src/model.ts";
 
 const cfg: TinyConfig = { ...TINY, vocab: 40, context: 16 };
 
@@ -43,6 +43,27 @@ describe("tiny model", () => {
     writeFileSync(join(__dirname, "..", "..", "artifacts", "tiny", "grad-case.json"), JSON.stringify({ cfg, params: Array.from(P0), x: Array.from(x), y: Array.from(y),
       loss: lv, grad: gd, layout: layout(cfg).tensors }));
   }, 120_000);
+
+  it("writes a slow-motion case for the 64-bit check", async () => {
+    // exactly what the training worker does for "Show the math": one plain gradient step on one example, then
+    // each right next letter's probability before and after, from the compiled sampler
+    const tr = adamTrainer(cfg, initParams(cfg, 5), { lr: 1e-2, b1: 0.9, b2: 0.99, eps: 1e-8 });
+    for (let i = 0; i < 20; i++) { const { x, y } = batch(i, 8, cfg.context); await tr.step(x, y, 8); }
+    const P0 = await tr.params();
+    tr.dispose();
+    const { x, y } = batch(3, 1, cfg.context);
+    const res = await slowStep(cfg, P0, x, y);
+    const lr = res.lr;
+    const S = sampler(cfg);
+    const D0 = deviceParams(P0), D1 = deviceParams(res.params);
+    const pb = await S.all(D0, x), pa = await S.all(D1, x);
+    D0.dispose(); D1.dispose();
+    const V = cfg.vocab;
+    const before = Array.from(y, (t, i) => pb[i * V + t]), after = Array.from(y, (t, i) => pa[i * V + t]);
+    expect(res.lossAfter).toBeLessThan(res.loss);
+    writeFileSync(join(__dirname, "..", "..", "artifacts", "tiny", "slow-case.json"), JSON.stringify({ cfg, params: Array.from(P0), x: Array.from(x), y: Array.from(y),
+      lr, loss: res.loss, lossAfter: res.lossAfter, before, after, layout: layout(cfg).tensors }));
+  }, 300_000);
 
   it("learns a pattern with Adam", async () => {
     const tr = adamTrainer(cfg, initParams(cfg, 1), { lr: 1e-2, b1: 0.9, b2: 0.99, eps: 1e-8 });
