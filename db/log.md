@@ -34,3 +34,36 @@ Tiny model gradient check, engine parity and WebGPU training speed
 ## [2026-10-01 17:13] update | records/measurements/2026-10-01-tiny-model
 Gradient matches float64, engine agrees with jax-js, noise to words in 16 s
 
+## [2026-10-01 18:01] capture | records/run/2026/10/2026-10-01-phase-0a-curation
+Phase 0A curation, copying-head search and start-marker weight scan
+
+## [2026-10-01 18:01] update | records/measurements/2026-10-01-phase-0a-curation
+All core and optional steps pass their rule on the chosen weights
+
+## [2026-10-01 18:01] decide | records/decisions/2026-10-01-path-step-redesigns
+Step 2 zeroes five weights, step 5 uses made-up words, step 10 judges 2 bits
+
+## [2026-10-01 18:01] update | records/measurements/2026-10-01-phase-2-checks
+Phase 2 checks pass on the development Mac
+
+## [2026-10-01 18:01] update | records/measurements/2026-10-01-dev-mac-speed
+Development Mac speed, memory and device-check accuracy
+
+## [2026-10-01 18:01] decide | records/decisions/2026-10-01-push-tolerance
+Push tolerance from measured float32 push noise
+
+## [2026-10-01 18:01] update | records/measurements/2026-10-01-phase-3-agent-checks
+Throttled connection, keyboard, accessibility tree, targets and copy
+
+## [2026-10-01 18:01] update | records/measurements/2026-10-01-tiny-model
+Slow motion checked against float64; step size fixed
+
+## [2026-10-01 18:01] update | records/plan/05-phase-2
+Phase 2 passed on the development Mac
+
+## [2026-10-01 18:01] update | records/plan/02-phase-0a
+Phase 0A waiting only on recording approval
+
+## [2026-10-01 18:01] update | DB.md
+Declare capture and decide as this store's log kinds (used since setup)
+

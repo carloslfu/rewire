@@ -41,6 +41,10 @@ write credentials, tokens, private hostnames, IP addresses or personal data.
 
 ### Ignored types
 
+### Validation log kinds
+- capture
+- decide
+
 ## Folders
 
 - records/measurements — what was measured, how, on which device, and whether it still stands

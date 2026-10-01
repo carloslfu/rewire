@@ -2,7 +2,7 @@
 type: measurement
 id: 01m3w6ey2d1jz7xyep8v6zqxab
 created: 2026-10-01T16:58:45.709480+00:00
-updated: 2026-10-01T16:58:45.725380+00:00
+updated: 2026-10-01T18:01:10.215542+00:00
 summary: 'Tiny model: gradient matches float64 (relative error 5e-7), engine agrees with jax-js (4e-5), noise to words in 16 s on WebGPU'
 date: 2026-10-01
 devices: '[[records/devices/dev-mac-m5-pro]]'
@@ -24,3 +24,6 @@ The tiny model has Qwen3's design at 4 floors, width 128, 4 query heads of 32 sh
 | Slow motion, one plain gradient step at learning rate 0.5 | Loss on a 48-letter example 1.474 before, 1.038 after | Numbers come from the same functions the gradient check verified |
 
 Not yet measured: training live on a phone (needs Carlos's iPhone 13). A one-step time on a phone also feeds the Phase 0B device rule.
+
+## Slow motion against float64
+The page's slow-motion step (one plain gradient step on one example) is checked by the tiny tests, which run the same slowStep and compiled sampler and write artifacts/tiny/slow-case.json, and by py/tools/tiny_gradcheck.py, which recomputes it in float64: loss within 4e-7, loss after the step within 1e-6, right-letter probabilities within 2e-7 before and 4e-7 after. In the page a fixed step of 0.5 overshot on a trained model (loss 1.316 to 1.309 while the right letters' average probability fell from 53% to 50%), so the step size is now the largest of 0.5, 0.25, 0.1, 0.05, 0.02 and 0.01 that lowers the loss and raises that average; on the same trained model it chose 0.25 (loss 0.605, average 67%).
