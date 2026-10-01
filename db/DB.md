@@ -19,7 +19,7 @@ read this file, then `dbmd log tail 20 --dir db`. Write through `dbmd`
 `dbmd validate --all db`, then `cd db && dbmd log <kind> <object> -m "<note>"`.
 
 **Capture before you transcribe.** A number enters the store as raw tool output
-first: the JSON or log a tool printed, saved under `sources/runs/YYYY/MM/` as a
+first: the JSON or log a tool printed, saved under `records/run/YYYY/MM/` as a
 `run` with the exact command and the device. The `measurement` record links the
 run and states the number, the method and the conditions. A timing taken on a
 loaded machine is kept and marked `discarded: true` with the reason.
@@ -47,7 +47,7 @@ write credentials, tokens, private hostnames, IP addresses or personal data.
 - records/decisions — what was decided, on which evidence, and what would reverse it
 - records/devices — the devices and browsers measurements ran on
 - records/plan — the state of each build phase and its exit check
-- sources/runs — raw tool output captured before a number was transcribed
+- records/run — raw tool output captured before a number was transcribed, by date
 
 ## Schemas
 
@@ -57,7 +57,7 @@ write credentials, tokens, private hostnames, IP addresses or personal data.
 - phase (required, enum: setup, smoke, 0A, 0B, 1, 2, 3, 4, 5, 6)
 - status (required, enum: measured, analysis, superseded, withdrawn)
 - devices (link to records/devices/)
-- runs (link to sources/runs/)
+- runs (link to records/run/)
 - superseded_by (link to records/measurements/)
 - note (string)
 - summary_template: {title}
