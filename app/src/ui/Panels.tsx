@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { applyChips, chipsWith, checkDevice, freshStart, openStep, pauseDownload, replayAlternative, send, setFocus, shippingSteps,
   startDownload, stepAction, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
-import { COPY, type StepData } from "../path/steps.ts";
+import { type StepData, stepCopy } from "../path/steps.ts";
 import { S } from "../strings.ts";
 import { chips as chipDefs, multOf, withMult } from "./describe.ts";
 import { Knob } from "./Knob.tsx";
@@ -17,7 +17,7 @@ export function StepCard() {
   const busy = useStore((s) => s.busy);
   const st = stepData(step);
   if (!st) return null;
-  const copy = COPY[st.slug];
+  const copy = stepCopy(st);
   if (!copy) return null;
   const steps = shippingSteps();
   const i = steps.findIndex((x) => x.n === st.n);
@@ -31,7 +31,7 @@ export function StepCard() {
         <p className="term">{S.terms[copy.term][0]}: <i>{S.terms[copy.term][1]}</i></p>
       )}
       <div className="controls"><StepControlView st={st} disabled={busy} /></div>
-      {tried && <p className="why" role="status">{copy.why(st.facts ?? {})}</p>}
+      {tried && <p className="why" role="status">{copy.why}</p>}
       <div className="nav">
         {prev && <a className="btn quiet" href={`#step-${prev.n}`} onClick={(e) => { e.preventDefault(); void openStep(prev.n); }}>{S.back}</a>}
         {tried && st.control.kind !== "tiny" && (mode === "live" ? (
@@ -47,7 +47,8 @@ export function StepCard() {
 function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) {
   const chips = useStore((s) => s.chips);
   const c = st.control;
-  const copy = COPY[st.slug];
+  const copy = stepCopy(st);
+  if (!copy) return null;
   switch (c.kind) {
     case "swap": {
       const on = (chips.swaps ?? []).some(([a, b]) => (a === c.ids[0] && b === c.ids[1]) || (a === c.ids[1] && b === c.ids[0]));
@@ -95,7 +96,7 @@ function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) 
           <div className="seg change" role="radiogroup" aria-label={`${c.label} strength`}>
             {c.stops.map((v) => (
               <button key={v} type="button" role="radio" data-v={v === 0 ? 1 : v} aria-checked={cur === v} disabled={disabled}
-                onClick={() => void stepAction(v)}>{v === 0 ? "None" : v === -c.stops[c.stops.length - 1] ? "Flip" : String(v)}{v === c.breaking ? " (breaks)" : ""}</button>
+                onClick={() => void stepAction(v)}>{v === 0 ? "None" : v < 0 ? "Flip" : String(v)}{v === c.breaking ? " (breaks)" : ""}</button>
             ))}
           </div>
           <p className="note">"{c.label}" at floor {c.floor + 1}. The breaking line is at {c.breaking}.</p>
@@ -150,10 +151,12 @@ export function Composer() {
   const step = useStore((s) => s.step);
   const model = useStore((s) => s.model);
   const full = useStore((s) => s.full);
+  const tried = useStore((s) => s.stepTried);
   const [text, setText] = useState("");
   const st = stepData(step);
+  // A step's other questions appear once its change has been tried, so the first tap is the step's own control.
   if (mode !== "live") {
-    const alts = st?.alternatives ?? [];
+    const alts = tried ? st?.alternatives ?? [] : [];
     if (!alts.length) return null;
     return (
       <div>
@@ -164,7 +167,7 @@ export function Composer() {
       </div>
     );
   }
-  const suggest = model.id === "qwen" && st ? COPY[st.slug]?.suggestions ?? [] : [];
+  const suggest = model.id === "qwen" && st && tried ? stepCopy(st)?.suggestions ?? [] : [];
   if (full) return (
     <div className="composer" role="status">
       <span className="note" style={{ flex: 1 }}>{S.contextFull}</span>
@@ -248,7 +251,7 @@ export function PathList() {
                 <a href={`#step-${s.n}`} aria-current={s.n === step ? "step" : undefined}
                   onClick={(e) => { e.preventDefault(); void openStep(s.n); }}>
                   <span className="n">{i + 1}</span>
-                  <span>{COPY[s.slug]?.title ?? s.slug}</span>
+                  <span>{stepCopy(s)?.title ?? s.slug}</span>
                 </a>
               </li>
             ))}

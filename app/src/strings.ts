@@ -59,7 +59,8 @@ export const S = {
     b < a ? `Same words, less sure: "${word}" fell from ${a}% to ${b}%.` : `Same words, more sure: "${word}" rose from ${a}% to ${b}%.`,
   sameNumbers: "Same words and nearly the same probabilities: this change barely matters for this reply.",
   underlineNote: "Underlined: words the changed model finds unlikely.",
-  replyWords: "Reply words. Arrow keys move between words; Enter shows what went into one.",
+  reply: "Reply",
+  replyWords: "Arrow keys move between word pieces; Enter shows what went into one.",
   notRecorded: "This change wasn't recorded for this question. It runs live once the model is on this device.",
   contextFull: "This conversation has reached the model's context limit here.",
   freshStart: "Start fresh",
@@ -75,7 +76,7 @@ export const S = {
     hidden: (w: string) => `"${w}" hidden from later words`,
     concept: (c: string, f: number, s: number) => `"${c}" pushed at floor ${f}, strength ${s}`,
     bits: (b: number) => `${b} bits`,
-    zeroed: (f: number) => `one weight on floor ${f} set to zero`,
+    zeroed: (f: number, n: number) => (n === 1 ? `one weight on floor ${f} set to zero` : `${n} weights on floor ${f} set to zero`),
   },
   mult: (m: number) => (m === 0 ? "off" : m === -1 ? "flipped" : m === 1 ? "normal" : `×${m}`),
 

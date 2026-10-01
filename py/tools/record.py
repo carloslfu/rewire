@@ -155,7 +155,8 @@ def rec_step3(R: Rec):
             "control": {"kind": "floors", "floors": [0, mid]}, "facts": {"middle": mid + 1}, "featured": {"side": "normal", "index": 0}}
 
 
-def rec_simple(R: Rec, n: int, name: str, spec_of, control, core=False, facts=None, feature_changed=True):
+def rec_simple(R: Rec, n: int, name: str, spec_of, control, core=False, facts=None, feature_changed=True, extras=None):
+    """extras: (label, spec_of) pairs also recorded for the message and its alternatives (step 5's random heads)."""
     res = R.cur_json(name)
     if not res or not res["passes"]:
         return None
@@ -168,10 +169,14 @@ def rec_simple(R: Rec, n: int, name: str, spec_of, control, core=False, facts=No
     R.feature(rw, f"step-{n}", nrun, prompt, nrep.tokens, 0, {})
     if feature_changed:
         R.feature(rw, f"step-{n}", crun, prompt, crep.tokens, 0, spec)
+    for label, extra_of in extras or []:
+        R.run(rw, label, msg, extra_of(res), seed, normal=nrep.tokens)
     for a in alts(res, 2):
         s = seeded(res["per_prompt"], a)
         n2 = R.run(rw, f"normal:{a}", a, {}, s)[1]
         R.run(rw, f"changed:{a}", a, spec, s, normal=n2.tokens)
+        for label, extra_of in extras or []:
+            R.run(rw, f"{label}:{a}", a, extra_of(res), s, normal=n2.tokens)
     print(f"  step-{n}", rw.write(APP / f"step-{n}.rwr"), "bytes", flush=True)
     return {"n": n, "slug": f"step-{n}", "core": core, "recording": f"step-{n}.rwr", "message": msg, "alternatives": alts(res, 2),
             "control": control(res), "facts": facts(res) if facts else {}, "featured": {"side": "normal", "index": 0}}
@@ -185,7 +190,7 @@ def rec_step6(R: Rec):
     msg = res["best"]
     seed = seeded(res["per_prompt"], msg)
     fl, work, brk = res["floor"], res["working"], res["breaking"]
-    stops = sorted({round(-work, 2), round(work / 2, 2), round(work, 2), round(brk, 2)})
+    stops = sorted({round(-work, 2), round(res.get("blend", work / 2), 2), round(work, 2), round(brk, 2)})
     nrun, nrep, prompt = R.run(rw, "normal", msg, {}, seed)
     for st in stops:
         spec = {"concept": {"id": "ocean", "floor": fl, "strength": st}}
@@ -309,13 +314,16 @@ def main():
     R = Rec(wdir)
     steps = []
     jobs = [("step-1", lambda: rec_step1(R)), ("step-2", lambda: rec_simple(
-        R, 2, "step2", lambda r: {"zeroed": [r["weight"]]}, lambda r: {"kind": "zeroed", "weight": r["weight"]})),
+        R, 2, "step2", lambda r: {"zeroed": r["weights"]}, lambda r: {"kind": "zeroed", "weights": r["weights"]},
+        facts=lambda r: {"k": r["k"], "floor": r["floor"] + 1, "value": round(r["value"]), "left": round(r["left"]),
+                         "typical": round(r["typical"]), "ratio": round(r["ratio"])})),
         ("step-3", lambda: rec_step3(R)),
         ("step-4", lambda: rec_simple(R, 4, "step4", lambda r: {"hidden": [{"key": 0, "from": r["chosen"]}]},
                                       lambda r: {"kind": "hide", "key": 0, "from": r["chosen"]})),
         ("step-5", lambda: rec_simple(R, 5, "step5", lambda r: {"heads": [{"floor": L, "head": h, "mult": 0} for L, h in r["heads"]]},
                                       lambda r: {"kind": "heads", "heads": r["heads"], "random": r["random"]},
-                                      facts=lambda r: {"count": len(r["heads"])})),
+                                      facts=lambda r: {"count": len(r["heads"])},
+                                      extras=[("random", lambda r: {"heads": [{"floor": L, "head": h, "mult": 0} for L, h in r["random"]]})])),
         ("step-6", lambda: rec_step6(R)), ("step-7", lambda: rec_step7(R)), ("step-8", lambda: rec_step8(R)),
         ("step-9", lambda: rec_step9(R)), ("step-10", lambda: rec_step10(R))]
     old = json.loads((APP / "path.json").read_text()) if (APP / "path.json").exists() else {"steps": []}

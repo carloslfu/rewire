@@ -205,6 +205,7 @@ def stage_step4(C: Ctx):
         res[f"from{frm}"] = {"per_prompt": per, **judge(per)}
         if res[f"from{frm}"]["passes"]:
             res["chosen"] = frm
+            res.update(res[f"from{frm}"])  # the chosen variant's prompts, as every other step reports them
             break
     res["passes"] = "chosen" in res
     return res
@@ -333,6 +334,11 @@ def use_concepts(C: Ctx):
     C.concepts = {cid: [torch.tensor(v) for v in vs] for cid, vs in c["vectors"].items()}
 
 
+RECIPE_WORDS = ["flour", "sugar", "butter", "\\begg", "\\bmix", "bake", "oven", "\\bpan", "heat", "cook", "ingredient", "recipe", "minute", "stir",
+                "bowl", "slice", "bread", "cheese", "tomato", "fruit", "dough", "sandwich", "soup", "pancake", "cookie"]
+BLEND_GRID = [0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6]
+
+
 def stage_step6(C: Ctx):
     use_concepts(C)
     cc = C.load("concepts")["concepts"]["ocean"]
@@ -341,18 +347,43 @@ def stage_step6(C: Ctx):
         return {"passes": False, "reason": "no working floor for ocean"}
     fl, work, brk = best["floor"], best["working"][1], best["breaking"]
     words = CONCEPTS["ocean"]["words"]
-    per = []
+    sea_ok = lambda r: has(words)(r) and not r["broken"]  # noqa: E731
+    per, seeds = [], {}
     for msg in RECIPES:
         n = C.replies(msg, {})
         w = C.replies(msg, {"concept": {"id": "ocean", "floor": fl, "strength": work}})
         b = C.replies(msg, {"concept": {"id": "ocean", "floor": fl, "strength": brk}})
-        sea_ok = lambda r: has(words)(r) and not r["broken"]  # noqa: E731
         per.append({"prompt": msg, "stated": count(w, sea_ok), "control": count(b, lambda r: r["broken"]),
                     "contrast": count(n, lambda r: not has(words)(r) and not r["broken"]),
                     "seed": next((n[i]["seed"] for i in range(20) if sea_ok(w[i]) and b[i]["broken"] and not has(words)(n[i])), None),
                     "examples": {"working": slim(w, 2), "broken": slim(b, 2)}})
+        seeds[msg] = [sea_ok(w[i]) and b[i]["broken"] and not has(words)(n[i]) and not n[i]["broken"] for i in range(len(n))]
         print("  step6", msg, per[-1]["stated"], per[-1]["control"], per[-1]["contrast"], flush=True)
-    return {"floor": fl, "working": work, "breaking": brk, "per_prompt": per, **judge(per)}
+    res = {"floor": fl, "working": work, "breaking": brk, "per_prompt": per, **judge(per)}
+    if not res["passes"]:
+        return res
+    # "A little steers the topic": the strength below the working one where replies most often stay recipes and
+    # pick up the sea. Measured on the passing prompts; it is a description, not part of the rule.
+    blend = lambda r: has(words)(r) and has(RECIPE_WORDS)(r) and not r["broken"]  # noqa: E731
+    grid, runs = [], {}
+    for st in [x for x in BLEND_GRID if x < work]:
+        rows = {msg: C.replies(msg, {"concept": {"id": "ocean", "floor": fl, "strength": st}}) for msg in res["passing_prompts"]}
+        runs[st] = rows
+        grid.append({"strength": st, "blend": {m: count(r, blend) for m, r in rows.items()}})
+        print("  step6 blend", st, grid[-1]["blend"], flush=True)
+    if grid:
+        top = max(grid, key=lambda g: (sum(g["blend"].values()), -g["strength"]))
+        st = top["strength"]
+        res.update({"blend": st, "blend_grid": grid})
+        # the recorded prompt and seed show all four stops at once: no sea normally, a blend, the sea, broken
+        full = {m: [i for i, ok in enumerate(seeds[m]) if ok and blend(runs[st][m][i])] for m in res["passing_prompts"]}
+        pick = max(full, key=lambda m: len(full[m]))
+        if full[pick]:
+            res["best"] = pick
+            row = next(p for p in per if p["prompt"] == pick)
+            row["seed"] = SEEDS[full[pick][0]]
+            res["blend_example"] = runs[st][pick][full[pick][0]]["text"][:200]
+    return res
 
 
 # ------------------------------------------------------------------ step 7
@@ -521,49 +552,54 @@ def short_ppl(C: Ctx, spec: dict, windows: int = 8, seq: int = 512) -> float:
 
 @torch.no_grad()
 def stage_step2(C: Ctx):
+    """The start marker's huge value. superweight_scan.py found it: one memory block writes about 8,000 into a
+    single stream channel at the start marker, through several large weights together (no single weight carries
+    it; zeroing the largest alone raises perplexity 5%). The step zeroes the fewest of those weights, at most the
+    change table's 8, that pass the break rule."""
     base = short_ppl(C, {})
     mats = C.w.mats(4)
-    cands = set()
-    # super-weight candidates: in early floors' down projections, the input channel with activation spikes and the
-    # output row where it lands; plus each early floor's 20 largest weights
-    every = json.loads((DATA / "everyday.json").read_text())[:8]
-    acts = torch.zeros(FLOORS, mats[0]["down"].shape[1])
-    for msg in every:
+    caps = []
+    for msg in json.loads((DATA / "everyday.json").read_text())[:8]:
         cap: dict = {}
         C.model.run(torch.tensor([chat.first_turn(msg)]), Cache(), C.ch({}), capture=cap)
-        for L in range(4):
-            acts[L] = torch.maximum(acts[L], cap["inter"][L]["act"][0].abs().amax(0).cpu())
-    for L in range(4):
-        j = int(acts[L].argmax())
-        col = mats[L]["down"][:, j].abs().cpu()
-        for r in col.topk(3).indices.tolist():
-            cands.add((L, "down", int(r), j))
-        for t in ("down", "o", "up", "gate", "q", "k", "v"):
-            W = mats[L][t].abs().flatten().cpu()
-            top = W.topk(20 if t == "down" else 4).indices
-            for k in top.tolist():
-                cands.add((L, t, k // mats[L][t].shape[1], k % mats[L][t].shape[1]))
-    rows = []
-    for (L, t, r, c) in sorted(cands):
-        spec = {"zeroed": [{"floor": L, "tensor": t, "row": r, "col": c}]}
+        caps.append(cap)
+    best = (0.0, -1, -1)
+    for L in range(FLOORS):
+        m = torch.stack([c["mem"][L][0][0].float().abs().cpu() for c in caps]).mean(0)
+        v, ch = m.max(0)
+        if float(v) > best[0]:
+            best = (float(v), L, int(ch))
+    _, L, ch = best
+    acts = torch.stack([c["inter"][L]["act"][0][0].float().cpu() for c in caps]).mean(0)
+    row = mats[L]["down"][ch].float().cpu()
+    contrib = row * acts
+    order = contrib.abs().argsort(descending=True).tolist()
+    total = float(contrib.sum())
+    # every other number in the stream after that floor (positions after the start marker), for the copy
+    rest = torch.cat([c["stream"][L + 1][0][1:].float().abs().cpu().flatten() for c in caps])
+    typical = float(torch.quantile(rest[torch.randperm(len(rest))[:200000]], 0.999))
+    res = {"base_ppl": base, "floor": L, "channel": ch, "value": total, "typical": typical,
+           "contributions": [{"unit": j, "weight": float(row[j]), "act": float(acts[j]), "contrib": float(contrib[j])} for j in order[:10]],
+           "tries": []}
+    print(f"  step2 floor {L} channel {ch}: {total:.0f} at the start marker; 99.9% of the rest below {typical:.1f}", flush=True)
+    for k in range(1, 9):
+        spec = {"zeroed": [{"floor": L, "tensor": "down", "row": ch, "col": j} for j in order[:k]]}
         p = short_ppl(C, spec)
-        rows.append({"floor": L, "tensor": t, "row": r, "col": c, "ppl": p, "ratio": p / base})
-    rows.sort(key=lambda x: -x["ratio"])
-    print("  step2 top", rows[:5], flush=True)
-    res = {"base_ppl": base, "candidates": len(rows), "top": rows[:10]}
-    for best in rows[:3]:
-        if best["ratio"] < 10:
-            break
-        spec = {"zeroed": [{k: best[k] for k in ("floor", "tensor", "row", "col")}]}
+        left = total - float(contrib[order[:k]].sum())
+        res["tries"].append({"k": k, "ppl": p, "ratio": p / base, "left": left})
+        print(f"  step2 zero {k}: {left:.0f} left, perplexity x{p / base:.2f}", flush=True)
+        if p / base < 3:
+            continue
         per = []
         for msg in EVERY4[:5]:
             n = C.replies(msg, {})
             z = C.replies(msg, spec)
             per.append({"prompt": msg, "stated": count(z, lambda r: r["broken"]), "contrast": count(n, lambda r: not r["broken"]),
                         "seed": first_seed(z, lambda r: r["broken"], n, lambda r: not r["broken"]), "examples": slim(z, 2)})
-        broke = sum(1 for p in per if p["stated"] >= NEED_SEEDS)
-        if broke >= 4:
-            res.update({"weight": spec["zeroed"][0], "per_prompt": per, "passes": True, "best": max(per, key=lambda p: p["stated"])["prompt"]})
+            print("  step2", k, msg, per[-1]["stated"], per[-1]["contrast"], flush=True)
+        j = judge(per)
+        if j["passes"]:
+            res.update({"weights": spec["zeroed"], "k": k, "left": left, "ratio": p / base, "per_prompt": per, **j})
             return res
     res["passes"] = False
     return res

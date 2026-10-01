@@ -68,6 +68,8 @@ describe.skipIf(!have)("golden traces", () => {
       const P = cfg.floors * (cfg.queryHeads + 1) + 1;
       const errs: number[] = [];
       let pushErr = 0, agree = 0, topChecked = 0, topAgree = 0;
+      let worstPush: Record<string, number> = {};
+      let pushRatio = 0;
       for (let i = 0; i < gen.length; i++) {
         conv.step(i === 0 ? prompt[prompt.length - 1] : gen[i - 1], { seed: c.seed, turn: 0, step: i });
         const s = new Float32Array(await download(dev, conv.scores));
@@ -83,7 +85,13 @@ describe.skipIf(!have)("golden traces", () => {
           if (best === topI[pos * 64]) topAgree++;
         }
         // pushes are computed toward the engine's own pick; compare when it matches Python's
-        if (out[0] === gen[i]) for (let p = 0; p < P; p++) pushErr = Math.max(pushErr, Math.abs(pu[p] - pyPush[i * P + p]));
+        // Pushes agree within 0.01 or 0.5% of the push, whichever is larger: about twice the reference's own float32
+        // noise against float64 (tools/push_noise.py; up to 0.018, or 0.23% of the push, on large pushes).
+        if (out[0] === gen[i]) for (let p = 0; p < P; p++) {
+          const py = pyPush[i * P + p], e = Math.abs(pu[p] - py);
+          pushRatio = Math.max(pushRatio, e / Math.max(0.01, 0.005 * Math.abs(py)));
+          if (e > pushErr) { pushErr = e; worstPush = { step: i, p, floor: p === 0 ? -1 : Math.floor((p - 1) / (cfg.queryHeads + 1)), part: p === 0 ? -1 : (p - 1) % (cfg.queryHeads + 1), engine: pu[p], python: py }; }
+        }
       }
       errs.sort((a, b) => a - b);
       const maxErr = errs[errs.length - 1], p99 = errs[Math.floor(errs.length * 0.99)];
@@ -102,7 +110,7 @@ describe.skipIf(!have)("golden traces", () => {
         }
         worstStream = Math.max(worstStream, Math.sqrt(num / den));
       }
-      const r = { tokens: T, maxErr, p99, pushErr, sampleAgree: agree / gen.length, topAgree: `${topAgree}/${topChecked}`, worstStream };
+      const r = { tokens: T, maxErr, p99, pushErr, pushRatio, worstPush, sampleAgree: agree / gen.length, topAgree: `${topAgree}/${topChecked}`, worstStream };
       report[name] = r;
       writeFileSync(join(GDIR, "engine-report.json"), JSON.stringify(report, null, 1));
       console.log(name, JSON.stringify(r));
@@ -112,7 +120,7 @@ describe.skipIf(!have)("golden traces", () => {
       expect(maxErr).toBeLessThan(0.01);
       expect(p99).toBeLessThan(0.01);
       expect(worstStream).toBeLessThan(0.001);
-      expect(pushErr).toBeLessThan(0.01);
+      expect(pushRatio).toBeLessThan(1);
       expect(topAgree).toBe(topChecked);
     }, 300_000);
   }

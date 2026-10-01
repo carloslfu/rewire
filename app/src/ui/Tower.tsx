@@ -105,7 +105,7 @@ export function Tower({ compact }: { compact?: boolean }) {
         ) : <span className="note">32-bit weights</span>}
         <div className="seg" role="group" aria-label="Tower lighting">
           <button type="button" aria-pressed={view === "push"} onClick={() => store.set({ view: "push" })}>{S.viewPush}</button>
-          <button type="button" aria-pressed={view === "difference"} disabled={!hasDiff} title={hasDiff ? S.diffNote : S.diffNone}
+          <button type="button" aria-pressed={view === "difference"} disabled={!hasDiff} title={hasDiff ? S.diffNote : S.diffNone} aria-label={S.viewDiff}
             onClick={() => store.set({ view: "difference" })}>{S.viewDiff}</button>
         </div>
       </div>
@@ -116,7 +116,8 @@ export function Tower({ compact }: { compact?: boolean }) {
         // fixed side columns, so the head cells grow to the 24px target size before anything else takes the space
         style={{ gridTemplateColumns: `32px repeat(${HEADS}, minmax(10px, ${HEADS > 8 ? 24 : 48}px)) 8px 36px` }}>
         <span aria-hidden="true" />
-        <button type="button" className={`wide${isOn({ kind: "words-out" }) ? " on" : ""}`} onClick={() => setFocus({ kind: "words-out" })}>
+        <button type="button" className={`wide${isOn({ kind: "words-out" }) ? " on" : ""}`} onClick={() => setFocus({ kind: "words-out" })}
+          aria-label={`${S.wordsOut}${c ? `: "${wq}"${prob !== undefined ? `, ${Math.round(prob * 100)}%` : ""}` : ""}`}>
           <span>{S.wordsOut}</span>
           {c && <span className="num">"{wq}" {prob !== undefined ? `${Math.round(prob * 100)}%` : ""}</span>}
         </button>

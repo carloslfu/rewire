@@ -46,8 +46,11 @@ export function chips(spec: ChangeSpec, readTokens?: number[]): ChipDef[] {
     out.push({ key: "c", label: S.chip.concept(conceptLabel(spec.concept.id), spec.concept.floor + 1, spec.concept.strength),
       without: () => ({ ...copy(), concept: null }) });
   }
-  for (const [i, z] of (spec.zeroed ?? []).entries()) {
-    out.push({ key: `z${i}`, label: S.chip.zeroed(z.floor + 1), without: () => ({ ...copy(), zeroed: spec.zeroed!.filter((_, j) => j !== i) }) });
+  // zeroed weights read as one chip per floor ("5 weights on floor 3 set to zero")
+  const perFloor = new Map<number, number>();
+  for (const z of spec.zeroed ?? []) perFloor.set(z.floor, (perFloor.get(z.floor) ?? 0) + 1);
+  for (const [floor, n] of perFloor) {
+    out.push({ key: `z${floor}`, label: S.chip.zeroed(floor + 1, n), without: () => ({ ...copy(), zeroed: spec.zeroed!.filter((z) => z.floor !== floor) }) });
   }
   if (spec.bits && spec.bits !== 4) out.push({ key: "b", label: S.chip.bits(spec.bits), without: () => ({ ...copy(), bits: 4 }) });
   return out;

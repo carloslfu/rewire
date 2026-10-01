@@ -33,6 +33,8 @@ CASES = [
                                                                   "memory": [{"floor": 5, "mult": 2}]}, 14),
     ("hidden", "Give me one tip for sleeping better.", {"hidden": [{"key": 0, "from": 2}, {"key": 9, "from": 10}]}, 15),
     ("bits3", "What is a good name for a cat?", {"bits": 3}, 16),
+    ("memory", "Suggest a name for a small boat.", {"memory": [{"floor": 5, "mult": 0}, {"floor": 18, "mult": 2}],
+                                                    "heads": [{"floor": 11, "head": 4, "mult": -1}]}, 19),
     ("zeroed", "How do I make a cup of tea?", {"zeroed": [{"floor": 1, "tensor": "down", "row": 300, "col": 1000},
                                                           {"floor": 3, "tensor": "o", "row": 7, "col": 600}]}, 17),
 ]

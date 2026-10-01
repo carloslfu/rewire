@@ -350,6 +350,7 @@ export class Conversation {
     const cfg = this.cfg, dev = this.dev, m = this.model;
     const W = cfg.width, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, U = cfg.units, F = cfg.floors;
     const { prog, buf, rows, per, off } = this.inspectProgram();
+    const t0 = performance.now();
     const keep = this.length;
     dev.queue.writeBuffer(this.intok, 0, new Uint32Array([input]));
     this.writeParams({ T: 1, pos0: position, row: 0 });
@@ -359,6 +360,7 @@ export class Conversation {
     this.length = keep;
     const [raw, rowsRaw, scoresRaw, rinvRaw] = await Promise.all([download(dev, buf), download(dev, rows), download(dev, this.scores),
       download(dev, this.rinv, 16)]);
+    const tRead = performance.now();
     const all = new Float32Array(raw);
     const detail = new Map<string, Float32Array>();
     const n = position + 1;
@@ -391,6 +393,7 @@ export class Conversation {
     const top = topK(scores, cfg.vocabReal, 64);
     detail.set("final.top_scores", Float32Array.from(top.map((i) => scores[i])));
     detail.set("final.top_ids", Float32Array.from(top));
+    const tUnpack = performance.now();
     // unit pushes: u = (dict[target] - mean row) * w_final * rinv, then each floor's down columns dotted with u
     const rinv = new Float32Array(rinvRaw)[0];
     const row = await this.dictRow(target);
@@ -404,8 +407,11 @@ export class Conversation {
       for (let j = 0; j < U; j++) up[j] = act[j] * dots[L * U + j] * mm * a;
       detail.set(`f${L}.unit_push`, up);
     }
+    const tUnits = performance.now();
     const guesses = await this.floorGuesses(detail, 5);
-    return { detail, guesses };
+    const tEnd = performance.now();
+    return { detail, guesses, timing: { pass: tRead - t0, unpack: tUnpack - tRead, units: tUnits - tUnpack, guesses: tEnd - tUnits,
+      guess_read: this.lastGuessReadMs } };
   }
 
   private dictRowPipe?: { ids: GPUBuffer; out: GPUBuffer; group: GPUBindGroup; pipeline: GPUComputePipeline };
@@ -444,6 +450,9 @@ export class Conversation {
 
   private guessPipe?: { inp: GPUBuffer; xn: GPUBuffer; rinv: GPUBuffer; scores: GPUBuffer; list: Dispatch[] };
   /** What each floor's output would say: the final normalization and the dictionary, top k per floor. */
+  /** How long the last floor-guess readback took (bench detail). */
+  lastGuessReadMs = 0;
+
   private async floorGuesses(detail: Map<string, Float32Array>, k: number): Promise<{ id: number; p: number }[][]> {
     const m = this.model, dev = this.dev, cfg = this.cfg, W = cfg.width, F = cfg.floors, V = cfg.vocabRows;
     if (!this.guessPipe) {
@@ -462,7 +471,9 @@ export class Conversation {
     const enc = dev.createCommandEncoder();
     encode(enc, g.list);
     dev.queue.submit([enc.finish()]);
+    const tg = performance.now();
     const sc = new Float32Array(await download(dev, g.scores));
+    this.lastGuessReadMs = performance.now() - tg;
     const out: { id: number; p: number }[][] = [];
     for (let L = 0; L < F; L++) {
       const row = sc.subarray(L * V, L * V + V);
@@ -638,6 +649,8 @@ export interface InspectHost {
 export interface Inspection {
   detail: Map<string, Float32Array>;
   guesses: { id: number; p: number }[][];
+  /** Milliseconds per phase: the capture pass and its readback, unpacking, unit pushes, floor guesses. */
+  timing?: { pass: number; unpack: number; units: number; guesses: number; guess_read: number };
 }
 
 function headNorm(x: Float32Array, w: Float32Array, heads: number, D: number, eps: number): Float32Array {

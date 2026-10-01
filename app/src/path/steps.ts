@@ -4,7 +4,7 @@ import type { ChangeSpec } from "../model/types.ts";
 
 export type StepControl =
   | { kind: "swap"; a: string; b: string; ids: [number, number] }
-  | { kind: "zeroed"; weight: { floor: number; tensor: "q" | "k" | "v" | "o" | "gate" | "up" | "down"; row: number; col: number } }
+  | { kind: "zeroed"; weights: { floor: number; tensor: "q" | "k" | "v" | "o" | "gate" | "up" | "down"; row: number; col: number }[] }
   | { kind: "floors"; floors: number[] }
   | { kind: "hide"; key: number; from: number }
   | { kind: "heads"; heads: [number, number][]; random: [number, number][] }
@@ -45,17 +45,26 @@ export interface PathData {
   slurs_filtered?: number;
 }
 
+type Facts = Record<string, string | number>;
+/** Copy that may depend on the step's measured facts. */
+type FactText = string | ((f: Facts) => string);
+
 export interface StepCopy {
-  title: string;
+  title: FactText;
   question: string;
   /** What the control says. */
-  action: string;
+  action: FactText;
   /** One plain line after trying. */
-  why: (f: Record<string, string | number>) => string;
+  why: (f: Facts) => string;
   term?: string;
   /** Questions to tap once the model runs live, with the step's change still on. */
   suggestions?: string[];
 }
+
+const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+const count = (v: string | number | undefined, d: number) => NUMBER_WORDS[Number(v ?? d)] ?? String(v ?? d);
+const capital = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+const grouped = (v: string | number | undefined, d: number) => Number(v ?? d).toLocaleString("en-US");
 
 export const COPY: Record<string, StepCopy> = {
   "step-1": {
@@ -67,10 +76,12 @@ export const COPY: Record<string, StepCopy> = {
     suggestions: ["Why does Rome have the Eiffel Tower?", "What is Paris famous for?", "How far is Rome from Paris?"],
   },
   "step-2": {
-    title: "One number out of 596 million",
-    question: "Can one number break it?",
-    action: "Set that number to zero",
-    why: () => "A few numbers matter far more than the rest. This is one of them.",
+    title: (f) => `${capital(count(f.k, 5))} numbers out of 596 million`,
+    question: "Can a handful of numbers break it?",
+    action: (f) => `Zero ${count(f.k, 5)} weights on floor ${f.floor ?? 3}`,
+    why: (f) => `Together these ${count(f.k, 5)} weights write one huge number, about ${grouped(f.value, 8000)}, into the start marker's stream, ` +
+      `where 99.9% of the other numbers stay below ${f.typical ?? 20}. Zero them and only about ${grouped(f.left, 460)} is left, and the replies fall apart. ` +
+      "No single one of them does it alone.",
   },
   "step-3": {
     title: "Skip a floor",
@@ -99,7 +110,7 @@ export const COPY: Record<string, StepCopy> = {
     title: "Add a concept, then push too far",
     question: "What if we added a little of a concept to its stream?",
     action: "Turn up the concept",
-    why: () => "The concept is a direction in the stream. A little steers the topic; too much drowns out everything else, so it loops, rambles or switches language.",
+    why: () => "The concept is a direction in the stream. A little steers the reply toward the sea, more takes over the topic, and too much drowns out everything else, so it rambles or loops.",
     term: "steering",
     suggestions: ["Give me a tip for a job interview.", "Describe your perfect weekend."],
   },
@@ -107,7 +118,7 @@ export const COPY: Record<string, StepCopy> = {
     title: "Where does the answer form?",
     question: "If the model stopped at each floor, what would it say?",
     action: "Show the floor guesses",
-    why: (f) => `The answer first appears around floor ${f.floor ?? "20"}. It takes shape on the upper floors.`,
+    why: (f) => `The answer becomes the top floor guess around floor ${f.floor ?? "20"} and stays there to the end. It takes shape on the upper floors.`,
     term: "lens",
   },
   "step-8": {
@@ -140,10 +151,28 @@ export const COPY: Record<string, StepCopy> = {
   },
 };
 
+/** A step's copy with its measured facts filled in. */
+export interface ResolvedCopy {
+  title: string;
+  question: string;
+  action: string;
+  why: string;
+  term?: string;
+  suggestions?: string[];
+}
+
+export function stepCopy(st: StepData): ResolvedCopy | null {
+  const c = COPY[st.slug];
+  if (!c) return null;
+  const f = st.facts ?? {};
+  const text = (x: FactText) => (typeof x === "function" ? x(f) : x);
+  return { ...c, title: text(c.title), action: text(c.action), why: c.why(f) };
+}
+
 export function stepChanges(c: StepControl, stop?: number): ChangeSpec {
   switch (c.kind) {
     case "swap": return { swaps: [c.ids] };
-    case "zeroed": return { zeroed: [c.weight] };
+    case "zeroed": return { zeroed: c.weights };
     case "hide": return { hidden: [{ key: c.key, from: c.from }] };
     case "heads": return { heads: c.heads.map(([floor, head]) => ({ floor, head, mult: 0 })) };
     case "concept": return { concept: { id: c.id, floor: c.floor, strength: stop ?? 0 } };

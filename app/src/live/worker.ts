@@ -27,6 +27,8 @@ let tiny: { model: Model; slots: Slot[]; host: Omit<InspectHost, "table"> } | nu
 let which: "qwen" | "tiny" = "qwen";
 let man: Manifest | null = null;
 let base = "";
+/** Bytes of the tokenizer files, counted with the weights in download progress. */
+let extraBytes = 0;
 let phone = false;
 let tok: ChatTokenizer | null = null;
 let concepts = new Map<string, Float32Array[]>();
@@ -196,7 +198,9 @@ async function load(b: string, isPhone: boolean) {
   man = manifest;
   const cache = await openCache();
   const [tj, tc] = await Promise.all([cachedJson(cache, "tokenizer.json"), cachedJson(cache, "tokenizer_config.json")]);
-  tok = new ChatTokenizer(tj, tc, manifest.tokens, manifest.chat.system_prompt);
+  // the tokenizer counts toward the download the page offered, so progress and offer agree
+  extraBytes = tj.bytes + tc.bytes;
+  tok = new ChatTokenizer(tj.value, tc.value, manifest.tokens, manifest.chat.system_prompt);
   await build(cache);
   return { manifestHash: (manifest as unknown as { hash?: string }).hash ?? "", contextCap: need(model).cfg.maxContext, persisted: false };
 }
@@ -211,8 +215,8 @@ async function build(cache: Cache | null) {
     void build(cache).catch(() => undefined);
   });
   const cfg = configOf(m, phone ? m.chat.context_cap_phone : m.chat.context_cap_desktop);
-  const total = m.total_bytes;
-  let before = 0;
+  const total = m.total_bytes + extraBytes;
+  let before = extraBytes;
   const loaded = await loadWeights(dev, m, async (f) => {
     const data = await getFile(cache, f, (got) => post({ t: "progress", loaded: before + got, total }));
     before += f.bytes;
@@ -240,15 +244,17 @@ async function openCache(): Promise<Cache | null> {
   }
 }
 
-async function cachedJson(cache: Cache | null, name: string) {
+async function cachedJson(cache: Cache | null, name: string): Promise<{ value: Record<string, unknown>; bytes: number }> {
   const url = base + name;
   const hit = await cache?.match(url);
-  if (hit) return hit.json();
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${name}: ${r.status}`);
-  const text = await r.text();
-  await cache?.put(url, new Response(text, { headers: { "Content-Type": "application/json" } })).catch(() => undefined);
-  return JSON.parse(text);
+  const text = hit ? await hit.text() : await (async () => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${name}: ${r.status}`);
+    const t = await r.text();
+    await cache?.put(url, new Response(t, { headers: { "Content-Type": "application/json" } })).catch(() => undefined);
+    return t;
+  })();
+  return { value: JSON.parse(text), bytes: new TextEncoder().encode(text).length };
 }
 
 /** A weight file: from storage, or fetched with resume and checked against its hash before it is kept. */
@@ -335,10 +341,13 @@ async function bench() {
   c.rewind(0);
   c.read(read);
   const insp: number[] = [];
-  for (let r = 0; r < 3; r++) {
+  let phases: Record<string, number> = {};
+  await c.inspect(299, 7, 9, { ...need(host), table: s.table }); // warm-up: the first inspection compiles its pipelines
+  for (let r = 0; r < 7; r++) {
     const t0 = performance.now();
-    await c.inspect(299, 7, 9, { ...need(host), table: s.table });
+    const res = await c.inspect(299, 7, 9, { ...need(host), table: s.table });
     insp.push(performance.now() - t0);
+    phases = Object.fromEntries(Object.entries(res.timing ?? {}).map(([k, v]) => [k, Math.round(v)]));
   }
   s.tokens = [];
   c.rewind(0);
@@ -347,7 +356,8 @@ async function bench() {
   const kvPerConv = cfg.floors * 2 * cfg.kvHeads * cfg.maxContext * cfg.headSize * 2;
   return {
     read300write40_ms: median(normal), read300write40_changed_ms: median(changed), first_changed_word_ms: median(firstChanged),
-    write40_tokens_per_s: 40000 / median(writeOnly), inspect_ms: median(insp),
+    write40_tokens_per_s: 40000 / median(writeOnly), inspect_ms: median(insp), inspect_range_ms: [Math.min(...insp), Math.max(...insp)],
+    inspect_phases_ms: phases,
     gpu_bytes_estimate: weights + 3 * kvPerConv + 17 * 1024 * 1024 * 2, max_context: cfg.maxContext,
   };
 }

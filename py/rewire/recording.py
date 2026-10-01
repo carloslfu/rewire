@@ -247,4 +247,5 @@ def write_featured(path: Path, tensors: dict[str, np.ndarray]):
     for k, v in tensors.items():
         out[k] = np.ascontiguousarray(v.astype(np.float32 if k.endswith("_ids") else np.float16))
     save_file(out, str(path))
+    path.chmod(0o644)  # safetensors writes owner-only files; these are published with the page
     return path.stat().st_size

@@ -57,6 +57,8 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
   const shown = toks.map((t, i) => (STOP.has(t.id) ? -1 : i)).filter((i) => i >= 0);
   const selHere = word && word.turn === k && word.side === side ? word.index : -1;
   const roving = shown.includes(selHere) ? selHere : shown.includes(cursor) ? cursor : shown[0];
+  // screen readers get the reply as one sentence on the group; the pieces stay buttons for inspecting
+  const plain = shown.map((i) => piece(toks[i].id)).join("").trim();
   const onKey = (e: React.KeyboardEvent) => {
     const btns = [...(textRef.current?.querySelectorAll<HTMLButtonElement>("button.tok") ?? [])];
     const at = btns.indexOf(document.activeElement as HTMLButtonElement);
@@ -75,7 +77,8 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
     <div className={`reply${changed ? " changed" : ""}${reply.stale ? " stale" : ""}`}>
       {label && <div className="who">{label}</div>}
       <div className="text" ref={textRef} onKeyDown={inspectable ? onKey : undefined}
-        role={inspectable ? "group" : undefined} aria-label={inspectable ? S.replyWords : undefined}>
+        role={inspectable ? "group" : undefined} aria-label={inspectable ? `${label ?? S.reply}: ${plain}` : undefined}
+        aria-description={inspectable ? S.replyWords : undefined}>
         {toks.map((t, i) => {
           if (STOP.has(t.id)) return null;
           const sel = word && word.turn === k && word.side === side && word.index === i;
