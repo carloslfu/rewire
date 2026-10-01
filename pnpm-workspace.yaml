@@ -3,3 +3,6 @@ packages:
   - app
   - tiny
   - bench
+allowBuilds:
+  esbuild: set this to true or false
+  webgpu: set this to true or false
