@@ -15,10 +15,26 @@ def tokenizer():
     return AutoTokenizer.from_pretrained(str(model_dir()))
 
 
+@lru_cache(maxsize=1)
+def _plain_tokenizer():
+    """The tokenizer with every added token removed (chat markers and the thinking tags), so typed text
+    is always plain text. The browser builds the same tokenizer the same way."""
+    import json
+
+    from tokenizers import Tokenizer
+
+    from .conv import model_dir
+
+    j = json.loads((model_dir() / "tokenizer.json").read_text())
+    j["added_tokens"] = []
+    return Tokenizer.from_str(json.dumps(j))
+
+
 def plain(text: str) -> list[int]:
     """Tokenize text with special tokens disabled, so nobody can type a chat marker."""
-    tok = tokenizer()
-    return tok(text, add_special_tokens=False, split_special_tokens=True)["input_ids"]
+    if not text:
+        return []
+    return _plain_tokenizer().encode(text, add_special_tokens=False).ids
 
 
 def assistant_opening() -> list[int]:

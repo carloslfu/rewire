@@ -68,6 +68,14 @@ export class Model {
     return b;
   }
 
+  private slots = new Map<number, GPUBuffer>();
+  /** A uniform holding a slot index in its first word. */
+  slotUniform(slot: number): GPUBuffer {
+    let b = this.slots.get(slot);
+    if (!b) { b = this.uniform([slot, 0, 0, 0]); this.slots.set(slot, b); }
+    return b;
+  }
+
   /** A uniform for a matrix multiply inside floor L on tensor(s). */
   mmUniform(L: number, t: keyof typeof TENSOR_ID, t2?: keyof typeof TENSOR_ID): GPUBuffer {
     return this.uniform([L, TENSOR_ID[t], t2 ? TENSOR_ID[t2] : 0, 0]);
@@ -106,8 +114,10 @@ export class Conversation {
   /** Per floor, each head's output and the memory block's output at the last position: [floors][heads + 1][width]. */
   readonly parts: GPUBuffer; readonly scores: GPUBuffer; readonly cand: GPUBuffer;
   readonly sampleOut: GPUBuffer; readonly pushes: GPUBuffer;
-  private readonly chunkPlan: Dispatch[];
-  private readonly stepPlan: Dispatch[];
+  private chunkPlan: Dispatch[];
+  private stepPlan: Dispatch[];
+  /** When set, the stream entering each floor and the final stream are copied here: [floors + 1][maxContext][width]. */
+  capture?: GPUBuffer;
 
   constructor(readonly model: Model) {
     const { dev, cfg } = model;
@@ -161,6 +171,20 @@ export class Conversation {
   }
 
   /** The forward pass over SP.T tokens. `single` uses the one-token kernels and keeps each head's output. */
+  /** Copy every stream into `buf` from now on (tests and golden traces). */
+  setCapture(buf: GPUBuffer) {
+    this.capture = buf;
+    this.chunkPlan = this.forwardPlan(8, false);
+    this.stepPlan = [...this.forwardPlan(1, true), ...this.headPlan()];
+  }
+
+  private captureAt(slot: number, rows: number): Dispatch[] {
+    if (!this.capture) return [];
+    const m = this.model;
+    const p = m.pipe("capture", () => K.captureKernel(m.kc));
+    return [{ pipeline: p, group: bind(this.dev, p, [this.x, this.SP, m.slotUniform(slot), this.capture]), x: rows }];
+  }
+
   private forwardPlan(TB: number, single: boolean): Dispatch[] {
     const m = this.model, cfg = this.cfg, dev = this.dev, kc = m.kc;
     const W = cfg.width, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, U = cfg.units;
@@ -178,6 +202,7 @@ export class Conversation {
       const fw = m.w.floors[L];
       const uni = m.floorUniforms[L];
       plan.push({ pipeline: enter, group: bind(dev, enter, [this.x, fw.inNorm, this.ct, this.SP, this.h, uni]), x: rows });
+      plan.push(...this.captureAt(L, rows));
       plan.push(this.mm("q", W, H * D, TB, rows, fw.q, this.h, this.q, m.mmUniform(L, "q")));
       plan.push(this.mm("k", W, KV * D, TB, rows, fw.k, this.h, this.k, m.mmUniform(L, "k")));
       plan.push(this.mm("v", W, KV * D, TB, rows, fw.v, this.h, this.v, m.mmUniform(L, "v")));
@@ -195,6 +220,7 @@ export class Conversation {
       plan.push(this.mm("down", U, W, TB, rows, fw.down, this.act, this.m, m.mmUniform(L, "down")));
       plan.push({ pipeline: mres, group: bind(dev, mres, [this.mid, this.m, this.ct, this.SP, uni, this.x, this.parts]), x: rows });
     }
+    plan.push(...this.captureAt(cfg.floors, rows));
     return plan;
   }
 

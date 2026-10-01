@@ -15,5 +15,8 @@
     "typescript": "^7.0.2",
     "vitest": "^5.0.3",
     "webgpu": "^0.6.1"
+  },
+  "dependencies": {
+    "@huggingface/tokenizers": "^0.2.0"
   }
 }

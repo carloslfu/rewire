@@ -780,3 +780,22 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
 }
 // ${F} floors`;
 }
+
+/** Copy the T rows of x into a capture buffer at [slot][pos0 + t] (golden-trace checks and inspection). */
+export function captureKernel(c: KernelConsts) {
+  const W = c.cfg.width;
+  return /* wgsl */ `
+struct FP { floor: u32, a: u32, b: u32, c: u32 }
+@group(0) @binding(0) var<storage, read> x: array<f32>;
+@group(0) @binding(1) var<uniform> SP: array<vec4u, 4>;
+fn sp(i: u32) -> u32 { return SP[i / 4u][i % 4u]; }
+@group(0) @binding(2) var<uniform> F: FP;
+@group(0) @binding(3) var<storage, read_write> cap: array<f32>;
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {
+  let t = wg.x;
+  if (t >= sp(0)) { return; }
+  let base = (F.floor * ${c.cfg.maxContext}u + sp(1) + t) * ${W}u;
+  for (var i = li; i < ${W}u; i += 256u) { cap[base + i] = x[t * ${W}u + i]; }
+}`;
+}
