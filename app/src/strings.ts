@@ -14,7 +14,7 @@ export const S = {
   howItWorks: "How it works",
   whatsReal: "What's real here",
   whatsRealBody: [
-    "Live: every number on screen is computed by Qwen3-0.6B on this device, in its 4-bit form. Nothing you type leaves the device.",
+    "Live: you can run Qwen3-0.6B on this device in its 4-bit form. Guided examples also use recordings from the same model. Nothing you type leaves the device.",
     "Replay: the numbers were computed by the same 4-bit model on another computer and recorded. None of them is illustrative.",
     "Lighting shows each part's direct push toward a word, holding the final normalization's scale fixed. Parts that work through later floors can stay pale.",
     "The live model stores its weights in 4 bits, so it is somewhat weaker than the original 16-bit Qwen3-0.6B: on everyday replies it ranks the same word first 84% of the time, its perplexity on Wikipedia text is 8% higher, and it still knows 97% of the facts the original knows.",
