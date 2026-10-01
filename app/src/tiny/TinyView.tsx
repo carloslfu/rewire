@@ -4,7 +4,7 @@ import { decode, encode, VOCAB } from "@rewire/tiny/src/data.ts";
 import { layout, TINY } from "@rewire/tiny/src/config.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { openTiny } from "../state/actions.ts";
-import { store } from "../state/store.ts";
+import { useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { divergingRGB, fmt, pct } from "../ui/color.ts";
 import { Strip } from "../ui/Strip.tsx";
@@ -16,6 +16,7 @@ interface Recorded { steps: { step: number; loss: number }[]; samples: { step: n
 const STEPS = 1200, BATCH = 16, LR = 3e-3;
 
 export default function TinyView() {
+  const active = useStore((s) => s.tiny);
   const [texts, setTexts] = useState<Text[]>([]);
   const [chosen, setChosen] = useState<string>("alice");
   const [own, setOwn] = useState("");
@@ -27,17 +28,30 @@ export default function TinyView() {
   const [status, setStatus] = useState<string>("");
   const [recorded, setRecorded] = useState<boolean>(false);
   const [corpus, setCorpus] = useState("");
+  const [opening, setOpening] = useState(false);
   const w = useRef<Worker | null>(null);
+  const replayJob = useRef(0);
+  const mounted = useRef(true);
 
   useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}texts/index.json`).then((r) => r.json()).then(setTexts).catch(() => setTexts([]));
-    return () => w.current?.terminate();
+    mounted.current = true;
+    fetch(`${import.meta.env.BASE_URL}texts/index.json`).then((r) => r.json()).then((t) => { if (mounted.current) setTexts(t); }).catch(() => setTexts([]));
+    return () => { mounted.current = false; replayJob.current++; w.current?.terminate(); w.current = null; };
   }, []);
+
+  useEffect(() => {
+    if (!active) {
+      replayJob.current++;
+      w.current?.postMessage({ t: "stop" } satisfies TinyIn);
+      if (recorded || !w.current) setRunning(false);
+    }
+  }, [active]);
 
   const worker = () => {
     if (!w.current) {
       w.current = new Worker(new URL("./train.worker.ts", import.meta.url), { type: "module" });
       w.current.onmessage = (e: MessageEvent<TinyOut>) => receive(e.data);
+      w.current.onerror = () => { setRunning(false); setStatus("Training could not start. Try again."); w.current?.terminate(); w.current = null; };
     }
     return w.current;
   };
@@ -48,20 +62,23 @@ export default function TinyView() {
       case "ready": setStatus(""); break;
       case "loss": setLosses((l) => [...l, m.loss]); setMs((x) => (x === null ? m.ms : x * 0.9 + m.ms * 0.1)); break;
       case "sample": setSamples((s) => [...s, { step: m.step, text: m.text }]); break;
-      case "done": setRunning(false); setParams(m.params); setStatus(`Trained ${m.steps} steps in ${m.seconds.toFixed(0)} seconds.`); break;
+      case "done": setRunning(false); setParams(m.params); setStatus(`${m.steps < STEPS ? "Stopped after" : "Trained"} ${m.steps} ${m.steps === 1 ? "step" : "steps"} in ${m.seconds.toFixed(0)} ${Math.round(m.seconds) === 1 ? "second" : "seconds"}.`); break;
       case "error": setRunning(false); setStatus(m.message); break;
       default: break;
     }
   };
 
   const playRecorded = async () => {
+    const job = ++replayJob.current;
     setRecorded(true);
+    setStatus("This device cannot train live. Showing the recorded Alice in Wonderland run.");
     try {
       const r = (await (await fetch(`${import.meta.env.BASE_URL}recordings/tiny-run.json`)).json()) as Recorded;
       setLosses([]); setSamples([]);
       const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
       for (let i = 0; i < r.steps.length; i++) {
         if (!reduce && i % 5 === 0) await new Promise((res) => setTimeout(res, 16));
+        if (job !== replayJob.current || !mounted.current) return;
         setLosses((l) => [...l, r.steps[i].loss]);
         const s = r.samples.find((x) => x.step === r.steps[i].step);
         if (s) setSamples((x) => [...x, s]);
@@ -74,65 +91,84 @@ export default function TinyView() {
   };
 
   const teach = async () => {
-    const text = own.trim().length >= 200 ? own : await (await fetch(`${import.meta.env.BASE_URL}texts/${chosen}.txt`)).text();
-    setCorpus(text);
-    setLosses([]); setSamples([]); setParams(null); setMs(null); setStatus("Starting…"); setRunning(true);
-    if (!("gpu" in navigator)) return void playRecorded();
-    worker().postMessage({ t: "start", text, steps: STEPS, batch: BATCH, lr: LR, seed: 1 } satisfies TinyIn);
+    if (running || (own.trim() && own.trim().length < 200)) return;
+    const job = ++replayJob.current;
+    setLosses([]); setSamples([]); setParams(null); setMs(null); setRecorded(false); setStatus("Starting…"); setRunning(true);
+    try {
+      let text = own;
+      if (!own.trim()) {
+        const response = await fetch(`${import.meta.env.BASE_URL}texts/${chosen}.txt`);
+        if (!response.ok) throw new Error("The training text could not load. Try again or paste your own writing.");
+        text = await response.text();
+      }
+      if (job !== replayJob.current || !mounted.current) return;
+      setCorpus(text);
+      if (!("gpu" in navigator)) return void playRecorded();
+      worker().postMessage({ t: "start", text, steps: STEPS, batch: BATCH, lr: LR, seed: 1 } satisfies TinyIn);
+    } catch (e) { setRunning(false); setStatus(String((e as Error).message ?? e)); }
   };
 
-  const stop = () => w.current?.postMessage({ t: "stop" } satisfies TinyIn);
+  const stop = () => {
+    replayJob.current++;
+    if (recorded || !w.current) { setRunning(false); setStatus("Stopped."); }
+    else { w.current.postMessage({ t: "stop" } satisfies TinyIn); setStatus("Finishing the current step…"); }
+  };
   const last = samples[samples.length - 1];
 
   return (
-    <main className="col tiny" style={{ maxWidth: 980, margin: "0 auto" }}>
-      <button type="button" className="btn quiet" onClick={() => store.set({ tiny: false })}>← {S.tiny.back}</button>
-      <h2 style={{ fontSize: 22, margin: "8px 0 4px" }}>{S.tiny.title}</h2>
-      <p className="note" style={{ maxWidth: 720 }}>{S.tiny.intro}</p>
+    <main className="col tiny" id="training">
+      <div className="training-summary">
+        <p className="eyebrow">A separate model, built from scratch</p>
+        <h1>{S.tiny.title}</h1>
+        <p className="muted">Give it some writing and watch it learn the patterns, one letter at a time. Everything stays on this device.</p>
+      </div>
 
       <section style={{ marginTop: 14 }}>
         <h3>{S.tiny.builtIn}</h3>
         <div className="row" role="radiogroup" aria-label={S.tiny.builtIn}>
           {texts.map((t) => (
             <button key={t.id} type="button" role="radio" aria-checked={chosen === t.id && !own.trim()} className={`btn${chosen === t.id && !own.trim() ? " primary" : ""}`}
-              onClick={() => { setChosen(t.id); setOwn(""); }}>
+              disabled={running} onClick={() => { setChosen(t.id); setOwn(""); }}>
               {t.title} <span className="faint small">{t.author}</span>
             </button>
           ))}
         </div>
         <label className="small muted" htmlFor="own">{S.tiny.paste}</label>
-        <textarea id="own" value={own} onChange={(e) => setOwn(e.target.value)} placeholder="At least a few paragraphs work best." />
+        <textarea id="own" value={own} disabled={running} onChange={(e) => setOwn(e.target.value)} placeholder="At least a few paragraphs work best." />
         {own.trim() && own.trim().length < 200 && <p className="note">A little more text, please: at least 200 characters.</p>}
         <div className="row">
-          {!running ? <button type="button" className="btn primary" onClick={() => void teach()}>{S.tiny.teach}</button>
+          {!running ? <button type="button" className="btn primary" disabled={!!own.trim() && own.trim().length < 200} onClick={() => void teach()}>{params ? "Train again" : S.tiny.teach}</button>
             : <button type="button" className="btn" onClick={stop}>{S.tiny.stop}</button>}
-          <span className="note" role="status">{status}{ms !== null ? ` One step takes about ${ms.toFixed(0)} ms here.` : ""}{recorded ? ` ${S.tiny.recorded}` : ""}</span>
+          <span className="note" role="status">{status}{ms !== null ? recorded ? ` Recorded time per step: ${ms.toFixed(0)} ms.` : ` One step takes about ${ms.toFixed(0)} ms here.` : ""}</span>
         </div>
       </section>
 
       {losses.length > 0 && (
-        <section style={{ marginTop: 10 }}>
-          <h3>{S.tiny.loss}: <span className="num">{losses[losses.length - 1].toFixed(3)}</span> <span className="faint small">{S.tiny.step(losses.length)}</span></h3>
-          <LossChart losses={losses} />
-          <p className="note">The loss is how surprised it is by the next letter, on average: minus the logarithm of the probability it gave the right one. Guessing evenly among {VOCAB} letters gives {Math.log(VOCAB).toFixed(2)}.</p>
-          <h3 style={{ marginTop: 12 }}>{S.tiny.sample} {last && <span className="faint small">({S.tiny.step(last.step)})</span>}</h3>
-          <div className="sample" aria-live="off">{last ? last.text : "…"}</div>
-          {samples.length > 1 && (
-            <details style={{ marginTop: 6 }}>
-              <summary className="small">Earlier samples</summary>
-              {samples.slice(0, -1).map((s) => <div key={s.step} className="sample" style={{ marginTop: 4 }}><span className="faint">{s.step}: </span>{s.text}</div>)}
-            </details>
-          )}
+        <section className="training-result">
+          <h2>Watch the writing change</h2>
+          <div className="training-samples">
+            <div><h3>At the beginning</h3><div className="sample">{samples[0]?.text ?? "Making its first attempt…"}</div></div>
+            <div><h3>{running ? "Learning now" : "After learning"} {last && <span className="faint small">· step {last.step}</span>}</h3><div className="sample" aria-live="off">{last?.text ?? "…"}</div></div>
+          </div>
+          <details className="training-details"><summary>See the learning curve and earlier samples</summary>
+            <h3>{S.tiny.loss}: <span className="num">{losses[losses.length - 1].toFixed(3)}</span> <span className="faint small">{S.tiny.step(losses.length)}</span></h3>
+            <LossChart losses={losses} />
+            <p className="note">Loss measures how surprised it is by the next letter. Lower is better on this training text; it does not prove that the model will generalize.</p>
+            {samples.slice(0, -1).map((s) => <div key={s.step} className="sample" style={{ marginTop: 8 }}><span className="faint">Step {s.step}: </span>{s.text}</div>)}
+          </details>
         </section>
       )}
 
       {params && (
         <section style={{ marginTop: 14 }}>
-          <button type="button" className="btn primary" onClick={() => void openTiny(params)}>{S.tiny.open}</button>
+          <button type="button" className="btn primary" disabled={opening} onClick={() => {
+            setOpening(true);
+            void openTiny(params).catch((e) => setStatus(String(e.message ?? e))).finally(() => setOpening(false));
+          }}>{opening ? "Opening your model…" : S.tiny.open}</button>
           <p className="note" style={{ marginTop: 4 }}>It opens in the same screen as Qwen3-0.6B, with every view and change: type the start of a sentence and it continues it, letter by letter.</p>
         </section>
       )}
-      {params && <SlowMotion params={params} corpus={corpus} worker={worker} />}
+      {params && <details className="training-details"><summary>Watch one learning step from the inside</summary><SlowMotion params={params} corpus={corpus} worker={worker} /></details>}
 
       <section style={{ marginTop: 18 }}>
         <p className="note" style={{ maxWidth: 720 }}>{S.tiny.why}</p>
@@ -146,8 +182,10 @@ function LossChart({ losses }: { losses: number[] }) {
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
+    const draw = () => {
     const dpr = devicePixelRatio || 1;
     const W = cv.clientWidth, H = cv.clientHeight;
+    if (!W || !H) return;
     cv.width = W * dpr; cv.height = H * dpr;
     const ctx = cv.getContext("2d")!;
     ctx.scale(dpr, dpr);
@@ -164,6 +202,11 @@ function LossChart({ losses }: { losses: number[] }) {
       if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
     });
     ctx.stroke();
+    };
+    draw();
+    const observer = new ResizeObserver(draw);
+    observer.observe(cv);
+    return () => observer.disconnect();
   }, [losses]);
   return <canvas ref={ref} role="img" aria-label={`Loss over ${losses.length} steps, now ${losses[losses.length - 1].toFixed(2)}`} />;
 }
@@ -175,11 +218,14 @@ function SlowMotion({ params, corpus, worker }: { params: Float32Array; corpus: 
   }, [corpus]);
   const [res, setRes] = useState<Extract<TinyOut, { t: "slow" }> | null>(null);
   const [math, setMath] = useState(false);
+  const [working, setWorking] = useState(false);
   const run = () => {
+    setWorking(true);
     const wk = worker();
     const prev = wk.onmessage;
     wk.onmessage = (e: MessageEvent<TinyOut>) => {
-      if (e.data.t === "slow") { setRes(e.data); wk.onmessage = prev; } else prev?.call(wk, e);
+      if (e.data.t === "slow") { setRes(e.data); setWorking(false); wk.onmessage = prev; }
+      else { if (e.data.t === "error") { setWorking(false); wk.onmessage = prev; } prev?.call(wk, e); }
     };
     wk.postMessage({ t: "slow", params: params.slice(), example } satisfies TinyIn);
   };
@@ -191,7 +237,7 @@ function SlowMotion({ params, corpus, worker }: { params: Float32Array; corpus: 
     <section style={{ marginTop: 18 }}>
       <h3>{S.tiny.slowMotion}</h3>
       <p className="note">{S.tiny.slowIntro} This view uses plain gradient descent, because Adam moves nearly every weight by the same amount on its first step and hides the pattern. The step size is the largest of a few tries that lowers this example's loss and raises the right letters' average probability.</p>
-      <div className="row"><button type="button" className="btn" onClick={run}>Run one step on this example</button></div>
+      <div className="row"><button type="button" className="btn" disabled={working} onClick={run}>{working ? "Computing the learning step…" : "Run one step on this example"}</button></div>
       <p className="sample">{example}</p>
       {res && (
         <>

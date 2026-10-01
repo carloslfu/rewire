@@ -79,3 +79,6 @@ Preserved filtered native browser observations without claiming a complete Safar
 ## [2026-10-01 20:46] capture | records/run/2026/10/2026-10-01-trained-model-retry
 Captured the explicit trained-model retry regression and final app suite/build.
 
+## [2026-10-01 21:56] capture | records/measurements/2026-10-01-conversation-first-ux
+Implemented the approved conversation-first interface; captured 57 passing tests, real browser experiments, training, recovery, keyboard and responsive checks while keeping physical-device and human gates open.
+

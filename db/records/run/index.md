@@ -2,11 +2,13 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-10-01T20:46:22.814459Z
+updated: 2026-10-01T21:56:12.637162Z
 ---
 
 # records/run
 
+- [[records/run/2026/10/2026-10-01-conversation-first-browser]] — Browser evidence for experiments, training, recovery, provenance and responsive layouts
+- [[records/run/2026/10/2026-10-01-conversation-first-checks]] — Conversation-first regression, typecheck, build and preflight output
 - [[records/run/2026/10/2026-10-01-trained-model-retry]] — Trained-model retry regression and final production build
 - [[records/run/2026/10/2026-10-01-mac-browser-smoke]] — Safari live contrast and Firefox default replay smoke observations
 - [[records/run/2026/10/2026-10-01-phone-layout]] — Phone tower geometry and compact accessibility

@@ -8,6 +8,7 @@ export type ToWorker = { id: number } & (
   | { t: "load"; base: string; phone: boolean; expectedHash?: string }
   | { t: "pause"; paused: boolean }
   | { t: "version"; version: number }
+  | { t: "cancel" }
   | { t: "first"; message: string }
   | { t: "next"; reply: number[]; message: string }
   | { t: "plain"; text: string }

@@ -1,8 +1,8 @@
 // The conversation: each turn's normal reply, and once forked, the changed reply beside it (section 4.3).
-import { Fragment, useRef, useState } from "react";
-import type { Reply, Side, Turn } from "../model/types.ts";
-import { continueReply, piece, selectWord, undoPick } from "../state/actions.ts";
-import { store, useStore } from "../state/store.ts";
+import { Fragment, useEffect, useRef, useState } from "react";
+import type { Reply, Side, Tok, Turn } from "../model/types.ts";
+import { continueReply, piece, selectWord, setFocus, undoPick } from "../state/actions.ts";
+import { useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { pct } from "./color.ts";
 import { describe } from "./describe.ts";
@@ -13,17 +13,20 @@ const MARKERS: Record<number, string> = { 151644: "<|im_start|>", 151645: "<|im_
 export function Conversation() {
   const turns = useStore((s) => s.turns);
   const mode = useStore((s) => s.mode);
+  const end = useRef<HTMLDivElement>(null);
   const [reads, setReads] = useState(false);
+  useEffect(() => {
+    if (turns.length > 1 && turns[turns.length - 1]?.normal.source === "live") end.current?.scrollIntoView({ block: "nearest" });
+  }, [turns.length]);
   if (!turns.length) return null;
   return (
-    <div aria-live="off">
+    <div className="conversation" aria-live="off">
       {turns.map((t, k) => <TurnView key={k} turn={t} k={k} last={k === turns.length - 1} live={mode === "live"} />)}
-      <div className="reads-toggle">
-        <button type="button" className="linkish small" aria-expanded={reads} onClick={() => setReads(!reads)}>
-          {reads ? S.hideReads : S.whatItReads}
-        </button>
+      <div ref={end} />
+      <details className="reads-toggle" open={reads} onToggle={(e) => setReads(e.currentTarget.open)}>
+        <summary>{S.whatItReads}</summary>
         {reads && <Reads turns={turns} />}
-      </div>
+      </details>
     </div>
   );
 }
@@ -43,10 +46,12 @@ function TurnView({ turn, k, last, live }: { turn: Turn; k: number; last: boolea
 
 function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: number; side: Side; turn: Turn; last: boolean; live: boolean }) {
   const word = useStore((s) => s.word);
+  const inspecting = useStore((s) => s.sheet);
+  const busy = useStore((s) => s.busy);
   const model = useStore((s) => s.model);
   const compare = side === "normal" ? turn.changed?.compare : undefined;
   const changed = side === "changed";
-  const label = !changed ? (turn.changed ? S.normal : null)
+  const label = !changed ? (turn.changed ? "Original" : model.id === "tiny" ? "Your tiny model" : "Rewire")
     : reply.stale ? S.writtenUnder(describe(reply.changes, turn.normal.read)) : S.changedBy(describe(reply.changes, turn.normal.read));
   const toks = reply.toks;
   const moved = changed && reply.done && !reply.stale ? whatMoved(turn) : null;
@@ -75,35 +80,33 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
   };
   return (
     <div className={`reply${changed ? " changed" : ""}${reply.stale ? " stale" : ""}`}>
-      {label && <div className="who">{label}</div>}
+      <div className="reply-heading"><span className="who">{label}</span><span className="provenance">{reply.source === "recording" ? "Recorded example" : reply.source === "mixed" ? "Recorded start · continued here" : "On this device"}</span></div>
       <div className="text" ref={textRef} onKeyDown={inspectable ? onKey : undefined}
         role={inspectable ? "group" : undefined} aria-label={inspectable ? `${label ?? S.reply}: ${plain}` : undefined}
         aria-description={inspectable ? S.replyWords : undefined}>
-        {toks.map((t, i) => {
+        {wordGroups(toks).map((group) => <span className="token-word" key={group[0].i}>{group.map(({ t, i }) => {
           if (STOP.has(t.id)) return null;
           const sel = word && word.turn === k && word.side === side && word.index === i;
           const pc = compare?.[i] ? Math.exp(compare[i].lp1) : null;
           const pn = Math.exp(t.lp1);
           const under = pc !== null && pc < 0.1 && pc < 0.5 * pn;
           const txt = piece(t.id);
+          const spoken = txt.trim() || (txt.includes("\n") ? "Line break" : "Space");
           if (!inspectable) return <Fragment key={i}>{txt}</Fragment>;
           return (
             <button key={i} type="button" className={`tok${sel ? " sel" : ""}${under ? " under" : ""}${t.picked ? " picked" : ""}${reply.featured?.includes(i) ? " featured" : ""}`}
-              data-i={i} tabIndex={i === roving ? 0 : -1} aria-pressed={!!sel}
-              aria-label={under ? `${txt.trim()}: the changed model gives it ${pct(pc!)}` : undefined}
+              data-i={i} tabIndex={i === roving ? 0 : -1} aria-pressed={!!sel && inspecting}
+              aria-label={under ? `${spoken}: the changed model gives it ${pct(pc!)}` : !txt.trim() ? spoken : undefined}
               title={under ? `Normal ${pct(pn)}, changed ${pct(pc!)}` : undefined}
               onClick={() => selectWord({ turn: k, side, index: i })}>
               {txt}
             </button>
           );
-        })}
+        })}</span>)}
         {!reply.done && <span className="tok cursor" aria-hidden="true" />}
       </div>
       {reply.missing && <p className="note">{S.notRecorded}</p>}
       {moved && <p className="moved">{moved}</p>}
-      {compare && toks.some((t, i) => compare[i] && Math.exp(compare[i].lp1) < 0.1 && Math.exp(compare[i].lp1) < 0.5 * Math.exp(t.lp1)) && (
-        <p className="note">{S.underlineNote}</p>
-      )}
       <div className="foot">
         {reply.pickedAt !== undefined && reply.original && (
           <>
@@ -114,12 +117,24 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
         {reply.done && !reply.ended && !reply.stale && last && (
           <>
             <span>{S.stopped(reply.toks.length, model.piece)}</span>
-            {live && <button type="button" className="btn" onClick={() => void continueReply()}>{S.cont}</button>}
+            {live && <button type="button" className="btn" disabled={busy} onClick={() => void continueReply()}>{S.cont}</button>}
           </>
         )}
       </div>
     </div>
   );
+}
+
+/** Keep adjacent pieces of one word together when a narrow reply wraps. */
+function wordGroups(toks: Tok[]) {
+  const groups: { t: Tok; i: number }[][] = [];
+  toks.forEach((t, i) => {
+    if (STOP.has(t.id)) return;
+    const txt = piece(t.id), previous = groups.at(-1)?.at(-1);
+    if (!previous || /^\s/.test(txt) || /\s$/.test(piece(previous.t.id))) groups.push([]);
+    groups[groups.length - 1].push({ t, i });
+  });
+  return groups;
 }
 
 /** Screen readers hear finished replies, not each streamed word (section 5.5). */
@@ -175,7 +190,7 @@ function Reads({ turns }: { turns: Turn[] }) {
           const txt = m ?? piece(x.id);
           return (
             <button key={x.pos} type="button" className={`piece${m ? " marker" : ""}${hidden.has(x.pos) ? " hidden" : ""}`}
-              title={`position ${x.pos}, id ${x.id}`} onClick={() => store.set({ focus: { kind: "words-in", position: x.pos }, sheet: true })}>
+              title={`position ${x.pos}, id ${x.id}`} aria-label={!txt.trim() ? txt.includes("\n") ? "Line break" : "Space" : undefined} onClick={() => setFocus({ kind: "words-in", position: x.pos })}>
               {txt.replace(/\n/g, "↵")}
             </button>
           );

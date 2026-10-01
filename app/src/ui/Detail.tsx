@@ -65,6 +65,7 @@ const wordText = (id: number) => {
 // ------------------------------------------------------------------ word
 
 function WordPanel({ c }: { c: Chosen | null }) {
+  const [allCandidates, setAllCandidates] = useState(false);
   const model = useStore((s) => s.model);
   const D = S.def(model);
   const temperature = useStore((s) => s.temperature);
@@ -92,7 +93,7 @@ function WordPanel({ c }: { c: Chosen | null }) {
         <p className="note">{S.candidatesNote(t.cut)}</p>
         <table className="cands">
           <tbody>
-            {t.cands.map((x, i) => (
+            {t.cands.slice(0, allCandidates ? undefined : 5).map((x, i) => (
               <tr key={x.id} className={`${x.id === t.id ? "chosen" : ""}${i >= t.cut ? " dropped" : ""}${i === t.cut ? " cutline" : ""}`}>
                 <td><span className="num faint">{i + 1}.</span> {wordText(x.id)}</td>
                 <td className="p num">{pct(x.p)}</td>
@@ -107,12 +108,10 @@ function WordPanel({ c }: { c: Chosen | null }) {
             ))}
           </tbody>
         </table>
-        {t.guesses && <Guesses c={c} />}
+        {t.cands.length > 5 && <button type="button" className="linkish" onClick={() => setAllCandidates(!allCandidates)}>{allCandidates ? "Show fewer candidates" : `Show all ${t.cands.length} candidates`}</button>}
+        {t.guesses && <details><summary>Follow the guesses through the layers</summary><Guesses c={c} /></details>}
       </section>
-      <section>
-        <div className="kicker">{S.control}</div>
-        <SwapControl id={t.id} />
-      </section>
+      <details><summary>Change this word’s dictionary entry</summary><SwapControl id={t.id} /></details>
     </>
   );
 }

@@ -35,6 +35,7 @@ let tok: ChatTokenizer | null = null;
 let concepts = new Map<string, Float32Array[]>();
 let host: Omit<InspectHost, "table"> | null = null;
 let version = 0;
+let writeEpoch = 0;
 let files: ModelFiles | null = null;
 
 interface Slot {
@@ -60,6 +61,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       case "version":
         version = m.version;
         return;
+      case "cancel": writeEpoch++; return;
       case "check": return done(m.id, await check());
       case "load": return done(m.id, await load(m.base, m.phone, m.expectedHash));
       case "first": return done(m.id, need(tok).firstTurn(m.message));
@@ -80,7 +82,10 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
         return post({ t: "done", id: m.id, result: r }, [r.buffer as ArrayBuffer]);
       }
       case "use": which = m.model; return done(m.id, true);
-      case "write": return done(m.id, await locked(m.job.conv, () => write(m.job, m.id)));
+      case "write": {
+        const epoch = writeEpoch;
+        return done(m.id, await locked(m.job.conv, () => write(m.job, m.id, epoch)));
+      }
       case "compare": return done(m.id, await locked(m.conv, () => compare(m.conv, m.changes, m.history, m.reply, m.version)));
       case "inspect": {
         const r = await locked(m.conv, () => inspect(m.conv, m.changes, m.tokens, m.target));
@@ -380,7 +385,8 @@ function contextCheck(n: number) {
   if (n > curModel().cfg.maxContext) throw new Error("context-full");
 }
 
-async function write(job: WriteJob, id: number): Promise<{ ended: boolean; cancelled: boolean }> {
+async function write(job: WriteJob, id: number, epoch = writeEpoch): Promise<{ ended: boolean; cancelled: boolean }> {
+  if (epoch !== writeEpoch) return { ended: false, cancelled: true };
   const all = [...job.history, ...job.prefix];
   const room = curModel().cfg.maxContext - all.length;
   const cap = Math.min(job.cap, room);
@@ -391,7 +397,7 @@ async function write(job: WriteJob, id: number): Promise<{ ended: boolean; cance
   const start = job.prefix.length;
   const toks: number[] = [];
   let submitted = 0, received = 0, ended = false, cancelled = false;
-  const stale = () => job.version >= 0 && version > job.version;
+  const stale = () => epoch !== writeEpoch || (job.version >= 0 && version > job.version);
   const take = async () => {
     const r = await c.result(received);
     received++;

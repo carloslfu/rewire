@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/measurements
-updated: 2026-10-01T20:46:22.833497Z
+updated: 2026-10-01T21:56:12.652833Z
 ---
 
 # records/measurements
 
+- [[records/measurements/2026-10-01-conversation-first-ux]] — Conversation-first UI, real chat, ten experiments, training and fallback checks
 - [[records/measurements/2026-10-01-launch-readiness-continuation]] — Launch-readiness continuation: downloads, recovery and phone layout
 - [[records/measurements/2026-10-01-phase-3-agent-checks]] — Phase 3 agent checks: step 1 plays from its recording at 1.4 s on a 9 Mbps link before the model arrives; keyboard-only flow, accessibility tree, targets and copy fixed and verified
 - [[records/measurements/2026-10-01-tiny-model]] — Tiny model: gradient matches float64 (relative error 5e-7), engine agrees with jax-js (4e-5), noise to words in 16 s on WebGPU

@@ -1,44 +1,48 @@
 // The step card, change chips, composer, device line, path list and "What's real here".
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { applyChips, chipsWith, checkDevice, freshStart, openStep, pauseDownload, replayAlternative, send, setFocus, shippingSteps,
-  startDownload, stepAction, stepData } from "../state/actions.ts";
+  startDownload, stepAction, stepData, stopReply, useExperiment, canUseInChat } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { type StepData, stepCopy } from "../path/steps.ts";
 import { S } from "../strings.ts";
 import { chips as chipDefs, multOf, withMult } from "./describe.ts";
 import { Knob } from "./Knob.tsx";
+import { Modal } from "./Modal.tsx";
 
 // ------------------------------------------------------------------ step card
 
 export function StepCard() {
   const step = useStore((s) => s.step);
   const tried = useStore((s) => s.stepTried);
-  const mode = useStore((s) => s.mode);
   const busy = useStore((s) => s.busy);
+  const turns = useStore((s) => s.turns);
+  const model = useStore((s) => s.model);
   const st = stepData(step);
-  if (!st) return null;
+  if (model.id === "tiny") return null;
+  if (!st) return turns.length ? <div className="experiment-invitation">
+    <span>What happens if you change the model?</span>
+    <button type="button" className="btn change" disabled={busy} onClick={() => store.set({ pathOpen: true })}>Try an experiment</button>
+  </div> : null;
   const copy = stepCopy(st);
-  if (!copy) return null;
-  const steps = shippingSteps();
-  const i = steps.findIndex((x) => x.n === st.n);
-  const prev = steps[i - 1], next = steps[i + 1];
+  if (!copy || st.control.kind === "tiny") return null;
+  const isExample = turns.length === 1 && turns[0].normal.source === "recording" && turns[0].user === st.message;
+  const swap = st.control.kind === "swap" ? st.control : null;
   return (
-    <section className="step" aria-labelledby="step-title">
-      <div className="count">{S.stepOf(i + 1, steps.length)}{st.core ? "" : ""}</div>
-      <h2 id="step-title">{copy.title}</h2>
-      <p className="q">{copy.question}</p>
-      {copy.term && S.terms[copy.term] && (
-        <p className="term">{S.terms[copy.term][0]}: <i>{S.terms[copy.term][1]}</i></p>
-      )}
-      <div className="controls"><StepControlView st={st} disabled={busy} /></div>
-      {tried && <p className="why" role="status">{copy.why}</p>}
-      <div className="nav">
-        {prev && <a className="btn quiet" href={`#step-${prev.n}`} onClick={(e) => { e.preventDefault(); void openStep(prev.n); }}>{S.back}</a>}
-        {tried && st.control.kind !== "tiny" && (mode === "live" ? (
-          <button type="button" className="btn quiet" onClick={() => { store.set({ step: null }); document.getElementById("composer")?.focus(); }}>{S.tryOwn}</button>
-        ) : st.alternatives?.length ? <span className="note">{S.tryOwnReplay}: below</span> : null)}
-        <span className="spacer" />
-        {next && <a className="btn primary" href={`#step-${next.n}`} onClick={(e) => { e.preventDefault(); void openStep(next.n); }}>{S.next}</a>}
+    <section className={`step${swap ? " swap-step" : ""}`} aria-labelledby="step-title">
+      <div className="experiment-row">
+        <div className="experiment-intro">
+          <p className="eyebrow">{swap ? "Try changing its dictionary" : "Change the model"}</p>
+          <h2 id="step-title">{swap ? <>{swap.a} <span className="swap-arrow" aria-hidden="true">↔</span> {swap.b}</> : copy.title}</h2>
+          {!swap && <p className="q">{copy.question}</p>}
+        </div>
+        <div className="controls"><StepControlView st={st} disabled={busy || !turns.length} /></div>
+      </div>
+      <div className="experiment-foot">
+        {tried && isExample && <p className="why" role="status">{swap ? "Same question. Different numbers inside the model." : "Compare the replies, then look inside to see what changed."}</p>}
+        <div className="experiment-links">
+          <button type="button" className="linkish" disabled={busy || !turns.length} onClick={() => store.set({ sheet: true, inspectView: "explanation" })}>Look inside</button>
+          {!isExample && <button type="button" className="linkish muted" onClick={() => void openStep(st.n)}>See the example</button>}
+        </div>
       </div>
     </section>
   );
@@ -128,6 +132,7 @@ function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) 
 export function Chips() {
   const spec = useStore((s) => s.chips);
   const turns = useStore((s) => s.turns);
+  const busy = useStore((s) => s.busy);
   const defs = chipDefs(spec, turns[0]?.normal.read);
   if (!defs.length) return null;
   return (
@@ -135,10 +140,10 @@ export function Chips() {
       {defs.map((d) => (
         <span key={d.key} className="chip">
           {d.label}
-          <button type="button" aria-label={S.remove(d.label)} onClick={() => void applyChips(d.without())}>×</button>
+          <button type="button" disabled={busy} aria-label={S.remove(d.label)} onClick={() => void applyChips(d.without())}>×</button>
         </span>
       ))}
-      <button type="button" className="btn quiet" onClick={() => void applyChips({})}>{S.resetAll}</button>
+      {defs.length > 1 && <button type="button" className="btn quiet" disabled={busy} onClick={() => void applyChips({})}>{S.resetAll}</button>}
     </div>
   );
 }
@@ -154,37 +159,33 @@ export function Composer() {
   const tried = useStore((s) => s.stepTried);
   const [text, setText] = useState("");
   const st = stepData(step);
-  // A step's other questions appear once its change has been tried, so the first tap is the step's own control.
-  if (mode !== "live") {
-    const alts = tried ? st?.alternatives ?? [] : [];
-    if (!alts.length) return null;
-    return (
-      <div>
-        <p className="note">{S.placeholderReplay}</p>
-        <div className="suggest">
-          {alts.map((a) => <button key={a} type="button" className="btn" onClick={() => void playAlternative(a)}>{a}</button>)}
-        </div>
-      </div>
-    );
-  }
-  const suggest = model.id === "qwen" && st && tried ? stepCopy(st)?.suggestions ?? [] : [];
-  if (full) return (
-    <div className="composer" role="status">
-      <span className="note" style={{ flex: 1 }}>{S.contextFull}</span>
-      <button type="button" className="btn primary" onClick={freshStart}>{S.freshStart}</button>
-    </div>
-  );
+  const alts = mode !== "live" && tried ? st?.alternatives ?? [] : [];
+  const submit = () => {
+    if (mode !== "live" || busy || !text.trim()) return;
+    const message = text;
+    setText("");
+    void send(message);
+  };
+  if (full) return <div className="context-full" role="status">
+    <p>{S.contextFull} Start fresh to keep chatting with the current changes.</p>
+    <button type="button" className="btn primary" onClick={freshStart}>{S.freshStart}</button>
+  </div>;
   return (
     <div>
-      <form className="composer" onSubmit={(e) => { e.preventDefault(); const t = text; setText(""); void send(t); }}>
-        <input id="composer" value={text} onChange={(e) => setText(e.target.value)} placeholder={model.id === "tiny" ? S.placeholderTiny : S.placeholderLive} aria-label="Message" disabled={busy} autoComplete="off" />
-        <button type="submit" className="btn primary" disabled={busy || !text.trim()}>{S.send}</button>
+      <label className="composer-label" htmlFor="composer">{model.id === "tiny" ? "Start a sentence" : "Try your own question"}</label>
+      <form className="composer main-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <textarea id="composer" rows={2} value={text} onChange={(e) => setText(e.target.value)}
+          placeholder={model.id === "tiny" ? S.placeholderTiny : S.placeholderLive} aria-label="Message" autoComplete="off"
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }} />
+        {busy ? <button type="button" className="btn stop" onClick={stopReply}>Stop</button>
+          : <button type="submit" className="btn primary" disabled={mode !== "live" || !text.trim()}>{S.send}</button>}
       </form>
-      {suggest.length > 0 && (
-        <div className="suggest">
-          {suggest.map((q) => <button key={q} type="button" className="btn" disabled={busy} onClick={() => void send(q)}>{q}</button>)}
-        </div>
-      )}
+      {model.id === "qwen" && <DeviceBar />}
+      {mode === "live" && <p className="composer-note">{model.id === "tiny" ? "Your trained model · continues text one letter at a time" : "Runs on your device · your messages stay here"}</p>}
+      {alts.length > 0 && <details className="replay-alternatives">
+        <summary>Try another recorded question</summary>
+        <div className="suggest">{alts.map((a) => <button key={a} type="button" className="btn quiet" disabled={busy} onClick={() => void playAlternative(a)}>{a}</button>)}</div>
+      </details>}
     </div>
   );
 }
@@ -225,52 +226,43 @@ export function DeviceBar() {
 
 // ------------------------------------------------------------------ path list
 
+const featuredExperiments = [1, 3, 6];
+
 export function PathList() {
   const open = useStore((s) => s.pathOpen);
-  const step = useStore((s) => s.step);
-  const ref = useRef<HTMLDialogElement>(null);
-  // A native modal dialog: the browser traps focus, closes on Escape and returns focus to the opener.
-  useEffect(() => {
-    const d = ref.current;
-    if (!d) return;
-    if (open && !d.open) d.showModal();
-    if (!open && d.open) d.close();
-  }, [open]);
-  const steps = open ? shippingSteps() : [];
-  return (
-    <dialog ref={ref} className="drawer" aria-labelledby="path-title" onClose={() => store.set({ pathOpen: false })}
-      onClick={(e) => { if (e.target === e.currentTarget) store.set({ pathOpen: false }); }}>
-      {open && (
-        <nav aria-label={S.pathTitle}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h2 id="path-title">{S.pathTitle}</h2>
-            <button type="button" className="btn quiet" onClick={() => store.set({ pathOpen: false })}>{S.close}</button>
-          </div>
-          <p className="note" style={{ marginTop: 4 }}>{S.pathIntro}</p>
-          <ol>
-            {steps.map((s, i) => (
-              <li key={s.n}>
-                <a href={`#step-${s.n}`} aria-current={s.n === step ? "step" : undefined}
-                  onClick={(e) => { e.preventDefault(); void openStep(s.n); }}>
-                  <span className="n">{i + 1}</span>
-                  <span>{stepCopy(s)?.title ?? s.slug}</span>
-                </a>
-              </li>
-            ))}
-          </ol>
-          <WhatsReal />
-        </nav>
-      )}
-    </dialog>
-  );
+  const busy = useStore((s) => s.busy);
+  const mode = useStore((s) => s.mode);
+  const model = useStore((s) => s.model);
+  const turns = useStore((s) => s.turns);
+  const hasOwnChat = mode === "live" && model.id === "qwen" && turns.some((t) => t.normal.source !== "recording");
+  const steps = open ? shippingSteps().filter((s) => s.control.kind !== "tiny") : [];
+  const row = (s: StepData) => {
+    const copy = stepCopy(s);
+    const canApply = hasOwnChat && canUseInChat(s);
+    return <li key={s.n}>
+      <div><h3>{copy?.title ?? s.slug}</h3><p>{copy?.question}</p></div>
+      <div className="experiment-choices">
+        {canApply && <button type="button" className="btn change" disabled={busy} onClick={() => void useExperiment(s.n)}>Use in this chat</button>}
+        <a className={`btn${canApply ? " quiet" : ""}`} href={`#step-${s.n}`} onClick={(e) => { e.preventDefault(); void openStep(s.n); }}>Try the example</a>
+      </div>
+    </li>;
+  };
+  return <Modal open={open} onClose={() => store.set({ pathOpen: false })} title="Experiments" className="experiment-browser">
+    <p className="modal-intro">Change one thing and see what happens. Examples are recorded runs you can explore right away.</p>
+    <ul className="experiment-list">{featuredExperiments.flatMap((n) => steps.filter((s) => s.n === n)).map(row)}</ul>
+    <details className="more-experiments"><summary>More to explore</summary>
+      <ul className="experiment-list">{steps.filter((s) => !featuredExperiments.includes(s.n)).map(row)}</ul>
+    </details>
+    <div className="training-invitation"><div><h3>Teach a tiny model</h3><p>Watch a separate, smaller model learn from text.</p></div>
+      <button type="button" className="btn" onClick={() => { stopReply(); store.set({ tiny: true, pathOpen: false, sheet: false }); }}>Open training</button>
+    </div>
+  </Modal>;
 }
 
-export function WhatsReal() {
-  const [open, setOpen] = useState(false);
-  return (
-    <div style={{ marginTop: 18 }}>
-      <button type="button" className="linkish small" aria-expanded={open} onClick={() => setOpen(!open)}>{S.whatsReal}</button>
-      {open && <ul className="whatsreal note">{S.whatsRealBody.map((x) => <li key={x}>{x}</li>)}</ul>}
-    </div>
-  );
+export function WhatsReal({ expanded = false }: { expanded?: boolean }) {
+  const [open, setOpen] = useState(expanded);
+  return <div className="whats-real">
+    {!expanded && <button type="button" className="linkish small" aria-expanded={open} onClick={() => setOpen(!open)}>{S.whatsReal}</button>}
+    {open && <ul className="whatsreal note">{S.whatsRealBody.map((x) => <li key={x}>{x}</li>)}</ul>}
+  </div>;
 }

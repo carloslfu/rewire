@@ -7,6 +7,17 @@ own writing in front of you. No server does the thinking and nothing you type le
 
 Status: in development. The build follows phases with exit checks; measurements and decisions are in `db/`.
 
+## The experience
+
+Start with a conversation and one experiment: swap Paris and Rome. Live chat accepts your own questions
+and follow-ups. A change adds an original/changed comparison; undo keeps the conversation. The optional
+Experiments menu can apply a modification to the current chat or open its recorded example.
+
+Word probabilities and the full model open in the inspector. Training has its own view, with writing
+before and after learning first, and the learning curve and gradient details behind disclosures. Replies
+say whether they were recorded, generated here, or continued here from a recording. The model is small
+and can give confident wrong answers.
+
 ## Layout
 
 - `app/` the page: React, Vite and TypeScript, built as static files
@@ -26,7 +37,7 @@ pnpm -C app dev
 
 The page plays recordings of real runs until the model is on the device. To run it live in development,
 convert the weights (`py/tools/convert.py`, see `py/`) into `artifacts/weights/<id>/`; the dev server serves
-them at `/weights/`. Tests: `pnpm -C engine test`, `pnpm -C tiny test`, `uv run pytest` in `py/`.
+them at `/weights/`. Tests: `pnpm test` runs the engine, tiny-model and app suites; `uv run pytest` in `py/` runs the reference checks.
 
 ## Checking the production build
 

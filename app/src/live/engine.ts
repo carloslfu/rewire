@@ -54,6 +54,10 @@ export class EngineClient {
     this.startWorker();
   }
 
+  cancel() {
+    this.w.postMessage({ t: "cancel", id: 0 } satisfies ToWorker);
+  }
+
   private startWorker() {
     this.w = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     this.w.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);

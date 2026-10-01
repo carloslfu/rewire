@@ -62,10 +62,10 @@ self.onmessage = async (e: MessageEvent<TinyIn>) => {
   const m = e.data;
   try {
     if (m.t === "stop") { stopped = true; return; }
+    if (m.t === "start") stopped = false;
     const dev = await start();
     if (!dev) { post({ t: "unsupported", reason: "WebGPU is not available" }); return; }
     if (m.t === "start") {
-      stopped = false;
       post({ t: "ready", device: dev });
       const ids = encode(m.text);
       let tr: Trainer | null = adamTrainer(cfg, initParams(cfg, m.seed), { lr: m.lr, b1: 0.9, b2: 0.99, eps: 1e-8 });

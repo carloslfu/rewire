@@ -55,6 +55,9 @@ export interface State {
   announce: string;
   /** Phone: the detail sheet is open. */
   sheet: boolean;
+  /** Inspection is revealed only after an explicit request. */
+  inspectView: "explanation" | "word" | "model";
+  error: string | null;
   /** Qwen's mode while the tiny model is on screen. */
   qwenMode?: Mode;
   /** The conversation reached the model's context limit. */
@@ -84,6 +87,8 @@ export const initial: State = {
   tiny: false,
   announce: "",
   sheet: false,
+  inspectView: "word",
+  error: null,
 };
 
 type Listener = () => void;

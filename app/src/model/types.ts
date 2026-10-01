@@ -50,7 +50,9 @@ export interface Reply {
   /** Written under chips that are no longer on screen: shown as plain text, not inspectable. */
   stale?: boolean;
   /** Where it came from. */
-  source: "recording" | "live";
+  source: "recording" | "live" | "mixed";
+  /** Retain provenance when the visitor changes experiments without clearing their chat. */
+  recording?: string;
   /** The reply before the visitor picked a word (Undo). */
   original?: Reply;
   /** Index of the picked word. */

@@ -2,14 +2,14 @@
 type: index
 scope: type-folder
 folder: records/plan
-updated: 2026-10-01T20:30:14.964428Z
+updated: 2026-10-01T21:56:12.698610Z
 ---
 
 # records/plan
 
 - [[records/plan/08-phase-5]] — Phase 5: launch readiness
-- [[records/plan/07-phase-4]] — Phase 4: the tiny model
 - [[records/plan/06-phase-3]] — Phase 3: the explainer
+- [[records/plan/07-phase-4]] — Phase 4: the tiny model
 - [[records/plan/04-phase-1]] — Phase 1: engine core
 - [[records/plan/03-phase-0b]] — Phase 0B: speed spike
 - [[records/plan/05-phase-2]] — Phase 2: changes and inspection
