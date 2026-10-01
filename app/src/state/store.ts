@@ -81,7 +81,7 @@ export const initial: State = {
   view: "push",
   temperature: 0.7,
   seed: 11,
-  step: 1,
+  step: null,
   pathOpen: false,
   stepTried: false,
   tiny: false,

@@ -23,9 +23,9 @@ export const S = {
 
   // device check and download (section 5.1)
   checking: "Checking whether this device can run the model…",
-  noWebgpu: "This browser can't run the model, so these are recordings of real runs. Browsers with WebGPU, such as recent Chrome, Edge and Safari, can run it live.",
-  slow: "This device is too slow to run it live, so these are recordings of real runs.",
-  crashed: "The model stopped this tab last time, so these are recordings of real runs.",
+  noWebgpu: "This browser cannot run live chat. You can explore recorded experiments, or try a browser with WebGPU.",
+  slow: "Live chat may be slow on this device. You can explore recorded experiments or try it anyway.",
+  crashed: "The model did not finish cleanly last time. You can explore recorded experiments or try running it again.",
   tryAnyway: "Run it live anyway",
   offer: (mb: number | null) => `This device can run the model live. ${mb ? `It is a ${mb} MB download` : "It is a download of a few hundred MB"}. The browser will try to keep it for next time.`,
   download: "Enable live chat",
@@ -101,7 +101,7 @@ export const S = {
   diffNote: "Changed model minus normal model, on the normal reply's words.",
   diffNone: "The Difference view needs a change.",
   towerCaption: (m: ModelInfo) => "Lighting shows each part's direct push only; parts that work through later floors can stay pale." +
-    (m.id === "tiny" ? "" : " The first floor barely lights, yet losing it is fatal."),
+    (m.id === "tiny" ? "" : " A pale layer can still be essential."),
   wordsIn: "Words in",
   wordsOut: "Words out",
   floorN: (n: number) => `Floor ${n}`,

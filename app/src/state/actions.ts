@@ -457,7 +457,7 @@ export async function openTiny(params: Float32Array) {
   setHash(null);
 }
 
-export async function backToQwen(n: number | null = shippingSteps()[0]?.n ?? null) {
+export async function backToQwen(n: number | null = null) {
   stopReply();
   claim("normal");
   claim("changed");
@@ -668,7 +668,7 @@ export async function checkDevice(force = false) {
   }
   if (!r.webgpu) return setDevice({ kind: "no-webgpu" });
   if (r.seconds > 4 && !force) return setDevice({ kind: "slow", seconds: r.seconds });
-  if (r.seconds <= 2 && !isPhone() && !force) return startDownload(r.seconds);
+  // Loading chat is explicit, so a visitor can train the tiny model without downloading Qwen.
   setDevice({ kind: "offer", seconds: r.seconds, bytes: await downloadBytes() });
 }
 
@@ -779,10 +779,10 @@ export async function start() {
   watchExit();
   path = await loadPath();
   const m = /^#step-(\d+)$/.exec(location.hash);
-  const n = m ? Number(m[1]) : 1;
+  const n = m ? Number(m[1]) : null;
   const exists = path?.steps.some((s) => s.n === n);
   if (m && !exists) store.set({ pathOpen: true });
-  await Promise.all([openStep(exists ? n : path?.steps[0]?.n ?? null), checkDevice()]);
+  await Promise.all([openStep(exists ? n : null), checkDevice()]);
   addEventListener("hashchange", () => {
     const mm = /^#step-(\d+)$/.exec(location.hash);
     if (!mm) return;

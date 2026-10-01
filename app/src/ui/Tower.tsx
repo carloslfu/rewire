@@ -9,7 +9,7 @@ import { diverging, signed } from "./color.ts";
 import { multOf } from "./describe.ts";
 import { chosen, FLOORS, HEADS, hardestFloors, headIndex, maxAbs, memIndex, towerValues } from "./word.ts";
 
-export function Tower({ compact }: { compact?: boolean }) {
+export function Tower({ compact, embedded }: { compact?: boolean; embedded?: boolean }) {
   const turns = useStore((s) => s.turns);
   const word = useStore((s) => s.word);
   const fork = useStore((s) => s.fork);
@@ -22,16 +22,16 @@ export function Tower({ compact }: { compact?: boolean }) {
   const scale = vals ? maxAbs(vals) : 1;
   const w = c ? piece(c.tok.id) : "";
   const wq = w.trim() || w;
+  const atlasData = pathData()?.atlas;
   const atlas = useMemo(() => {
-    const a = pathData()?.atlas;
+    const a = model.id === "qwen" ? atlasData : undefined;
     const m = new Map<string, string>();
     for (const [f, h] of a?.copying ?? []) m.set(`${f}.${h}`, "copying head");
     for (const [f, h] of a?.start_marker ?? []) if (!m.has(`${f}.${h}`)) m.set(`${f}.${h}`, "rests on the start marker");
     for (const [f, h] of a?.answer_heads ?? []) if (!m.has(`${f}.${h}`)) m.set(`${f}.${h}`, "answer pusher");
     return m;
-  }, []);
+  }, [model.id, atlasData]);
   const gridRef = useRef<HTMLDivElement>(null);
-  const flowKey = c ? `${c.ref.turn}.${c.ref.side}.${c.ref.index}.${view}` : "none";
   const hasDiff = !!c?.forced;
   const bits = chips.bits ?? 4;
 
@@ -56,11 +56,12 @@ export function Tower({ compact }: { compact?: boolean }) {
   for (let L = FLOORS - 1; L >= 0; L--) {
     const fm = multOf(chips, "floor", L);
     const conceptHere = chips.concept && chips.concept.strength !== 0 && chips.concept.floor === L;
+    const zeroedHere = chips.zeroed?.filter((z) => z.floor === L).length ?? 0;
     rows.push(
-      <button key={`l${L}`} type="button" className={`lbl${fm !== 1 || conceptHere ? " row-edit" : ""}`} data-r={L} data-c={-1}
-        tabIndex={L === FLOORS - 1 ? 0 : -1} aria-label={`${S.floorN(L + 1)}${fm !== 1 ? `, ${S.mult(fm)}` : ""}`}
+      <button key={`l${L}`} type="button" className={`lbl${fm !== 1 || conceptHere || zeroedHere ? " row-edit" : ""}`} data-r={L} data-c={-1}
+        tabIndex={L === FLOORS - 1 ? 0 : -1} aria-label={`${S.floorN(L + 1)}${fm !== 1 ? `, ${S.mult(fm)}` : ""}${zeroedHere ? `, ${zeroedHere} weights set to zero` : ""}`}
         onClick={() => setFocus({ kind: "floor", floor: L })}>
-        {L + 1}{fm !== 1 ? (fm === 0 ? "∅" : "*") : ""}
+        {L + 1}{fm !== 1 ? (fm === 0 ? "∅" : "*") : zeroedHere ? "*" : ""}
       </button>,
     );
     for (let h = 0; h < HEADS; h++) {
@@ -68,7 +69,7 @@ export function Tower({ compact }: { compact?: boolean }) {
       const m = multOf(chips, "head", L, h);
       const at = atlas.get(`${L}.${h}`);
       rows.push(
-        <button key={`${flowKey}-h${L}.${h}`} type="button" data-r={L} data-c={h} tabIndex={-1}
+        <button key={`h${L}.${h}`} type="button" data-r={L} data-c={h} tabIndex={-1}
           className={`cell${vals ? " flowing" : ""}${m !== 1 || fm !== 1 ? " edit" : ""}${m === 0 || fm === 0 ? " off" : ""}${at ? " atlas" : ""}${isOn({ kind: "head", floor: L, head: h }) ? " on" : ""}`}
           style={{ background: v === undefined ? undefined : diverging(v / scale), animationDelay: `${L * 9}ms` }}
           aria-label={`${S.floorN(L + 1)}, ${S.headN(h + 1)}${m !== 1 ? ` (${S.mult(m)})` : ""}${at ? `, ${at}, ${S.foundByTesting}` : ""}:${label(v)}`}
@@ -79,7 +80,7 @@ export function Tower({ compact }: { compact?: boolean }) {
     const v = vals?.[memIndex(L)];
     const mm = multOf(chips, "memory", L);
     rows.push(
-      <button key={`${flowKey}-m${L}`} type="button" data-r={L} data-c={HEADS} tabIndex={-1}
+      <button key={`m${L}`} type="button" data-r={L} data-c={HEADS} tabIndex={-1}
         className={`cell mem${vals ? " flowing" : ""}${mm !== 1 || fm !== 1 ? " edit" : ""}${mm === 0 || fm === 0 ? " off" : ""}${isOn({ kind: "memory", floor: L }) ? " on" : ""}`}
         style={{ background: v === undefined ? undefined : diverging(v / scale), animationDelay: `${L * 9}ms` }}
         aria-label={`${S.floorN(L + 1)}, ${S.memoryBlock}${mm !== 1 ? ` (${S.mult(mm)})` : ""}:${label(v)}`}
@@ -116,8 +117,8 @@ export function Tower({ compact }: { compact?: boolean }) {
       <div className={`tower${compact ? " compact" : ""}`} ref={gridRef} onKeyDown={onKey} role="group" aria-label={S.tower}
         inert={compact} aria-hidden={compact || undefined}
         // fixed side columns, so the head cells grow to the 24px target size before anything else takes the space
-        style={{ gridTemplateColumns: `32px repeat(${HEADS}, minmax(${compact ? 10 : 24}px, ${HEADS > 8 ? 24 : 48}px)) 8px 36px`,
-          minWidth: compact ? undefined : 32 + HEADS * 24 + 8 + 36 + HEADS + 2 }}>
+        style={{ gridTemplateColumns: embedded ? `26px repeat(${HEADS}, minmax(0, 1fr)) 6px 30px` : `32px repeat(${HEADS}, minmax(${compact ? 10 : 24}px, ${HEADS > 8 ? 24 : 48}px)) 8px 36px`,
+          minWidth: compact || embedded ? undefined : 32 + HEADS * 24 + 8 + 36 + HEADS + 2 }}>
         <span aria-hidden="true" />
         <button type="button" className={`wide${isOn({ kind: "words-out" }) ? " on" : ""}`} onClick={() => setFocus({ kind: "words-out" })}
           aria-label={`${S.wordsOut}${c ? `: "${wq}"${prob !== undefined ? `, ${Math.round(prob * 100)}%` : ""}` : ""}`}>

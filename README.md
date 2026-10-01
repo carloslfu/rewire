@@ -9,14 +9,25 @@ Status: in development. The build follows phases with exit checks; measurements 
 
 ## The experience
 
-Start with a conversation and one experiment: swap Paris and Rome. Live chat accepts your own questions
-and follow-ups. A change adds an original/changed comparison; undo keeps the conversation. The optional
-Experiments menu can apply a modification to the current chat or open its recorded example.
+The lab has two benches. **Dismantle** starts with your own question and keeps a live visualizer
+beside the conversation on desktop. On mobile, open it with Show model. Cut layers, change individual
+heads, zero selected weights, or reduce weight precision. Original and changed replies share the same
+sampling seed. Changes persist into new questions; Restore removes them. Recorded experiments are
+optional and labeled.
 
-Word probabilities and the full model open in the inspector. Training has its own view, with writing
-before and after learning first, and the learning curve and gradient details behind disclosures. Replies
-say whether they were recorded, generated here, or continued here from a recording. The model is small
-and can give confident wrong answers.
+**Grow** trains a separate 800,256-parameter transformer from random weights using actual backpropagation
+in the browser. Its editable starter language withholds six combinations from thirty training examples.
+Test cases and expected answers are editable, and test prompts run without the training corpus in context.
+The live weight map shows actual parameter values or their changes since initialization. Keep learning
+continues from current weights with a fresh optimizer, including after changing the training text.
+
+Scramble and Erase rewrite the learned matrix parameters themselves. A retained intact copy makes the
+experiment reversible, and both copies generate with the same input and sampling seed. Open the result
+in the full lab to inspect attention and direct contributions or disable components. Training does not
+fine-tune Qwen. The tiny model trains on 64-letter windows and works best with short ASCII patterns.
+
+Qwen replies identify recorded, locally generated, and mixed provenance. Neither model is a reliable
+source of facts. The visualizer reports measured contributions, not a complete causal explanation.
 
 ## Layout
 
@@ -35,7 +46,8 @@ pnpm install
 pnpm -C app dev
 ```
 
-The page plays recordings of real runs until the model is on the device. To run it live in development,
+Load Qwen explicitly with Enable live chat. Recorded runs are available while it downloads. Grow needs
+no pretrained model download and does not start the Qwen download in the background. To run chat live in development,
 convert the weights (`py/tools/convert.py`, see `py/`) into `artifacts/weights/<id>/`; the dev server serves
 them at `/weights/`. Tests: `pnpm test` runs the engine, tiny-model and app suites; `uv run pytest` in `py/` runs the reference checks.
 

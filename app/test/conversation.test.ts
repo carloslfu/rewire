@@ -50,6 +50,29 @@ beforeEach(async () => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+it("opens on freeform input and keeps interventions across a fresh conversation", async () => {
+  expect(store.get().step).toBeNull();
+  expect(store.get().turns).toHaveLength(0);
+  await actions.applyChips({ zeroed: [{ floor: 2, tensor: "down", row: 5, col: 7 }] });
+  await actions.send("An unrecorded question");
+  const changes = store.get().chips;
+  actions.freshStart();
+  await actions.send("A different question");
+  expect(store.get().chips).toEqual(changes);
+  expect(store.get().turns).toHaveLength(1);
+  expect(store.get().turns[0].changed?.changes).toEqual(changes);
+  await actions.applyChips({});
+  expect(store.get().turns[0].changed).toBeUndefined();
+});
+
+it("offers the chat download even on fast devices so Grow needs no pretrained model", async () => {
+  mock.check.mockResolvedValueOnce({ webgpu: true, seconds: 0.5 });
+  const loads = mock.load.mock.calls.length;
+  await actions.checkDevice();
+  expect(store.get().device.kind).toBe("offer");
+  expect(mock.load).toHaveBeenCalledTimes(loads);
+});
+
 it("accepts only one submission while tokenization is pending", async () => {
   const first = deferred<number[]>();
   mock.firstTurn.mockReturnValueOnce(first.promise);

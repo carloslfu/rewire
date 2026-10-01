@@ -321,3 +321,99 @@ h3 { font-size: 15px; font-weight: 600; }
 .training-details[open] > summary { margin-bottom: 15px; }
 .tiny textarea { font-size: 16px; margin-top: 9px; }
 @media(max-width:620px) { .training-samples { grid-template-columns: minmax(0,1fr); gap: 18px; } }
+
+/* The experiment bench: output beside the instrument, with no simulated activity. */
+.top { position: sticky; top: 0; z-index: 5; }
+.top-actions .active-tab { color: var(--fg); box-shadow: inset 0 -2px var(--changed); border-radius: 0; }
+.lab-layout { display: grid; grid-template-columns: minmax(0, 1fr) 520px; max-width: 1600px; margin: auto; align-items: start; }
+.lab-layout > .workspace { width: 100%; max-width: 880px; padding: 30px 44px 70px; }
+.lab-scope { position: sticky; top: 77px; max-height: calc(100dvh - 77px); overflow-y: auto; border-left: 1px solid var(--line); background: var(--panel); padding: 26px 24px 32px; scrollbar-width: thin; min-width: 0; }
+.scope-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.scope-title h2 { font-size: 21px; }
+.scope-title > .num { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.scope-title .btn { font-size: 11px; padding: 4px; }
+.scope-provenance { font-family: var(--mono); font-size: 11px; color: var(--muted); margin: 8px 0 20px; }
+.lab-controls { padding: 17px 0; margin-bottom: 21px; border-block: 1px solid var(--line); }
+.lab-controls .btn { font-size: 12px; padding: 7px 10px; min-height: 34px; }
+.lab-controls .btn[aria-pressed=true] { background: var(--changed-soft); border-color: var(--changed); color: var(--changed); }
+.lab-controls .note { margin-top: 12px; font-size: 12px; }
+.lab-scope .tower-head h2 { font-size: 16px; min-width: 170px; }
+.lab-scope .tower .cell, .lab-scope .tower .lbl { min-height: 19px; }
+.lab-scope .tower .cell { transition: background-color .1s linear; animation: none; }
+.lab-scope .caption, .lab-scope .legend { font-size: 11px; }
+.lab-heading h1 { font-size: clamp(32px, 3.1vw, 48px); line-height: 1.12; letter-spacing: -1.8px; white-space: pre-line; max-width: 600px; }
+.lab-heading > p:not(.eyebrow) { margin-top: 18px; max-width: 460px; color: var(--muted); font-size: 16px; }
+.empty-chat.lab-heading { padding: 35px 0 42px; }
+.lab-onramp { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 30px; }
+.lab-onramp .linkish { color: var(--muted); }
+.mobile-scope-toggle { display: none; }
+.training-workspace .lab-heading { margin: 20px 0 38px; }
+.training-workspace h2 { font-size: 20px; }
+.training-workspace section + section { margin-top: 32px; padding-top: 26px; border-top: 1px solid var(--line); }
+.section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.section-heading .num { font-size: 12px; color: var(--muted); }
+.teaching-data textarea { width: 100%; margin: 14px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 15px 18px; font: 14px/1.6 var(--mono); resize: vertical; }
+.training-status { margin-top: 12px; min-height: 20px; }
+.training-workspace .sample { font: 14px/1.65 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0 0; padding: 14px; border: 0; border-left: 2px solid var(--line); background: var(--soft); }
+.training-workspace .training-samples > div:last-child .sample { border-color: var(--changed); }
+.learning-output canvas { width: 100%; height: 100px; margin-top: 20px; }
+.test-bench > .note, .damage-bench > .note { margin: 10px 0; }
+.probe-input { display: flex; gap: 10px; margin: 15px 0; }
+.probe-input input { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font-family: var(--mono); padding: 12px; flex: 1; width: 0; min-width: 0; }
+.probe-result { margin: 20px 0; }
+.probe-prompt { color: var(--muted); }
+.test-results { margin-top: 14px; font-size: 13px; overflow-x: auto; }
+.test-results table { width: 100%; margin: 15px 0; border-collapse: collapse; font: 12px/1.6 var(--mono); text-align: left; }
+.test-results td, .test-results th { border-bottom: 1px solid var(--line); padding: 8px 6px; }
+.test-pass { color: var(--ok); }
+.damage-strength { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 20px 0; font-size: 13px; }
+.damage-strength output { font-family: var(--mono); margin-left: auto; }
+.damage-strength input { width: 100%; accent-color: var(--changed); }
+.training-handoff .note { margin-top: 10px; }
+.weight-scope > .note { margin-top: 12px; }
+.weight-layers { display: grid; gap: 6px; margin: 24px 0; }
+.weight-layers button { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; font: 12px var(--mono); }
+.weight-layers button[aria-pressed=true] { border-color: var(--changed); }
+.weight-trace { display: flex; gap: 5px; width: 62%; }
+.weight-trace i { width: 14%; height: 17px; background: var(--changed); }
+.scope-settings { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; font-size: 12px; }
+.scope-settings select { background: var(--panel); border: 1px solid var(--line); padding: 7px; border-radius: 5px; }
+.weight-image { margin-top: 18px; }
+.weight-image .strip { image-rendering: pixelated; }
+.weight-metrics { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 12px; margin: 24px 0; border-block: 1px solid var(--line); padding: 18px 0; }
+.weight-metrics dt { font-size: 11px; color: var(--muted); }
+.weight-metrics dd { font: 17px var(--mono); margin: 7px 0 0; }
+.scope-footnote { font-size: 11px; color: var(--muted); line-height: 1.65; }
+@media (min-width: 1600px) { .lab-layout { border-right: 1px solid var(--line); } }
+@media (max-width: 1100px) { .lab-layout { grid-template-columns: minmax(0, 1fr) 450px; } .lab-layout > .workspace { padding: 26px; } }
+@media (max-width: 900px) {
+  .lab-layout { display: flex; flex-direction: column; }
+  .lab-layout > .workspace { max-width: 760px; margin: auto; }
+  .lab-scope { display: none; position: static; max-height: none; width: 100%; border-left: 0; border-bottom: 1px solid var(--line); }
+  .mobile-scope-open .lab-scope { display: block; order: -1; }
+  .mobile-scope-toggle { display: inline-flex; margin-bottom: 16px; }
+  .lab-scope .tower .cell, .lab-scope .tower .lbl { min-height: 24px; }
+  .lab-heading h1 { font-size: 38px; }
+}
+@media (max-width: 620px) {
+  .lab-layout > .workspace { padding: 22px 20px 44px; }
+  .lab-scope { padding: 22px 18px; }
+  .lab-heading h1 { font-size: 35px; }
+  .lab-heading > p:not(.eyebrow) { font-size: 15px; }
+  .scope-title h2 { font-size: 20px; }
+  .training-workspace .lab-heading { margin-top: 10px; }
+  .weight-metrics dd { font-size: 14px; }
+  .training-actions .btn { font-size: 12px; }
+  .test-results table { font-size: 11px; }
+}
+#test-cases { width: 100%; margin-top: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 12px; font: 13px/1.6 var(--mono); }
+.intact-comparison { margin: 20px 0; }
+.mobile-model .tower-head h2 { font-size: 16px; }
+.mobile-model .tower .cell, .mobile-model .tower .lbl { min-height: 24px; }
+.mobile-model .weight-metrics { gap: 8px; }
+.weight-layers { gap: 4px; margin: 16px 0; }
+.weight-layers button { padding: 7px 10px; }
+.weight-trace i { height: 13px; }
+.weight-image { margin-top: 12px; }
+.weight-metrics { margin: 16px 0; padding: 14px 0; }
+.weight-placeholder { min-height: 184px; display: grid; place-items: center; padding: 22px; border: 1px dashed var(--line); color: var(--muted); font-size: 13px; text-align: center; }

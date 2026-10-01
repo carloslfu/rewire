@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { encode, VOCAB } from "../src/data.ts";
 import { engineConfig, engineWeights } from "../src/engine.ts";
 import { adamTrainer, forward, initParams, ropeTables, TINY, type TinyConfig } from "../src/model.ts";
+import { mutateWeights } from "../src/lab.ts";
 
 const cfg: TinyConfig = { ...TINY, vocab: VOCAB, context: 32 };
 
@@ -16,6 +17,27 @@ beforeAll(async () => {
 });
 
 describe("tiny model in the engine", () => {
+  it("uses physically erased parameters and restores exactly the original logits", async () => {
+    const original = initParams(cfg, 12);
+    const erased = mutateWeights(original, cfg, { kind: "erase", amount: 1, seed: 5 });
+    const wg = await import("webgpu");
+    const dev = await getDevice(wg.create([]));
+    const scores = async (params: Float32Array) => {
+      const model = new Model(dev, engineConfig(cfg), engineWeights(dev, cfg, params));
+      try {
+        const conv = model.conversation();
+        conv.step(encode("r")[0], { seed: 42, turn: 0, step: 0 });
+        return new Float32Array(await download(dev, conv.scores)).slice(0, VOCAB);
+      } finally { model.destroy(); }
+    };
+    try {
+      const before = await scores(original);
+      expect(before.some((v) => Math.abs(v) > 0.01)).toBe(true);
+      expect((await scores(erased)).every((v) => v === 0)).toBe(true);
+      expect(await scores(original)).toEqual(before);
+    } finally { dev.destroy(); }
+  }, 60_000);
+
   it("matches jax-js logits at every position", async () => {
     // a few training steps so the weights are not just noise
     const text = encode("Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do. ".repeat(4));

@@ -8,6 +8,7 @@ import { fmt, pct, signed } from "./color.ts";
 import { multOf, withMult } from "./describe.ts";
 import { Knob } from "./Knob.tsx";
 import { Strip } from "./Strip.tsx";
+import { encode } from "@rewire/tiny/src/data.ts";
 import { type Chosen, chosen, HEADS, headIndex, memIndex } from "./word.ts";
 
 export function Detail() {
@@ -141,11 +142,12 @@ function Guesses({ c }: { c: Chosen }) {
 }
 
 function SwapControl({ id }: { id: number }) {
+  const model = useStore((s) => s.model);
   const chips = useStore((s) => s.chips);
   const mode = useStore((s) => s.mode);
   const [text, setText] = useState("");
   const [msg, setMsg] = useState("");
-  const pairs = pathData()?.swap_pairs ?? [];
+  const pairs = model.id === "qwen" ? pathData()?.swap_pairs ?? [] : [];
   const current = (chips.swaps ?? []).find(([a, b]) => a === id || b === id);
   const suggestions = pairs.filter((p) => p.ids.includes(id));
   const doSwap = (a: number, b: number) => chipsWith((s) => ({ ...s, swaps: [...(s.swaps ?? []).filter(([x, y]) => x !== a && y !== a && x !== b && y !== b), [a, b]] }));
@@ -153,7 +155,7 @@ function SwapControl({ id }: { id: number }) {
     const eng = liveEngine();
     if (!eng || !text.trim()) return;
     const w = text.trim();
-    const ids = await eng.plain(` ${w}`);
+    const ids = model.id === "tiny" ? Array.from(encode(w)) : await eng.plain(` ${w}`);
     if (ids.length !== 1) { setMsg(S.swapNotSingle); return; }
     setMsg("");
     await doSwap(id, ids[0]);
@@ -197,10 +199,10 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
   const view = useStore((s) => s.view);
   const { detail, loading } = useDetail(c);
   const at = useMemo(() => {
-    const a = pathData()?.atlas;
+    const a = model.id === "qwen" ? pathData()?.atlas : undefined;
     const has = (l?: [number, number][]) => l?.some(([f, h]) => f === floor && h === head);
     return has(a?.copying) ? "a copying head (induction head)" : has(a?.start_marker) ? "a head that rests on the start marker" : has(a?.answer_heads) ? "one of the heads pushing hardest toward answers" : null;
-  }, [floor, head]);
+  }, [floor, head, model.id]);
   const push = c?.tok.pushes[headIndex(floor, head)];
   const diff = c?.forced ? c.forced.pushes[headIndex(floor, head)] - (push ?? 0) : undefined;
   const mult = multOf(chips, "head", floor, head);
@@ -230,7 +232,7 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
               <div className="attn">
                 {top.map(({ p, j }) => (
                   <div className="attn-row" key={j}>
-                    <span className="w" title={`position ${j}`}>{j === 0 ? "start marker" : JSON.stringify(piece(ctx[j] ?? 0)).slice(1, -1)}</span>
+                    <span className="w" title={`position ${j}`}>{j === 0 && model.id === "qwen" ? "start marker" : JSON.stringify(piece(ctx[j] ?? 0)).slice(1, -1)}</span>
                     <span className="b" style={{ width: `${Math.max(1, p * 100)}%` }} />
                     <span className="num">{pct(p)}</span>
                   </div>
@@ -423,7 +425,7 @@ function ConceptControl({ floor }: { floor: number }) {
   const D = S.def(model);
   const chips = useStore((s) => s.chips);
   const concepts = pathData()?.concepts ?? [];
-  if (!concepts.length) return null;
+  if (!concepts.length || model.id === "tiny") return null;
   const cur = chips.concept;
   return (
     <div style={{ marginTop: 14 }}>
