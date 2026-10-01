@@ -5,7 +5,7 @@ import type { ConvId, WriteJob } from "./engine.ts";
 
 export type ToWorker = { id: number } & (
   | { t: "check" }
-  | { t: "load"; base: string; phone: boolean }
+  | { t: "load"; base: string; phone: boolean; expectedHash?: string }
   | { t: "pause"; paused: boolean }
   | { t: "version"; version: number }
   | { t: "first"; message: string }

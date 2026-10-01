@@ -2,11 +2,15 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-10-01T17:33:42.317541Z
+updated: 2026-10-01T20:29:27.806086Z
 ---
 
 # records/run
 
+- [[records/run/2026/10/2026-10-01-phone-layout]] — Phone tower geometry and compact accessibility
+- [[records/run/2026/10/2026-10-01-browser-fallbacks]] — Production browser fallback observations
+- [[records/run/2026/10/2026-10-01-release-preflight]] — Model and recording release preflight
+- [[records/run/2026/10/2026-10-01-continuation-checks]] — Continuation regression tests and production build
 - [[records/run/2026/10/2026-10-01-phase-0a-curation]] — Phase 0A curation of the chosen weights: every path step's rule, the copying-head search and the start-marker weight scan
 - [[records/run/2026/10/2026-10-01-engine-golden-parity]] — Engine against the float32 reference on seven golden traces of the converted model, and the reference's own float32 noise
 - [[records/run/2026/10/2026-10-01-four-bit-lab]] — 4-bit lab: 14 floor formats with the original dictionary, then 8- and 4-bit dictionaries on the best floors

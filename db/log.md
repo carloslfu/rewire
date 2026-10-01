@@ -67,3 +67,9 @@ Phase 0A waiting only on recording approval
 ## [2026-10-01 18:01] update | DB.md
 Declare capture and decide as this store's log kinds (used since setup)
 
+## [2026-10-01 20:30] capture | records/measurements/2026-10-01-launch-readiness-continuation
+Captured regression, release-preflight, Chrome fallback and phone-layout evidence; preserved physical-device and human approval gates.
+
+## [2026-10-01 20:31] update | records/measurements/2026-10-01-launch-readiness-continuation
+Keep tiny training as a smoke observation rather than introducing an uncontrolled speed measurement.
+

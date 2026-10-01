@@ -28,6 +28,44 @@ The page plays recordings of real runs until the model is on the device. To run 
 convert the weights (`py/tools/convert.py`, see `py/`) into `artifacts/weights/<id>/`; the dev server serves
 them at `/weights/`. Tests: `pnpm -C engine test`, `pnpm -C tiny test`, `uv run pytest` in `py/`.
 
+## Checking the production build
+
+```bash
+pnpm build
+node app/scripts/preflight.mjs
+node app/scripts/throttled-serve.mjs 5199 0 0
+```
+
+Open `http://localhost:5199/`. The local server applies the deployment's response headers, including its
+content security policy. Use `5199 1100 170` for the shared slow connection. The preflight checks every
+weight chunk, the manifest against all ten path recordings, the tokenizer files and license notices.
+
+For isolated fallback checks, run `node app/scripts/browser-qa.mjs`. Its local page at
+`http://localhost:5200/?scenario=reset` adds a button that sends a simulated GPU-loss notification to the
+real engine client. It must cancel current writes, reload the worker and let Continue re-read the saved
+conversation. This checks the recovery path; physical GPU loss still needs a device test. Other scenarios
+are `no-gpu`, `crashed`, `storage` and `corrupt`. The fixtures live in a temporary directory and are absent
+from the production build. Phone layout checks on a desktop do not qualify phone performance.
+
+## Deploying
+
+The page is static; the weights are a separate public Hugging Face model repository. After recording and
+publication approval, upload the exact `artifacts/weights/gptqclip-g32-d4clip/` folder using
+[Hugging Face's upload CLI](https://huggingface.co/docs/huggingface_hub/guides/cli). Keep its Apache 2.0
+license, model card and original tokenizer files together. Use the resulting immutable commit in
+`VITE_WEIGHTS_URL`, rather than a moving branch:
+
+```bash
+VITE_WEIGHTS_URL=https://huggingface.co/OWNER/MODEL/resolve/COMMIT/ pnpm build
+```
+
+Create a Cloudflare Pages project and deploy `app/dist`, including `_headers`, following
+[Cloudflare's Direct Upload instructions](https://developers.cloudflare.com/pages/get-started/direct-upload/).
+Direct Upload and Git integration are different project choices; choose Git integration when automatic
+deployments are wanted. For a Direct Upload project, `npx wrangler pages deploy app/dist --branch=staging`
+creates the staging deployment. Check the remote model download, hashes, CSP, caching and the physical
+device matrix there before launching. No analytics or server inference is part of this build.
+
 ## Credits
 
 - [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) by the Qwen team, Apache 2.0. The converted weights

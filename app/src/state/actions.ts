@@ -350,7 +350,8 @@ function endWithError(e: unknown) {
 export function freshStart() {
   claim("normal");
   claim("changed");
-  store.set({ turns: [], fork: -1, word: null, full: false, busy: false, follow: true });
+  store.set((s) => ({ turns: [], fork: -1, word: null, full: false, busy: false, follow: true, version: s.version + 1 }));
+  engine?.setVersion(store.get().version);
 }
 
 /** The tiny model continues the text you type (letters, no chat template). Each message starts fresh. */
@@ -376,6 +377,7 @@ export async function openTiny(params: Float32Array) {
   if (!engine) {
     const { EngineClient } = await import("../live/engine.ts");
     engine = new EngineClient();
+    connectEngine(engine);
   }
   const cfg: TinyConfig = { ...TINY, vocab: TINY_INFO.vocab };
   await engine.loadTiny(params.slice(), cfg);
@@ -575,6 +577,7 @@ export async function checkDevice(force = false) {
   setDevice({ kind: "checking" });
   const { EngineClient } = await import("../live/engine.ts");
   engine ??= new EngineClient();
+  connectEngine(engine);
   let r: CheckResult;
   try {
     r = await engine.check();
@@ -588,7 +591,8 @@ export async function checkDevice(force = false) {
 }
 
 function weightsBase() {
-  return (import.meta.env.VITE_WEIGHTS_URL as string | undefined) ?? `${location.origin}/weights/`;
+  const b = (import.meta.env.VITE_WEIGHTS_URL as string | undefined) ?? `${location.origin}/weights/`;
+  return b.endsWith("/") ? b : b + "/";
 }
 
 /** What "Get the model" will download: the weight files plus the tokenizer (null if the host can't say). */
@@ -596,8 +600,9 @@ async function downloadBytes(): Promise<number | null> {
   try {
     const base = weightsBase();
     const m = (await (await fetch(`${base}manifest.json`)).json()) as { total_bytes?: number };
-    const tok = await fetch(`${base}tokenizer.json`, { method: "HEAD" });
-    const n = Number(m.total_bytes ?? 0) + Number(tok.headers.get("content-length") ?? 0);
+    const responses = await Promise.all(["tokenizer.json", "tokenizer_config.json"].map((name) => fetch(base + name, { method: "HEAD" })));
+    if (responses.some((r) => !r.ok)) return null;
+    const n = Number(m.total_bytes ?? 0) + responses.reduce((sum, r) => sum + Number(r.headers.get("content-length") ?? 0), 0);
     return n > 0 ? n : null;
   } catch {
     return null;
@@ -606,24 +611,18 @@ async function downloadBytes(): Promise<number | null> {
 
 export async function startDownload(seconds = 0) {
   if (!engine) return;
+  engine.pause(false);
   setDevice({ kind: "downloading", loaded: 0, total: 0, paused: false, seconds });
-  engine.onProgress = (loaded, total) => {
-    const d = store.get().device;
-    if (d.kind === "downloading") setDevice({ ...d, loaded, total });
-    if (loaded >= total && total > 0) setDevice({ kind: "loading", seconds });
-  };
-  engine.onLost = () => store.set({ announce: "The GPU was reset; the model is reloading." });
-  engine.onPieces = (p) => addPieces(p);
   try {
     localStorage.setItem(CRASH_FLAG, "1");
   } catch {
     /* ignore */
   }
   try {
-    const info = await engine.load(weightsBase(), isPhone());
-    if (path && info.manifestHash !== path.manifest_hash) console.warn("recordings and weights come from different manifests");
+    const info = await engine.load(weightsBase(), isPhone(), path?.manifest_hash);
+    void navigator.storage?.persist?.().catch(() => false);
     setDevice({ kind: "ready", seconds });
-    store.set({ mode: "live", announce: S.ready });
+    store.set({ mode: "live", modelStored: info.stored, announce: S.ready });
     if (new URLSearchParams(location.search).has("bench")) {
       const r = await engine.bench();
       const out = { device_check_predicted_s: seconds, ...r, userAgent: navigator.userAgent };
@@ -631,6 +630,7 @@ export async function startDownload(seconds = 0) {
       store.set({ bench: out });
     }
   } catch (e) {
+    if (store.get().device.kind === "recovering") return;
     setDevice({ kind: "error", message: String((e as Error).message ?? e) });
     try {
       localStorage.removeItem(CRASH_FLAG);
@@ -638,6 +638,38 @@ export async function startDownload(seconds = 0) {
       /* ignore */
     }
   }
+}
+
+/** One reset cancels current writes; the rebuilt worker re-reads their tokens when Continue is used. */
+function connectEngine(client: EngineClient) {
+  let before: ReturnType<typeof store.get> | null = null;
+  client.onProgress = (loaded, total) => {
+    const d = store.get().device;
+    if (d.kind !== "downloading") return;
+    setDevice(loaded >= total && total > 0 ? { kind: "loading", seconds: d.seconds } : { ...d, loaded, total });
+  };
+  client.onPieces = addPieces;
+  client.onLost = () => {
+    before = store.get();
+    claim("normal"); claim("changed");
+    endWithError(S.recovering);
+    store.set((s) => ({ mode: "replay", device: { kind: "recovering" }, version: s.version + 1 }));
+    client.setVersion(store.get().version);
+  };
+  client.onRecovered = () => {
+    const prior = before;
+    before = null;
+    const loading = prior?.device.kind === "downloading" || prior?.device.kind === "loading" ? prior.device : null;
+    store.set({
+      mode: loading ? "live" : prior?.mode ?? "replay",
+      device: loading ? { kind: "ready", seconds: loading.seconds } : prior?.device ?? { kind: "ready", seconds: 0 },
+      announce: S.recovered,
+    });
+  };
+  client.onFailure = (message) => {
+    endWithError(message);
+    store.set({ mode: "replay", device: { kind: "error", message }, qwenMode: "replay" });
+  };
 }
 
 export function pauseDownload(paused: boolean) {

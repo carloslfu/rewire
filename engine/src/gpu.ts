@@ -50,11 +50,12 @@ export async function download(dev: GPUDevice, src: GPUBuffer, size = src.size, 
   const enc = dev.createCommandEncoder();
   enc.copyBufferToBuffer(src, offset, rb, 0, size);
   dev.queue.submit([enc.finish()]);
-  await rb.mapAsync(MAP_MODE_READ);
-  const out = rb.getMappedRange().slice(0);
-  rb.unmap();
-  rb.destroy();
-  return out;
+  try {
+    await rb.mapAsync(MAP_MODE_READ);
+    const out = rb.getMappedRange().slice(0);
+    rb.unmap();
+    return out;
+  } finally { rb.destroy(); }
 }
 
 export class Pipelines {

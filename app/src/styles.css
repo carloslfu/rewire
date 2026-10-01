@@ -199,6 +199,7 @@ button.piece { cursor: pointer; }
 .seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--fg); color: var(--bg); }
 .seg.change button[aria-checked="true"]:not([data-v="1"]) { background: var(--changed); color: #fff; }
 .tower { display: grid; gap: 1px; align-items: stretch; max-width: 100%; }
+.tower-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
 .tower .lbl {
   font-size: 11px; color: var(--faint); display: flex; align-items: center; justify-content: flex-end; padding-right: 6px;
   border: 0; background: none; min-height: 24px; font-variant-numeric: tabular-nums;

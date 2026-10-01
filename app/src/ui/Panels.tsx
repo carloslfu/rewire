@@ -198,6 +198,7 @@ async function playAlternative(message: string) {
 
 export function DeviceBar() {
   const d = useStore((s) => s.device);
+  const stored = useStore((s) => s.modelStored);
   const bench = useStore((s) => s.bench);
   if (bench) return <pre className="devicebar" id="bench" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(bench, null, 1)}</pre>;
   const mb = (n: number) => Math.round(n / 1e6);
@@ -216,8 +217,9 @@ export function DeviceBar() {
         </div>
       );
     case "loading": return <div className="devicebar" role="status">{S.loadingModel}</div>;
-    case "ready": return null;
-    case "error": return <div className="devicebar" role="status">{S.loadError(d.message)}</div>;
+    case "recovering": return <div className="devicebar" role="status">{S.recovering}</div>;
+    case "ready": return stored === false ? <div className="devicebar" role="status">{S.storageRefused}</div> : null;
+    case "error": return <div className="devicebar" role="status">{S.loadError(d.message)} <button type="button" className="btn" onClick={() => void startDownload()}>{S.retry}</button></div>;
   }
 }
 

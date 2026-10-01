@@ -38,6 +38,8 @@ export function ropeTable(cfg: ModelConfig): Float32Array {
 }
 
 export class Model {
+  private uniforms = new Set<GPUBuffer>();
+  private conversations = new Set<Conversation>();
   readonly lay: TableLayout;
   readonly pipes: Pipelines;
   readonly floorUniforms: GPUBuffer[] = [];
@@ -66,6 +68,7 @@ export class Model {
   uniform(words: number[]): GPUBuffer {
     const b = this.dev.createBuffer({ size: 16, usage: BU.UNIFORM | BU.COPY_DST });
     this.dev.queue.writeBuffer(b, 0, new Uint32Array(words));
+    this.uniforms.add(b);
     return b;
   }
 
@@ -87,7 +90,19 @@ export class Model {
   }
 
   conversation(): Conversation {
-    return new Conversation(this);
+    const c = new Conversation(this);
+    this.conversations.add(c);
+    return c;
+  }
+
+  /** Release a replaced model, including conversations and uniforms created by inspection plans. */
+  destroy() {
+    for (const c of this.conversations) c.destroy();
+    this.conversations.clear();
+    for (const b of this.uniforms) b.destroy();
+    this.uniforms.clear();
+    for (const f of this.w.floors) for (const b of Object.values(f)) (b as GPUBuffer).destroy();
+    for (const b of [this.w.dict, this.w.finalNorm, this.w.meanRow, this.rope, this.aux]) b.destroy();
   }
 }
 
@@ -156,6 +171,12 @@ export class Conversation {
     this.chunkPlan = this.forwardPlan(8, false);
     this.stepPlan = this.forwardPlan(1, true);
     [this.headA, this.headB] = this.headPlans();
+  }
+
+  destroy() {
+    for (const b of [this.ct, this.SP, this.x, this.h, this.q, this.k, this.kout, this.v, this.att, this.o,
+      this.mid, this.h2, this.act, this.m, this.xn, this.rinv, this.intok, this.tok, this.parts, this.scores,
+      this.cand, this.sampleOut, this.pushes, this.forced, ...this.kcache, ...this.vcache, ...this.stage, this.capture]) b?.destroy();
   }
 
   setTable(table: Uint32Array) {

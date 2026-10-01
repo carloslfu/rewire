@@ -14,6 +14,7 @@ export type DeviceState =
   | { kind: "offer"; seconds: number; bytes: number | null }
   | { kind: "downloading"; loaded: number; total: number; paused: boolean; seconds: number }
   | { kind: "loading"; seconds: number }
+  | { kind: "recovering" }
   | { kind: "ready"; seconds: number }
   | { kind: "error"; message: string };
 
@@ -22,6 +23,8 @@ export interface State {
   model: ModelInfo;
   mode: Mode;
   device: DeviceState;
+  /** False if the browser refused the model cache or ran out of storage. */
+  modelStored?: boolean;
   /** The active changes (chips). */
   chips: ChangeSpec;
   /** Bumped whenever the chips change, so stale work can be dropped. */

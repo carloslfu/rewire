@@ -34,26 +34,68 @@ type DistOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; onTok?: (t: Tok) => void };
 
 export class EngineClient {
-  private w: Worker;
+  private w!: Worker;
   private seq = 1;
   private pending = new Map<number, Pending>();
+  private loaded: { base: string; phone: boolean; expectedHash?: string } | null = null;
+  private trained: { params: Float32Array; config: TinyConfig } | null = null;
+  private model: "qwen" | "tiny" = "qwen";
+  private version = 0;
+  private recovery: Promise<void> | null = null;
+  private failed = false;
   onProgress?: (loaded: number, total: number) => void;
   /** Texts of word pieces that arrive with written words. */
   onPieces?: (pieces: [number, string][]) => void;
   onLost?: () => void;
+  onRecovered?: () => void;
+  onFailure?: (message: string) => void;
 
   constructor() {
+    this.startWorker();
+  }
+
+  private startWorker() {
     this.w = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     this.w.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
     this.w.onerror = (e) => {
-      for (const p of this.pending.values()) p.reject(new Error(e.message || "worker error"));
-      this.pending.clear();
+      const message = e.message || "worker error";
+      this.failed = true;
+      this.rejectPending(message);
+      this.onFailure?.(message);
     };
+  }
+
+  private rejectPending(message: string) {
+    for (const p of this.pending.values()) p.reject(new Error(message));
+    this.pending.clear();
+  }
+
+  private async recover() {
+    this.rejectPending("The GPU was reset; the model is reloading.");
+    this.onLost?.();
+    this.w.terminate();
+    this.startWorker();
+    if (this.loaded) await this.call({ t: "load", ...this.loaded });
+    if (this.trained) await this.call({ t: "tiny", ...this.trained });
+    await this.call({ t: "use", model: this.model });
+    this.setVersion(this.version);
+    this.onRecovered?.();
   }
 
   private receive(m: FromWorker) {
     if (m.t === "progress") return this.onProgress?.(m.loaded, m.total);
-    if (m.t === "lost") return this.onLost?.();
+    if (m.t === "lost") {
+      if (this.recovery) {
+        this.rejectPending("The GPU could not recover.");
+        return;
+      }
+      this.recovery = this.recover().catch((e) => {
+        this.failed = true;
+        this.onFailure?.(String(e.message ?? e));
+      })
+        .finally(() => { this.recovery = null; });
+      return;
+    }
     const p = this.pending.get(m.id);
     if (!p) return;
     if (m.t === "tok") {
@@ -73,16 +115,26 @@ export class EngineClient {
     });
   }
 
+  private async ready<T>(msg: DistOmit<ToWorker, "id">, onTok?: (t: Tok) => void): Promise<T> {
+    await this.recovery;
+    if (this.failed) throw new Error("The model could not recover. Try getting the model again.");
+    return this.call(msg, onTok);
+  }
+
   check(): Promise<CheckResult> {
     return this.call({ t: "check" });
   }
-  load(base: string, phone: boolean): Promise<{ manifestHash: string; contextCap: number; persisted: boolean }> {
-    return this.call({ t: "load", base, phone });
+  async load(base: string, phone: boolean, expectedHash?: string): Promise<{ manifestHash: string; contextCap: number; stored: boolean }> {
+    await this.recovery;
+    if (this.failed) { this.w.terminate(); this.startWorker(); this.failed = false; }
+    this.loaded = { base, phone, expectedHash };
+    return this.call({ t: "load", ...this.loaded });
   }
   pause(paused: boolean) {
     this.w.postMessage({ t: "pause", id: 0, paused } as ToWorker);
   }
   setVersion(v: number) {
+    this.version = v;
     this.w.postMessage({ t: "version", id: 0, version: v } as ToWorker);
   }
   firstTurn(message: string): Promise<number[]> {
@@ -99,32 +151,35 @@ export class EngineClient {
     return this.call({ t: "pieces", ids });
   }
   write(job: WriteJob, onTok: (t: Tok) => void): Promise<{ ended: boolean; cancelled: boolean }> {
-    return this.call({ t: "write", job }, onTok);
+    return this.ready({ t: "write", job }, onTok);
   }
   compare(conv: ConvId, changes: ChangeSpec, history: number[], reply: number[], version: number): Promise<Forced[] | null> {
-    return this.call({ t: "compare", conv, changes, history, reply, version });
+    return this.ready({ t: "compare", conv, changes, history, reply, version });
   }
   inspect(conv: ConvId, changes: ChangeSpec, tokens: number[], target: number): Promise<{ detail: FloorDetail; guesses: Cand[][] }> {
-    return this.call({ t: "inspect", conv, changes, tokens, target });
+    return this.ready({ t: "inspect", conv, changes, tokens, target });
   }
   /** Hands the trained tiny model to the engine (its 32-bit path). */
-  loadTiny(params: Float32Array, config: TinyConfig): Promise<{ floors: number; heads: number }> {
+  async loadTiny(params: Float32Array, config: TinyConfig): Promise<{ floors: number; heads: number }> {
+    await this.recovery;
+    this.trained = { params: params.slice(), config };
     return this.call({ t: "tiny", params, config });
   }
   /** A head's full attention map over the conversation (n x n, row = query position). */
   attentionMap(conv: ConvId, changes: ChangeSpec, tokens: number[], floor: number, head: number): Promise<Float32Array> {
-    return this.call({ t: "map", conv, changes, tokens, floor, head });
+    return this.ready({ t: "map", conv, changes, tokens, floor, head });
   }
   /** Speed bench on the loaded model (medians of five runs). */
   bench(): Promise<Record<string, number>> {
-    return this.call({ t: "bench" });
+    return this.ready({ t: "bench" });
   }
   /** Which model the following jobs use. */
   use(model: "qwen" | "tiny"): Promise<boolean> {
-    return this.call({ t: "use", model });
+    this.model = model;
+    return this.ready({ t: "use", model });
   }
   /** Average dictionary row and a token's row (the words-in panel). */
   dictRow(id: number, changes: ChangeSpec): Promise<Float32Array> {
-    return this.call({ t: "dictRow", tokenId: id, changes });
+    return this.ready({ t: "dictRow", tokenId: id, changes });
   }
 }

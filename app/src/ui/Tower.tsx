@@ -112,9 +112,12 @@ export function Tower({ compact }: { compact?: boolean }) {
       {summary && <p className="note" style={{ marginBottom: 8 }}>{summary}</p>}
       {!c && <p className="note" style={{ marginBottom: 8 }}>{S.towerNone}</p>}
       {view === "difference" && <p className="note" style={{ marginBottom: 8 }}>{S.diffNote}</p>}
+      <div className="tower-scroll">
       <div className={`tower${compact ? " compact" : ""}`} ref={gridRef} onKeyDown={onKey} role="group" aria-label={S.tower}
+        inert={compact} aria-hidden={compact || undefined}
         // fixed side columns, so the head cells grow to the 24px target size before anything else takes the space
-        style={{ gridTemplateColumns: `32px repeat(${HEADS}, minmax(10px, ${HEADS > 8 ? 24 : 48}px)) 8px 36px` }}>
+        style={{ gridTemplateColumns: `32px repeat(${HEADS}, minmax(${compact ? 10 : 24}px, ${HEADS > 8 ? 24 : 48}px)) 8px 36px`,
+          minWidth: compact ? undefined : 32 + HEADS * 24 + 8 + 36 + HEADS + 2 }}>
         <span aria-hidden="true" />
         <button type="button" className={`wide${isOn({ kind: "words-out" }) ? " on" : ""}`} onClick={() => setFocus({ kind: "words-out" })}
           aria-label={`${S.wordsOut}${c ? `: "${wq}"${prob !== undefined ? `, ${Math.round(prob * 100)}%` : ""}` : ""}`}>
@@ -128,6 +131,7 @@ export function Tower({ compact }: { compact?: boolean }) {
           <span>{S.wordsIn}{c ? <span className="num"> "{piece(c.input).replace(/\n/g, "↵")}"</span> : null}</span>
           {dictV !== undefined && <span className="v num" style={{ background: diverging(dictV / scale) }}>{signed(dictV)}</span>}
         </button>
+      </div>
       </div>
       <div className="legend" aria-hidden="true">
         <span className="num">{signed(-scale)}</span>

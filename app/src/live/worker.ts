@@ -4,7 +4,7 @@
 import { type ChangeSpec, encodeTable } from "@rewire/engine/src/changes.ts";
 import { type ModelConfig, QWEN3_06B, STOP_TOKENS } from "@rewire/engine/src/config.ts";
 import { download, getDevice, storage } from "@rewire/engine/src/gpu.ts";
-import { configOf, type FileEntry, loadWeights, type Manifest, sha256 } from "@rewire/engine/src/manifest.ts";
+import { configOf, loadWeights, type Manifest, sha256 } from "@rewire/engine/src/manifest.ts";
 import { type Conversation, type InspectHost, Model, RING, type Weights } from "@rewire/engine/src/model.ts";
 import { ChatTokenizer } from "@rewire/engine/src/tokenizer.ts";
 import { engineConfig, engineWeights } from "@rewire/tiny/src/engine.ts";
@@ -13,6 +13,7 @@ import { canonical } from "../model/recording.ts";
 import type { Cand, Forced, Tok } from "../model/types.ts";
 import type { WriteJob } from "./engine.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
+import { ModelFiles } from "./files.ts";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -34,8 +35,7 @@ let tok: ChatTokenizer | null = null;
 let concepts = new Map<string, Float32Array[]>();
 let host: Omit<InspectHost, "table"> | null = null;
 let version = 0;
-let paused = false;
-let resume: (() => void) | null = null;
+let files: ModelFiles | null = null;
 
 interface Slot {
   c: Conversation;
@@ -55,14 +55,13 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
   try {
     switch (m.t) {
       case "pause":
-        paused = m.paused;
-        if (!paused) resume?.();
+        files?.pause(m.paused);
         return;
       case "version":
         version = m.version;
         return;
       case "check": return done(m.id, await check());
-      case "load": return done(m.id, await load(m.base, m.phone));
+      case "load": return done(m.id, await load(m.base, m.phone, m.expectedHash));
       case "first": return done(m.id, need(tok).firstTurn(m.message));
       case "next": return done(m.id, need(tok).nextTurn(m.reply, m.message).slice(m.reply.length));
       case "plain": return done(m.id, need(tok).plain(m.text));
@@ -191,44 +190,46 @@ function syntheticWeights(d: GPUDevice, cfg: ModelConfig): Weights {
 
 // ------------------------------------------------------------------ loading (section 6.2, "Download and storage")
 
-async function load(b: string, isPhone: boolean) {
+async function load(b: string, isPhone: boolean, expectedHash?: string) {
   base = b.endsWith("/") ? b : b + "/";
   phone = isPhone;
-  const manifest = (await (await fetch(base + "manifest.json", { cache: "no-cache" })).json()) as Manifest;
+  const response = await fetch(base + "manifest.json", { cache: "no-cache" });
+  if (!response.ok) throw new Error(`manifest.json: ${response.status}`);
+  const bytes = await response.arrayBuffer();
+  const manifest = JSON.parse(new TextDecoder().decode(bytes)) as Manifest;
+  // Recordings identify the exact manifest bytes, as the Python reference does.
+  const hash = await sha256(bytes);
+  if (expectedHash && hash !== expectedHash) throw new Error("The model files do not match these recordings");
   man = manifest;
   const cache = await openCache();
-  const [tj, tc] = await Promise.all([cachedJson(cache, "tokenizer.json"), cachedJson(cache, "tokenizer_config.json")]);
+  files = new ModelFiles(base, cache, { jsonVersion: hash });
+  const [tj, tc] = await Promise.all([files.json("tokenizer.json"), files.json("tokenizer_config.json")]);
   // the tokenizer counts toward the download the page offered, so progress and offer agree
   extraBytes = tj.bytes + tc.bytes;
   tok = new ChatTokenizer(tj.value, tc.value, manifest.tokens, manifest.chat.system_prompt);
-  await build(cache);
-  return { manifestHash: (manifest as unknown as { hash?: string }).hash ?? "", contextCap: need(model).cfg.maxContext, persisted: false };
+  await build();
+  return { manifestHash: hash, contextCap: need(model).cfg.maxContext, stored: files.stored };
 }
 
-async function build(cache: Cache | null) {
+async function build() {
   const m = need(man);
-  dev = await getDevice(navigator.gpu);
-  dev.lost.then((info) => {
-    if (info.reason === "destroyed") return;
-    post({ t: "lost" });
-    // recreate the device, reload from storage, and re-read conversations on the next job
-    void build(cache).catch(() => undefined);
-  });
+  const d = dev ??= await device();
   const cfg = configOf(m, phone ? m.chat.context_cap_phone : m.chat.context_cap_desktop);
   const total = m.total_bytes + extraBytes;
   let before = extraBytes;
-  const loaded = await loadWeights(dev, m, async (f) => {
-    const data = await getFile(cache, f, (got) => post({ t: "progress", loaded: before + got, total }));
+  const loaded = await loadWeights(d, m, async (f) => {
+    const data = await need(files).file(f, (got) => post({ t: "progress", loaded: before + got, total }));
     before += f.bytes;
     return data;
-  }, (d) => post({ t: "progress", loaded: d, total }));
+  });
   concepts = loaded.concepts;
-  model = new Model(dev, cfg, loaded.weights);
-  const qkNorm = await Promise.all(loaded.weights.floors.map(async (f) => new Float32Array(await download(dev!, f.qkNorm))));
+  model?.destroy();
+  model = new Model(d, cfg, loaded.weights);
+  const qkNorm = await Promise.all(loaded.weights.floors.map(async (f) => new Float32Array(await download(d, f.qkNorm))));
   host = {
     qkNorm,
-    meanRow: new Float32Array(await download(dev, loaded.weights.meanRow)),
-    finalNorm: new Float32Array(await download(dev, loaded.weights.finalNorm)),
+    meanRow: new Float32Array(await download(d, loaded.weights.meanRow)),
+    finalNorm: new Float32Array(await download(d, loaded.weights.finalNorm)),
   };
   slots = [0, 1, 2].map(() => {
     const c = need(model).conversation();
@@ -244,54 +245,13 @@ async function openCache(): Promise<Cache | null> {
   }
 }
 
-async function cachedJson(cache: Cache | null, name: string): Promise<{ value: Record<string, unknown>; bytes: number }> {
-  const url = base + name;
-  const hit = await cache?.match(url);
-  const text = hit ? await hit.text() : await (async () => {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`${name}: ${r.status}`);
-    const t = await r.text();
-    await cache?.put(url, new Response(t, { headers: { "Content-Type": "application/json" } })).catch(() => undefined);
-    return t;
-  })();
-  return { value: JSON.parse(text), bytes: new TextEncoder().encode(text).length };
-}
-
-/** A weight file: from storage, or fetched with resume and checked against its hash before it is kept. */
-async function getFile(cache: Cache | null, f: FileEntry, onBytes: (got: number) => void): Promise<ArrayBuffer> {
-  const url = base + f.name;
-  const hit = await cache?.match(url);
-  if (hit) {
-    const data = await hit.arrayBuffer();
-    if (data.byteLength === f.bytes) { onBytes(f.bytes); return data; }
-  }
-  const out = new Uint8Array(f.bytes);
-  let got = 0, tries = 0;
-  while (got < f.bytes) {
-    if (paused) await new Promise<void>((r) => (resume = r));
-    try {
-      const r = await fetch(url, got ? { headers: { Range: `bytes=${got}-` } } : {});
-      if (!r.ok) throw new Error(`${f.name}: ${r.status}`);
-      if (got && r.status !== 206) got = 0; // the server ignored the range: start over
-      const reader = r.body!.getReader();
-      for (;;) {
-        if (paused) { await reader.cancel(); break; }
-        const { value, done: end } = await reader.read();
-        if (end) break;
-        out.set(value, got);
-        got += value.byteLength;
-        onBytes(got);
-      }
-      tries = 0;
-    } catch (e) {
-      if (++tries > 5) throw e;
-      await new Promise((r) => setTimeout(r, 1000 * tries));
-    }
-  }
-  const h = await sha256(out.buffer);
-  if (h !== f.sha256) throw new Error(`${f.name} did not match its hash`);
-  await cache?.put(url, new Response(out.buffer, { headers: { "Content-Type": "application/octet-stream" } })).catch(() => undefined);
-  return out.buffer;
+/** The page replaces this worker on device loss, so no job can retain buffers from a lost device. */
+async function device() {
+  const d = await getDevice(navigator.gpu);
+  d.lost.then((info) => {
+    if (info.reason !== "destroyed") post({ t: "lost" });
+  });
+  return d;
 }
 
 // ------------------------------------------------------------------ the speed bench (Phase 0B, Phases 1 and 2)
@@ -365,12 +325,16 @@ async function bench() {
 // ------------------------------------------------------------------ the tiny model
 
 async function loadTiny(params: Float32Array, config: TinyConfig) {
-  dev ??= await getDevice(navigator.gpu);
-  if (tiny) for (const f of tiny.model.w.floors) for (const b of Object.values(f)) (b as GPUBuffer).destroy();
+  dev ??= await device();
+  if (tiny) {
+    await Promise.all(tiny.slots.map((s) => s.lock));
+    tiny.model.destroy();
+  }
   const cfg = engineConfig(config, 512);
   const w = engineWeights(dev, config, params);
   const m = new Model(dev, cfg, w);
-  const qkNorm = await Promise.all(w.floors.map(async (f) => new Float32Array(await download(dev!, f.qkNorm))));
+  const d = dev;
+  const qkNorm = await Promise.all(w.floors.map(async (f) => new Float32Array(await download(d, f.qkNorm))));
   tiny = {
     model: m,
     slots: [0, 1, 2].map(() => ({ c: m.conversation(), tokens: [], key: "{}", table: encodeTable({}, cfg), lock: Promise.resolve() })),
@@ -491,4 +455,3 @@ async function inspect(ci: number, changes: ChangeSpec, tokens: number[], target
   const h = which === "tiny" ? need(tiny).host : need(host);
   return s.c.inspect(tokens.length - 1, tokens[tokens.length - 1], target, { ...h, table: s.table });
 }
-

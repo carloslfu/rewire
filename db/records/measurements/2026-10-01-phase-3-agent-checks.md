@@ -2,7 +2,7 @@
 type: measurement
 id: 01m3w9k5pbf5ax3q33j1dj0zb3
 created: 2026-10-01T17:53:30.315208+00:00
-updated: 2026-10-01T17:53:30.315208+00:00
+updated: 2026-10-01T20:30:14.982457+00:00
 summary: 'Phase 3 agent checks: step 1 plays from its recording at 1.4 s on a 9 Mbps link before the model arrives; keyboard-only flow, accessibility tree, targets and copy fixed and verified'
 date: 2026-10-01
 devices: '[[records/devices/dev-mac-m5-pro]]'
@@ -23,3 +23,7 @@ On the development Mac in Chrome 152. These are the checks an agent can run; the
 **Targets and color.** At 1,024 px every control except inline word pieces (covered by WCAG's inline exception) is at least 24 by 24 px, after giving the tower's side columns fixed widths. Phones narrower than the 16 head columns need are below 24 px in the expanded tower. Push values are in each cell's name and the detail panel, so color is not the only signal.
 
 **Copy.** Corrected claims found in review: the bits control leaves the dictionary as it is (it is 4-bit too, not full precision); replay numbers come from the same 4-bit model; the browser list names WebGPU instead of fixed versions; the download size comes from the host (385 MB) instead of a fixed 350; the tower caption's first-floor claim shows only for Qwen; step 2, 5, 6, 7 and 10 explanations match their measured results. Suggested questions now appear after a step's change is tried.
+
+## Phone target correction (October 1 continuation)
+
+The expanded-phone target gap above is fixed in the continuation build. See [[records/measurements/2026-10-01-launch-readiness-continuation]] for the measured geometry and remaining physical-device limits.
