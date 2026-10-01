@@ -2,7 +2,7 @@
 type: measurement
 id: 01m3wjj5wwn11wd40ks4kkmx4g
 created: 2026-10-01T20:30:14.940644+00:00
-updated: 2026-10-01T20:31:09.207063+00:00
+updated: 2026-10-01T20:42:48.098230+00:00
 summary: 'Launch-readiness continuation: downloads, recovery and phone layout'
 date: 2026-10-01
 devices: '[[records/devices/dev-mac-m5-pro]]'
@@ -28,3 +28,7 @@ A simulated GPU-loss notification during a live reply cancels pending work and r
 Live tiny-model training and inference were also exercised under CSP. This is a smoke check on a loaded machine, not a new speed measurement or phone qualification.
 
 **Remaining gates.** Carlos's recording approval, the physical device matrix (including real GPU loss and phone training), five first-time visitors, a spoken screen-reader walkthrough, the remote Hugging Face download and Cloudflare staging check, and public launch approval. None is marked passed by these local checks.
+
+## Additional Mac browser smoke observations
+
+[[records/run/2026/10/2026-10-01-mac-browser-smoke]] captures Safari reaching Live and generating the changed Eiffel Tower answer. The captured turn was still busy, so its terminal completion, parity and timing are not qualified. Firefox selected Replay through its speed gate in this loaded visit; a full Firefox interaction or stable performance qualification was not completed. These observations do not close the device matrix.

@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-10-01T20:29:27.806086Z
+updated: 2026-10-01T20:42:48.073423Z
 ---
 
 # records/run
 
+- [[records/run/2026/10/2026-10-01-mac-browser-smoke]] — Safari live contrast and Firefox default replay smoke observations
 - [[records/run/2026/10/2026-10-01-phone-layout]] — Phone tower geometry and compact accessibility
 - [[records/run/2026/10/2026-10-01-browser-fallbacks]] — Production browser fallback observations
 - [[records/run/2026/10/2026-10-01-release-preflight]] — Model and recording release preflight

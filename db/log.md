@@ -73,3 +73,6 @@ Captured regression, release-preflight, Chrome fallback and phone-layout evidenc
 ## [2026-10-01 20:31] update | records/measurements/2026-10-01-launch-readiness-continuation
 Keep tiny training as a smoke observation rather than introducing an uncontrolled speed measurement.
 
+## [2026-10-01 20:42] capture | records/run/2026/10/2026-10-01-mac-browser-smoke
+Preserved filtered native browser observations without claiming a complete Safari turn or a stable Firefox speed qualification.
+
