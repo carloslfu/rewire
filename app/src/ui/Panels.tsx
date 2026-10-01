@@ -1,6 +1,6 @@
 // The step card, change chips, composer, device line, path list and "What's real here".
 import { useState } from "react";
-import { applyChips, chipsWith, checkDevice, openStep, pauseDownload, replayAlternative, send, setFocus, shippingSteps,
+import { applyChips, chipsWith, checkDevice, freshStart, openStep, pauseDownload, replayAlternative, send, setFocus, shippingSteps,
   startDownload, stepAction, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { COPY, type StepData } from "../path/steps.ts";
@@ -149,6 +149,7 @@ export function Composer() {
   const busy = useStore((s) => s.busy);
   const step = useStore((s) => s.step);
   const model = useStore((s) => s.model);
+  const full = useStore((s) => s.full);
   const [text, setText] = useState("");
   const st = stepData(step);
   if (mode !== "live") {
@@ -164,6 +165,12 @@ export function Composer() {
     );
   }
   const suggest = model.id === "qwen" && st ? COPY[st.slug]?.suggestions ?? [] : [];
+  if (full) return (
+    <div className="composer" role="status">
+      <span className="note" style={{ flex: 1 }}>{S.contextFull}</span>
+      <button type="button" className="btn primary" onClick={freshStart}>{S.freshStart}</button>
+    </div>
+  );
   return (
     <div>
       <form className="composer" onSubmit={(e) => { e.preventDefault(); const t = text; setText(""); void send(t); }}>

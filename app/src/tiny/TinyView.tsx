@@ -1,7 +1,7 @@
 // Teach a tiny model your writing (section 4.5): it trains in front of you, its samples turn from noise
 // into your kind of words, and slow motion shows one training step with its real numbers.
 import { decode, encode, VOCAB } from "@rewire/tiny/src/data.ts";
-import { layout, TINY } from "@rewire/tiny/src/model.ts";
+import { layout, TINY } from "@rewire/tiny/src/config.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { openTiny } from "../state/actions.ts";
 import { store } from "../state/store.ts";

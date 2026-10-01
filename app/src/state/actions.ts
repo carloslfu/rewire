@@ -7,7 +7,7 @@ import { loadPath, type PathData, type StepData, stepChanges } from "../path/ste
 import { S } from "../strings.ts";
 import { setDims } from "../ui/word.ts";
 import { encode, letter } from "@rewire/tiny/src/data.ts";
-import { TINY, type TinyConfig } from "@rewire/tiny/src/model.ts";
+import { TINY, type TinyConfig } from "@rewire/tiny/src/config.ts";
 import { QWEN_INFO, TINY_INFO } from "../model/info.ts";
 import { type DeviceState, store } from "./store.ts";
 
@@ -330,7 +330,26 @@ export async function send(message: string) {
     turns: [...st.turns, { user: text, normal: emptyReply({}, readN, "live"), changed: forked ? emptyReply(st.chips, readC, "live") : undefined }],
     fork, busy: true, word: null, follow: true,
   }));
-  await Promise.all([writeNormal(k), forked ? writeChangedLive(k) : Promise.resolve()]);
+  try {
+    await Promise.all([writeNormal(k), forked ? writeChangedLive(k) : Promise.resolve()]);
+  } catch (e) {
+    endWithError(e);
+  }
+}
+
+/** A failed write: the context limit offers a fresh start; anything else is announced. */
+function endWithError(e: unknown) {
+  const msg = String((e as Error)?.message ?? e);
+  store.set((s) => ({
+    turns: s.turns.map((t) => ({ ...t, normal: { ...t.normal, done: true }, changed: t.changed && { ...t.changed, done: true } })),
+    busy: false, full: msg.includes("context-full") ? true : s.full, announce: msg.includes("context-full") ? S.contextFull : msg,
+  }));
+}
+
+export function freshStart() {
+  claim("normal");
+  claim("changed");
+  store.set({ turns: [], fork: -1, word: null, full: false, busy: false, follow: true });
 }
 
 /** The tiny model continues the text you type (letters, no chat template). Each message starts fresh. */
@@ -414,6 +433,14 @@ export async function continueReply() {
   const s = store.get();
   const k = s.turns.length - 1;
   if (k < 0 || s.mode !== "live" || s.busy) return;
+  try {
+    await continueInner(s, k);
+  } catch (e) {
+    endWithError(e);
+  }
+}
+
+async function continueInner(s: ReturnType<typeof store.get>, k: number) {
   const t = s.turns[k];
   const jobs: Promise<void>[] = [];
   if (!t.normal.ended) {

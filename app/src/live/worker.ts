@@ -8,7 +8,7 @@ import { configOf, type FileEntry, loadWeights, type Manifest, sha256 } from "@r
 import { type Conversation, type InspectHost, Model, RING, type Weights } from "@rewire/engine/src/model.ts";
 import { ChatTokenizer } from "@rewire/engine/src/tokenizer.ts";
 import { engineConfig, engineWeights } from "@rewire/tiny/src/engine.ts";
-import type { TinyConfig } from "@rewire/tiny/src/model.ts";
+import type { TinyConfig } from "@rewire/tiny/src/config.ts";
 import { canonical } from "../model/recording.ts";
 import type { Cand, Forced, Tok } from "../model/types.ts";
 import type { WriteJob } from "./engine.ts";

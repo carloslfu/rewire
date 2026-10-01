@@ -1,6 +1,6 @@
 // Messages between the page and the engine worker.
 import type { Cand, ChangeSpec, FloorDetail, Forced, Tok } from "../model/types.ts";
-import type { TinyConfig } from "@rewire/tiny/src/model.ts";
+import type { TinyConfig } from "@rewire/tiny/src/config.ts";
 import type { ConvId, WriteJob } from "./engine.ts";
 
 export type ToWorker = { id: number } & (

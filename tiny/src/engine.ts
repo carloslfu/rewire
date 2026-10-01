@@ -3,7 +3,7 @@
 import type { ModelConfig } from "@rewire/engine/src/config.ts";
 import { upload } from "@rewire/engine/src/gpu.ts";
 import type { FloorWeights, Weights } from "@rewire/engine/src/model.ts";
-import { layout, type TinyConfig } from "./model.ts";
+import { layout, type TinyConfig } from "./config.ts";
 
 export function engineConfig(c: TinyConfig, maxContext = 256): ModelConfig {
   return {

@@ -54,6 +54,8 @@ export interface State {
   sheet: boolean;
   /** Qwen's mode while the tiny model is on screen. */
   qwenMode?: Mode;
+  /** The conversation reached the model's context limit. */
+  full?: boolean;
   /** Speed bench results (?bench). */
   bench?: Record<string, unknown>;
 }

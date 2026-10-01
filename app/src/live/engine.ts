@@ -1,7 +1,7 @@
 // The page's side of the engine worker (section 6.2): one worker, three conversations (normal,
 // changed, and the underline pass), versioned jobs so newer changes skip older work.
 import type { Cand, ChangeSpec, FloorDetail, Forced, Tok } from "../model/types.ts";
-import type { TinyConfig } from "@rewire/tiny/src/model.ts";
+import type { TinyConfig } from "@rewire/tiny/src/config.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
 
 export type ConvId = 0 | 1 | 2;
