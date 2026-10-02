@@ -21,7 +21,7 @@ export function Tower({ compact, embedded }: { compact?: boolean; embedded?: boo
   const vals = towerValues(c, view);
   const scale = vals ? maxAbs(vals) : 1;
   const w = c ? piece(c.tok.id) : "";
-  const wq = w.trim() || w;
+  const wq = w.trim() || JSON.stringify(w);
   const atlasData = pathData()?.atlas;
   const atlas = useMemo(() => {
     const a = model.id === "qwen" ? atlasData : undefined;
@@ -36,7 +36,11 @@ export function Tower({ compact, embedded }: { compact?: boolean; embedded?: boo
   const bits = chips.bits ?? 4;
 
   const isOn = (f: Focus) => JSON.stringify(f) === JSON.stringify(focus);
-  const label = (v: number | undefined) => (v === undefined || !c ? "" : ` ${signed(v)} ${view === "difference" ? "difference" : "toward"} "${wq}"`);
+  const label = (v: number | undefined) => {
+    if (v === undefined || !c) return "";
+    if (view === "difference") return ` ${signed(v)} change in direct contribution to "${wq}"`;
+    return ` ${signed(v)}, ${v === 0 ? "neutral direct contribution to" : `direct contribution ${v < 0 ? "against" : "toward"}`} "${wq}"`;
+  };
 
   const onKey = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement;
@@ -98,7 +102,7 @@ export function Tower({ compact, embedded }: { compact?: boolean; embedded?: boo
   return (
     <div>
       <div className="tower-head">
-        <h2>{c ? (view === "push" ? S.towerFor(wq) : `${S.viewDiff}: "${wq}"`) : S.tower}</h2>
+        <h2>{c ? S.towerFor(wq) : S.tower}</h2>
         {model.id === "qwen" ? (
           <button type="button" className={`bits-label${bits !== 4 ? " edit" : ""}`} onClick={() => setFocus({ kind: "bits" })}>
             {S.bitsLabel(bits)}
@@ -113,6 +117,30 @@ export function Tower({ compact, embedded }: { compact?: boolean; embedded?: boo
       {summary && <p className="note" style={{ marginBottom: 8 }}>{summary}</p>}
       {!c && <p className="note" style={{ marginBottom: 8 }}>{S.towerNone}</p>}
       {view === "difference" && <p className="note" style={{ marginBottom: 8 }}>{S.diffNote}</p>}
+      <div className="tower-legend" role="group" aria-label="Token contribution color scale">
+        <div className="legend-directions">
+          <span className="legend-negative">Blue: {view === "push" ? "against" : "lower"}</span>
+          <span className="legend-positive">Orange: {view === "push" ? "toward" : "higher"}</span>
+        </div>
+        <div className="legend-ramp" aria-hidden="true" style={{ background: `linear-gradient(90deg, ${diverging(-1)}, ${diverging(0)}, ${diverging(1)})` }} />
+        {vals && <div className="legend-values num" aria-label="Score scale">
+          <span>{signed(-scale)}</span><span>0</span><span>{signed(scale)}</span>
+        </div>}
+        <p className="legend-note">{vals ? "Score units, not percentages. Scale adjusts for each token." : "Select a token to see its scores."}</p>
+        <p className="legend-note">{view === "push" ? "Pale means little direct contribution. A pale part can still matter through later layers." : "Pale means little change in direct contribution."}</p>
+        <details className="legend-help">
+          <summary>How to read the colors</summary>
+          {view === "push" ? <>
+            <p>Each cell shows one part's contribution to the selected token's score relative to the average score across all tokens. Orange adds to that relative score; blue subtracts from it. Stronger color means a larger contribution.</p>
+            <p>Blue does not mean an opposite word. A token is a word, part of a word, a character or punctuation.</p>
+          </> : <>
+            <p>Each cell compares the same part in both models, for the same original token and context. Blue means its contribution decreased; orange means it increased.</p>
+            <p>An increase can still leave a contribution negative. These colors show the change, not whether the part now supports the token.</p>
+          </>}
+          <p>The numbers are in logits, the model's score units. The color range rescales to the largest absolute value shown, so use the numbers when comparing different tokens.</p>
+          <p>This measures direct contributions with the final normalization scale held fixed. It does not include effects through later layers. Turn a part off and compare outputs to test its effect.</p>
+        </details>
+      </div>
       <div className="tower-scroll">
       <div className={`tower${compact ? " compact" : ""}`} ref={gridRef} onKeyDown={onKey} role="group" aria-label={S.tower}
         inert={compact} aria-hidden={compact || undefined}
@@ -134,13 +162,6 @@ export function Tower({ compact, embedded }: { compact?: boolean; embedded?: boo
         </button>
       </div>
       </div>
-      <div className="legend" aria-hidden="true">
-        <span className="num">{signed(-scale)}</span>
-        <span className="ramp" style={{ background: `linear-gradient(90deg, ${diverging(-1)}, ${diverging(0)}, ${diverging(1)})` }} />
-        <span className="num">{signed(scale)}</span>
-        <span>{view === "push" ? "push toward the word" : "changed minus normal"}</span>
-      </div>
-      <p className="caption">{S.towerCaption(model)}</p>
     </div>
   );
 }

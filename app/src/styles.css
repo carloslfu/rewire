@@ -238,7 +238,7 @@ h3 { font-size: 15px; font-weight: 600; }
 @media(prefers-reduced-motion:reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
 /* ---- tower ---- */
 .tower-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.tower-head h2 { flex: 1; min-width: 200px; }
+.tower-head h2 { flex: 1; min-width: 200px; overflow-wrap: anywhere; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .seg button { border: 0; background: var(--panel); padding: 3px 10px; min-height: 28px; font-size: 13px; font-weight: 600; color: var(--muted); }
 .seg button + button { border-left: 1px solid var(--line); }
@@ -265,8 +265,18 @@ h3 { font-size: 15px; font-weight: 600; }
 .tower .flowing { animation: flow 0.35s ease-out both; }
 @keyframes flow { from { filter: brightness(1.8) saturate(0.4); } to { filter: none; } }
 @media (prefers-reduced-motion: reduce) { .tower .flowing { animation: none; } }
-.legend { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 8px; }
-.legend .ramp { height: 8px; width: 140px; border-radius: 4px; }
+.tower-legend { margin: 14px 0 18px; font-size: 12px; color: var(--muted); }
+.legend-directions { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+.legend-negative { color: var(--neg); }
+.legend-positive { color: color-mix(in oklab, var(--pos) 80%, var(--fg)); text-align: right; }
+.legend-ramp { height: 8px; border-radius: 4px; margin: 6px 0; }
+.legend-values { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+.legend-values > :nth-child(2) { text-align: center; }
+.legend-values > :last-child { text-align: right; }
+.legend-note { margin-top: 7px; }
+.legend-help { margin-top: 9px; }
+.legend-help summary { width: fit-content; color: var(--fg); }
+.legend-help p { margin-top: 10px; }
 .caption { font-size: 13px; color: var(--muted); margin-top: 8px; max-width: 520px; }
 .bits-label { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; font-size: 13px; padding: 2px 8px; min-height: 28px; font-weight: 600; }
 .bits-label.edit { border-color: var(--changed); color: var(--changed); }
@@ -341,7 +351,7 @@ h3 { font-size: 15px; font-weight: 600; }
 .lab-scope .tower-head h2 { font-size: 16px; min-width: 170px; }
 .lab-scope .tower .cell, .lab-scope .tower .lbl { min-height: 19px; }
 .lab-scope .tower .cell { transition: background-color .1s linear; animation: none; }
-.lab-scope .caption, .lab-scope .legend { font-size: 11px; }
+.lab-scope .caption { font-size: 11px; }
 .lab-heading h1 { font-size: clamp(32px, 3.1vw, 48px); line-height: 1.12; letter-spacing: -1.8px; white-space: pre-line; max-width: 600px; }
 .lab-heading > p:not(.eyebrow) { margin-top: 18px; max-width: 460px; color: var(--muted); font-size: 16px; }
 .empty-chat.lab-heading { padding: 35px 0 42px; }

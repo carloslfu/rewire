@@ -94,14 +94,12 @@ export const S = {
 
   // tower
   tower: "The tower",
-  towerFor: (w: string) => `Pushes toward "${w}"`,
-  towerNone: "Tap a word in a reply to light up the parts that pushed toward it.",
+  towerFor: (w: string) => `Selected token: "${w}"`,
+  towerNone: "Select a word or word piece in a reply to see which parts contribute toward or against it.",
   viewPush: "Push",
   viewDiff: "Difference",
-  diffNote: "Changed model minus normal model, on the normal reply's words.",
+  diffNote: "Change in direct contribution: changed model minus original, using the original reply's tokens and context.",
   diffNone: "The Difference view needs a change.",
-  towerCaption: (m: ModelInfo) => "Lighting shows each part's direct push only; parts that work through later floors can stay pale." +
-    (m.id === "tiny" ? "" : " A pale layer can still be essential."),
   wordsIn: "Words in",
   wordsOut: "Words out",
   floorN: (n: number) => `Floor ${n}`,
