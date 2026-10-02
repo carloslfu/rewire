@@ -49,6 +49,7 @@ export interface TableLayout {
   hidden: number;
   zeroed: number;
   bitTable: number;
+  geometry: number;
   words: number;
 }
 
@@ -66,8 +67,9 @@ export function tableLayout(c: Pick<ModelConfig, "floors" | "queryHeads" | "widt
   const hidden = swaps + MAX_SWAPS * 2;
   const zeroed = hidden + MAX_HIDDEN * 2;
   const bitTable = zeroed + MAX_ZEROED * 4;
-  const words = bitTable + 16;
-  return { header, head, mem, floor, concept, swaps, hidden, zeroed, bitTable, words };
+  const geometry = bitTable + 16;
+  const words = geometry + c.floors * c.queryHeads * 8;
+  return { header, head, mem, floor, concept, swaps, hidden, zeroed, bitTable, geometry, words };
 }
 
 // Header words

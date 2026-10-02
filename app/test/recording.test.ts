@@ -34,3 +34,12 @@ describe.skipIf(!have)("recordings", () => {
     expect(canonical({ bits: 4 })).toBe("{}");
   });
 });
+
+it("geometry gets its own replay and cache key, including plane and amount", () => {
+  const rotate = { floor: 0, head: 1, kind: "rotate" as const, angle: 90, seed: 1 };
+  expect(canonical({ geometry: [rotate] })).not.toBe("{}");
+  expect(canonical({ geometry: [rotate] })).not.toBe(canonical({ geometry: [{ ...rotate, seed: 2 }] }));
+  expect(canonical({ geometry: [{ ...rotate, angle: 0 }] })).toBe("{}");
+  expect(canonical({ geometry: [rotate, { ...rotate, head: 2 }] })).toBe(canonical({ geometry: [{ ...rotate, head: 2 }, rotate] }));
+  expect(canonical({ geometry: [{ floor: 0, head: 0, kind: "remove", amount: 0.5 }] })).not.toBe(canonical({ geometry: [{ floor: 0, head: 0, kind: "remove", amount: 1 }] }));
+});

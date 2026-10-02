@@ -92,7 +92,8 @@
       "2": "t[c] = round(c * 3 / 15) * 15 / 3"
     },
     "push_rule": "push of a part toward word t = (part output, already scaled by its multipliers and the floor multiplier) * final_norm_weight / rms(final stream at that position) . (dictionary[t] - mean of the real dictionary rows). The 476 parts (28 floors x (16 heads + 1 memory block)) plus the dictionary row's own push add up to t's score minus the mean score over real ids.",
-    "push_order": "dictionary row first, then for each floor 0..27: heads 0..15, then the memory block"
+    "push_order": "dictionary row first, then for each floor 0..27: heads 0..15, then the memory block",
+    "geometry_rule": "For each selected head, transform the width-dimensional projected output after head scaling and before residual addition, at every prompt and generated position. rotate: cos(angle)*v + sin(angle)*J_seed*v, J orthogonal with J^2=-I from seeded XOR coordinate pairing; remove: v - amount*(v.x)/(x.x)*x where x is the entering residual stream; shuffle: a seeded bijective affine coordinate permutation. Zero input stays zero. Head outputs after transformation are used for pushes. This changes activations, not weights."
   },
   "numbering": "Data uses zero-based floors, heads and positions. The interface shows floors and heads from 1, with the zero-based index in the details."
 }

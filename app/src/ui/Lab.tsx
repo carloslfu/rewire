@@ -1,4 +1,4 @@
-import { applyChips, chipsWith, stepData } from "../state/actions.ts";
+import { applyChips, chipsWith, setFocus, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { withMult, multOf } from "./describe.ts";
 import { Tower } from "./Tower.tsx";
@@ -23,6 +23,7 @@ export function LabScope() {
         <button className="btn" aria-pressed={multOf(chips, "floor", Math.floor(model.floors / 2)) === 0} disabled={disabled} onClick={() => setLayer(Math.floor(model.floors / 2))}>Cut layer {Math.floor(model.floors / 2) + 1}</button>
         {model.id === "qwen" && <button className="btn" disabled={disabled} aria-pressed={chips.bits === 2} onClick={() => void chipsWith((s) => ({ ...s, bits: s.bits === 2 ? 4 : 2 }))}>Crush precision</button>}
         {model.id === "qwen" && zero?.kind === "zeroed" && <button className="btn change" disabled={disabled} aria-pressed={!!chips.zeroed?.length} onClick={() => void chipsWith((s) => ({ ...s, zeroed: s.zeroed?.length ? [] : zero.weights }))}>Zero {zero.weights.length} weights</button>}
+        <button className="btn" disabled={disabled} onClick={() => setFocus({ kind: "head", floor: Math.min(16, model.floors - 1), head: 0 })}>Turn a signal</button>
       </div><p className="note">{model.id === "qwen" ? "Cut a layer’s contribution, reduce weight precision, or click any head below to alter it." : "Cut a layer’s contribution, or click any head below to alter it."} Changes stay on for your next question.</p>
       {mode !== "live" && <p className="note">Load the model to use these controls on your own questions.</p>}
     </div>

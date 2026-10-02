@@ -1,3 +1,4 @@
+import { geometryActive, type HeadGeometry } from "@rewire/engine/src/changes.ts";
 // Plain names for changes: chip labels, changed-reply labels and screen-reader text.
 import type { ChangeSpec } from "../model/types.ts";
 import { piece } from "../state/actions.ts";
@@ -18,6 +19,18 @@ function conceptLabel(id: string) {
 export function chips(spec: ChangeSpec, readTokens?: number[]): ChipDef[] {
   const out: ChipDef[] = [];
   const copy = () => structuredClone(spec);
+  const groups = new Map<string, HeadGeometry[]>();
+  for (const g of spec.geometry ?? []) {
+    if (!geometryActive(g)) continue;
+    const key = `${g.floor}:${geometryKey(g)}`;
+    groups.set(key, [...(groups.get(key) ?? []), g]);
+  }
+  for (const [key, group] of groups) {
+    const g = group[0];
+    const name = group.length === 1 ? `Head ${g.head + 1}, floor ${g.floor + 1}` : `${group.length} heads on floor ${g.floor + 1}`;
+    out.push({ key: `g${key}`, label: `${name}: ${geometryLabel(g)}`,
+      without: () => ({ ...copy(), geometry: spec.geometry!.filter((v) => !group.includes(v)) }) });
+  }
   for (const [i, h] of (spec.heads ?? []).entries()) {
     if (h.mult === 1) continue;
     out.push({ key: `h${h.floor}.${h.head}`, label: S.chip.head(h.floor + 1, h.head + 1, S.mult(h.mult)),
@@ -83,4 +96,15 @@ export function withMult(spec: ChangeSpec, kind: "head" | "memory" | "floor", fl
     if (mult !== 1) s.floors.push({ floor, mult });
   }
   return s;
+}
+
+export function geometryLabel(g: HeadGeometry): string {
+  return g.kind === "rotate" ? `rotated ${g.angle}° (plane ${g.seed})`
+    : g.kind === "remove" ? `${Math.round(g.amount * 100)}% overlap removed` : `scrambled (pattern ${g.seed})`;
+}
+
+/** Exact settings, independent of rounded display labels and the selected head. */
+export function geometryKey(g: HeadGeometry): string {
+  return g.kind === "rotate" ? `rotate:${g.angle}:${g.seed}`
+    : g.kind === "remove" ? `remove:${g.amount}` : `shuffle:${g.seed}`;
 }

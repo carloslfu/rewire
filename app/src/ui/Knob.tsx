@@ -16,7 +16,7 @@ export function Knob({ value, onChange, label, disabled }: { value: number; onCh
     else return;
     e.preventDefault();
     onChange(stops[j].v);
-    (e.currentTarget.parentElement?.children[j] as HTMLElement | undefined)?.focus();
+    (e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[j] as HTMLElement | undefined)?.focus();
   };
   return (
     <div className="seg change" role="radiogroup" aria-labelledby={id}>

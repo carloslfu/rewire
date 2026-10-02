@@ -76,3 +76,26 @@ describe("tiny model in the engine", () => {
     expect(agree).toBe(T);
   }, 300_000);
 });
+
+it("applies geometry to float32 heads during prefill and decode, then restores", async () => {
+  const { encodeTable } = await import("@rewire/engine/src/changes.ts");
+  const wg = await import("webgpu"), dev = await getDevice(wg.create([]));
+  const ec = engineConfig(cfg), model = new Model(dev, ec, engineWeights(dev, cfg, initParams(cfg, 8)));
+  const conv = model.conversation(), ids = Array.from(encode("rain?"));
+  const run = async (spec: Parameters<typeof encodeTable>[0], sequential = false) => {
+    conv.setTable(encodeTable(spec, ec)); conv.length = 0;
+    if (sequential) for (const id of ids.slice(0, -1)) conv.step(id, { seed: 4, turn: 0, step: 0 });
+    else conv.read(ids.slice(0, -1));
+    conv.step(ids.at(-1)!, { seed: 4, turn: 0, step: 0 });
+    return new Float32Array(await download(dev, conv.scores)).slice(0, VOCAB);
+  };
+  try {
+    const original = await run({});
+    const spec = { geometry: [{ floor: 0, head: 1, kind: "rotate" as const, angle: 90, seed: 5 },
+      { floor: 2, head: 0, kind: "shuffle" as const, seed: 23 }, { floor: 1, head: 3, kind: "remove" as const, amount: 1 }] };
+    const changed = await run(spec), sequential = await run(spec, true);
+    expect(Math.max(...changed.map((x, i) => Math.abs(x - original[i])))).toBeGreaterThan(1e-4);
+    expect(Math.max(...changed.map((x, i) => Math.abs(x - sequential[i])))).toBeLessThan(2e-3);
+    expect(await run({})).toEqual(original);
+  } finally { model.destroy(); dev.destroy(); }
+});

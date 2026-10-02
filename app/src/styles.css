@@ -428,3 +428,18 @@ h3 { font-size: 15px; font-weight: 600; }
 .weight-image { margin-top: 12px; }
 .weight-metrics { margin: 16px 0; padding: 14px 0; }
 .weight-placeholder { min-height: 184px; display: grid; place-items: center; padding: 22px; border: 1px dashed var(--line); color: var(--muted); font-size: 13px; text-align: center; }
+
+/* The geometric intervention stays inside the selected head's controls. */
+.head-geometry { border-top: 1px solid var(--line); padding-top: 16px; }
+.geometry-choice { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 0; font-size: 13px; }
+.geometry-choice select { min-width: 0; max-width: 70%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.geometry-scope { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin: 12px 0; }
+.geometry-scope input { accent-color: var(--changed); width: 18px; height: 18px; flex-shrink: 0; }
+.geometry-range-label, .geometry-seed { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; font-size: 13px; }
+.head-geometry input[type="range"] { width: 100%; accent-color: var(--changed); min-height: 32px; cursor: pointer; }
+.geometry-presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.geometry-presets [aria-pressed="true"] { color: var(--changed); background: var(--changed-soft); }
+.geometry-guide { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
+.geometry-guide svg { width: 124px; flex: 0 0 124px; }
+.geometry-measured { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.geometry-measured .kv { margin-top: 6px; font-size: 12px; }

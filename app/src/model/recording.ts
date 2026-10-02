@@ -1,3 +1,4 @@
+import { geometryActive } from "@rewire/engine/src/changes.ts";
 // Reads recordings (py/rewire/recording.py writes them; section 7.4) and featured-word detail files.
 import type { Cand, ChangeSpec, FloorDetail, Forced, Tok } from "./types.ts";
 
@@ -144,6 +145,10 @@ export function canonical(spec: ChangeSpec | undefined | null): string {
   const swaps = (spec.swaps ?? []).map(([a, b]) => (a < b ? [a, b] : [b, a])).sort(cmp);
   const hidden = (spec.hidden ?? []).map((x) => [x.key, x.from]).sort(cmp);
   const zeroed = (spec.zeroed ?? []).map((x) => [x.floor, x.tensor, x.row, x.col]).sort(cmp);
+  const geometry = (spec.geometry ?? []).filter(geometryActive).map((g) => g.kind === "rotate"
+    ? [g.floor, g.head, g.kind, g.angle, g.seed] : g.kind === "remove"
+      ? [g.floor, g.head, g.kind, g.amount] : [g.floor, g.head, g.kind, g.seed]).sort(cmp);
+  if (geometry.length) o.geometry = geometry;
   if (heads.length) o.heads = heads;
   if (memory.length) o.memory = memory;
   if (floors.length) o.floors = floors;

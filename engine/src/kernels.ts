@@ -29,6 +29,7 @@ const L_SWAPS: u32 = ${lay.swaps}u;
 const L_HIDDEN: u32 = ${lay.hidden}u;
 const L_ZEROED: u32 = ${lay.zeroed}u;
 const L_BITS: u32 = ${lay.bitTable}u;
+const L_GEOMETRY: u32 = ${lay.geometry}u;
 fn ctf(i: u32) -> f32 { return bitcast<f32>(ct[i]); }
 fn swapped(id: u32) -> u32 {
   let n = min(ct[7], ${MAX_SWAPS}u);
@@ -270,7 +271,7 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
  * Output projection for one token, keeping each head's contribution: part[h, r] = sum over the
  * head's 128 inputs; o[r] = sum over heads. 256 threads = 16 rows x 16 heads.
  */
-export function oHeadsKernel(c: KernelConsts) {
+export function oHeadsKernel(c: KernelConsts, batch = false) {
   const H = c.cfg.queryHeads, D = c.cfg.headSize, W = c.cfg.width, IN = H * D;
   const f32w = c.cfg.floorBits === 32;
   const G = c.cfg.group;
@@ -304,7 +305,8 @@ fn weight_at(r: u32, col: u32) -> f32 {
 }
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {
-  let t = sp(9);
+  let t = ${batch ? "wg.y" : "sp(9)"};
+  if (t >= sp(0)) { return; }
   let h = li % ${H}u;
   let rl = li / ${H}u;
   let row = wg.x * ${wgRows}u + rl;
@@ -319,7 +321,7 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
         acc -= weight_at(row, ct[z + 3u]) * att[t * ${IN}u + ct[z + 3u]];
       }
     }
-    part[h * ${W}u + row] = acc;
+    part[${batch ? `t * ${H * W}u + ` : ""}h * ${W}u + row] = acc;
   }
   red[li] = acc;
   workgroupBarrier();
@@ -327,6 +329,84 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
     var s = 0.0;
     for (var j = 0u; j < ${H}u; j++) { s += red[rl * ${H}u + j]; }
     o[t * ${W}u + row] = s;
+  }
+}`;
+}
+
+/** Transform projected heads in the shared residual coordinate system, one workgroup per head and token. */
+export function headGeometryKernel(c: KernelConsts) {
+  const W = c.cfg.width, H = c.cfg.queryHeads;
+  return /* wgsl */ `
+struct FP { floor: u32, a: u32, b: u32, c: u32 }
+@group(0) @binding(0) var<storage, read> original: array<f32>;
+@group(0) @binding(1) var<storage, read> stream: array<f32>;
+@group(0) @binding(2) var<storage, read> ct: array<u32>;
+@group(0) @binding(3) var<uniform> SP: array<vec4u, 4>;
+fn sp(i: u32) -> u32 { return SP[i / 4u][i % 4u]; }
+@group(0) @binding(4) var<uniform> F: FP;
+@group(0) @binding(5) var<storage, read_write> changed: array<f32>;
+${header(c)}
+var<workgroup> dot: array<vec2f, 256>;
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {
+  let t = wg.x; let h = wg.y;
+  if (t >= sp(0)) { return; }
+  let base = (t * ${H}u + h) * ${W}u;
+  let g = L_GEOMETRY + (F.floor * ${H}u + h) * 8u;
+  let mode = ct[g];
+  var d = vec2f(0.0);
+  // Uniform across the workgroup. Reference is the stream entering this floor.
+  if (mode == 2u) {
+    for (var i = li; i < ${W}u; i += 256u) {
+      let x = stream[t * ${W}u + i];
+      d += vec2f(original[base + i] * x, x * x);
+    }
+  }
+  dot[li] = d;
+  workgroupBarrier();
+  for (var s = 128u; s > 0u; s >>= 1u) {
+    if (li < s) { dot[li] += dot[li + s]; }
+    workgroupBarrier();
+  }
+  let projection = select(0.0, ctf(g + 3u) * dot[0].x / max(dot[0].y, 1e-20), dot[0].y > 1e-20);
+  for (var i = li; i < ${W}u; i += 256u) {
+    let v = original[base + i];
+    var y = v;
+    if (mode == 1u) {
+      let tangent = select(-1.0, 1.0, (i & ct[g + 5u]) != 0u) * original[base + (i ^ ct[g + 4u])];
+      y = ctf(g + 1u) * v + ctf(g + 2u) * tangent;
+    } else if (mode == 2u) {
+      y = v - projection * stream[t * ${W}u + i];
+    } else if (mode == 3u) {
+      y = original[base + ((i * ct[g + 6u] + ct[g + 7u]) % ${W}u)];
+    }
+    changed[base + i] = y;
+  }
+}`;
+}
+
+/** Sum the transformed heads and retain the exact vectors used for attribution. */
+export function sumHeadsKernel(c: KernelConsts) {
+  const W = c.cfg.width, H = c.cfg.queryHeads;
+  return /* wgsl */ `
+struct FP { floor: u32, a: u32, b: u32, c: u32 }
+@group(0) @binding(0) var<storage, read> heads: array<f32>;
+@group(0) @binding(1) var<storage, read_write> o: array<f32>;
+@group(0) @binding(2) var<storage, read_write> parts: array<f32>;
+@group(0) @binding(3) var<uniform> SP: array<vec4u, 4>;
+@group(0) @binding(4) var<uniform> F: FP;
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {
+  let t = wg.x;
+  if (t >= SP[0].x) { return; }
+  for (var i = li; i < ${W}u; i += 256u) {
+    var total = 0.0;
+    for (var h = 0u; h < ${H}u; h++) {
+      let v = heads[(t * ${H}u + h) * ${W}u + i];
+      total += v;
+      if (t == SP[2].y) { parts[(F.floor * ${H + 1}u + h) * ${W}u + i] = v; }
+    }
+    o[t * ${W}u + i] = total;
   }
 }`;
 }

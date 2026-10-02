@@ -80,9 +80,14 @@ export class Model {
     return b;
   }
 
+  private matrixUniforms = new Map<string, GPUBuffer>();
+
   /** A uniform for a matrix multiply inside floor L on tensor(s). */
   mmUniform(L: number, t: keyof typeof TENSOR_ID, t2?: keyof typeof TENSOR_ID): GPUBuffer {
-    return this.uniform([L, TENSOR_ID[t], t2 ? TENSOR_ID[t2] : 0, 0]);
+    const key = `${L}.${t}.${t2 ?? ""}`;
+    let b = this.matrixUniforms.get(key);
+    if (!b) { b = this.uniform([L, TENSOR_ID[t], t2 ? TENSOR_ID[t2] : 0, 0]); this.matrixUniforms.set(key, b); }
+    return b;
   }
 
   pipe(name: string, code: () => string, entry = "main"): GPUComputePipeline {
@@ -134,6 +139,8 @@ export class Conversation {
   readonly forced: GPUBuffer;
   /** Mappable buffers that receive each step's results, read a few steps behind. */
   readonly stage: GPUBuffer[] = [];
+  private geometryFloors = new Set<number>();
+  private geometryBuffers?: { before: GPUBuffer; after: GPUBuffer };
   private chunkPlan: Dispatch[];
   private stepPlan: Dispatch[];
   private headA: Dispatch[] = [];
@@ -176,11 +183,22 @@ export class Conversation {
   destroy() {
     for (const b of [this.ct, this.SP, this.x, this.h, this.q, this.k, this.kout, this.v, this.att, this.o,
       this.mid, this.h2, this.act, this.m, this.xn, this.rinv, this.intok, this.tok, this.parts, this.scores,
-      this.cand, this.sampleOut, this.pushes, this.forced, ...this.kcache, ...this.vcache, ...this.stage, this.capture]) b?.destroy();
+      this.cand, this.sampleOut, this.pushes, this.forced, ...this.kcache, ...this.vcache, ...this.stage, this.capture,
+      this.geometryBuffers?.before, this.geometryBuffers?.after, this.insp?.buf, this.insp?.rows, this.insp?.g, this.insp?.u]) b?.destroy();
   }
 
   setTable(table: Uint32Array) {
     this.dev.queue.writeBuffer(this.ct, 0, table);
+    const floors = new Set<number>();
+    for (let L = 0; L < this.cfg.floors; L++) for (let h = 0; h < this.cfg.queryHeads; h++) {
+      if (table[this.model.lay.geometry + (L * this.cfg.queryHeads + h) * 8]) floors.add(L);
+    }
+    const changed = floors.size !== this.geometryFloors.size || [...floors].some((L) => !this.geometryFloors.has(L));
+    this.geometryFloors = floors;
+    if (changed && this.chunkPlan) {
+      this.chunkPlan = this.forwardPlan(8, false);
+      this.stepPlan = this.forwardPlan(1, true);
+    }
   }
 
   writeParams(p: StepParams) {
@@ -218,6 +236,31 @@ export class Conversation {
     return [{ pipeline: p, group: bind(this.dev, p, [this.x, this.SP, m.slotUniform(slot), this.capture]), x: rows }];
   }
 
+  private headBuffers() {
+    if (!this.geometryBuffers) {
+      const bytes = CHUNK * this.cfg.queryHeads * this.cfg.width * 4;
+      this.geometryBuffers = { before: storage(this.dev, bytes, "heads before geometry"), after: storage(this.dev, bytes, "heads after geometry") };
+    }
+    return this.geometryBuffers;
+  }
+
+  private projectHeads(L: number, rows: number): Dispatch {
+    const m = this.model, { width: W, queryHeads: H } = this.cfg;
+    const p = m.pipe("oheads-batch", () => K.oHeadsKernel(m.kc, true));
+    return { pipeline: p, group: bind(this.dev, p, [m.w.floors[L].o, this.att, this.o, this.ct, this.SP,
+      m.mmUniform(L, "o"), this.headBuffers().before]), x: Math.ceil(W / Math.floor(256 / H)), y: rows };
+  }
+
+  private transformHeads(L: number, rows: number): Dispatch[] {
+    const m = this.model, b = this.headBuffers();
+    const p = m.pipe("head-geometry", () => K.headGeometryKernel(m.kc));
+    const sum = m.pipe("sum-heads", () => K.sumHeadsKernel(m.kc));
+    return [
+      { pipeline: p, group: bind(this.dev, p, [b.before, this.x, this.ct, this.SP, m.floorUniforms[L], b.after]), x: rows, y: this.cfg.queryHeads },
+      { pipeline: sum, group: bind(this.dev, sum, [b.after, this.o, this.parts, this.SP, m.floorUniforms[L]]), x: rows },
+    ];
+  }
+
   /** Where the chunk plan splits after floor L's rotation (the attention map keeps queries there). */
   private ropeAt: number[] = [];
 
@@ -247,7 +290,9 @@ export class Conversation {
         this.kcache[L], this.vcache[L], this.kout]), x: rows });
       if (!single) this.ropeAt[L] = plan.length;
       plan.push({ pipeline: attn, group: bind(dev, attn, [this.q, this.kcache[L], this.vcache[L], this.ct, this.SP, uni, this.att]), x: rows, y: H });
-      if (single) {
+      if (this.geometryFloors.has(L)) {
+        plan.push(this.projectHeads(L, rows), ...this.transformHeads(L, rows));
+      } else if (single) {
         plan.push({ pipeline: oh, group: bind(dev, oh, [fw.o, this.att, this.o, this.ct, this.SP, m.mmUniform(L, "o"),
           { buffer: this.parts, offset: L * (H + 1) * W * 4, size: H * W * 4 }]), x: Math.ceil(W / Math.floor(256 / H)) });
       } else {
@@ -300,7 +345,7 @@ export class Conversation {
 
   // ------------------------------------------------------------------ inspection (section 6.2, "Reads")
 
-  private insp?: { prog: (Dispatch | Copy)[]; buf: GPUBuffer; rows: GPUBuffer; per: number; off: Record<string, number> };
+  private insp?: { prog: (Dispatch | Copy)[]; buf: GPUBuffer; rows: GPUBuffer; g: GPUBuffer; u: GPUBuffer; per: number; off: Record<string, number> };
 
   /** Everything one floor computes, for every floor, at one position: built once, then reused. */
   private inspectProgram() {
@@ -308,7 +353,7 @@ export class Conversation {
     const m = this.model, cfg = this.cfg, dev = this.dev, kc = m.kc;
     const W = cfg.width, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, U = cfg.units, F = cfg.floors;
     const sizes: [string, number][] = [["x", W], ["h", W], ["q_raw", H * D], ["k_raw", KV * D], ["v", KV * D], ["q", H * D],
-      ["k", KV * D], ["att", H * D], ["o", W], ["mid", W], ["h2", W], ["gate", U], ["up", U], ["act", U], ["mem", W]];
+      ["k", KV * D], ["att", H * D], ["heads_before", H * W], ["heads_after", H * W], ["o", W], ["mid", W], ["h2", W], ["gate", U], ["up", U], ["act", U], ["mem", W]];
     const off: Record<string, number> = {};
     let per = 0;
     for (const [k, n] of sizes) { off[k] = per; per += n; }
@@ -325,7 +370,6 @@ export class Conversation {
     const attn = m.pipe("attn-cap", () => K.attentionKernel(kc, true));
     const ares = m.pipe("ares", () => K.attnResidualKernel(kc));
     const mres = m.pipe("mres", () => K.memResidualKernel(kc));
-    const oh = m.pipe("oheads", () => K.oHeadsKernel(kc));
     for (let L = 0; L < F; L++) {
       const fw = m.w.floors[L];
       const uni = m.floorUniforms[L];
@@ -340,8 +384,10 @@ export class Conversation {
       cp(this.q, L, "q", H * D); cp(this.kout, L, "k", KV * D);
       prog.push({ pipeline: attn, group: bind(dev, attn, [this.q, this.kcache[L], this.vcache[L], this.ct, this.SP, uni, this.att, rows]), x: 1, y: H });
       cp(this.att, L, "att", H * D);
-      prog.push({ pipeline: oh, group: bind(dev, oh, [fw.o, this.att, this.o, this.ct, this.SP, m.mmUniform(L, "o"),
-        { buffer: this.parts, offset: L * (H + 1) * W * 4, size: H * W * 4 }]), x: Math.ceil(W / Math.floor(256 / H)) });
+      prog.push(this.projectHeads(L, 1));
+      cp(this.headBuffers().before, L, "heads_before", H * W);
+      prog.push(...this.transformHeads(L, 1));
+      cp(this.headBuffers().after, L, "heads_after", H * W);
       cp(this.o, L, "o", W);
       prog.push({ pipeline: ares, group: bind(dev, ares, [this.x, this.o, fw.postNorm, this.ct, this.SP, uni, this.mid, this.h2]), x: 1 });
       cp(this.mid, L, "mid", W); cp(this.h2, L, "h2", W);
@@ -358,7 +404,7 @@ export class Conversation {
     const [a] = this.headPlans();
     prog.push(a[0], a[1]);
     prog.push({ copy: true, src: this.xn, dst: buf, srcOffset: 0, dstOffset: (per * F + W) * 4, size: W * 4 });
-    this.insp = { prog, buf, rows, per, off };
+    this.insp = { prog, buf, rows, g, u, per, off };
     return this.insp;
   }
 
@@ -392,7 +438,7 @@ export class Conversation {
     for (let L = 0; L < F; L++) {
       const g = (k: string, len: number) => all.slice(L * per + off[k], L * per + off[k] + len);
       for (const [k, len] of [["x", W], ["h", W], ["q_raw", H * D], ["k_raw", KV * D], ["v", KV * D], ["q", H * D], ["k", KV * D],
-        ["att", H * D], ["o", W], ["mid", W], ["h2", W], ["gate", U], ["up", U], ["act", U], ["mem", W]] as [string, number][]) {
+        ["att", H * D], ["heads_before", H * W], ["heads_after", H * W], ["o", W], ["mid", W], ["h2", W], ["gate", U], ["up", U], ["act", U], ["mem", W]] as [string, number][]) {
         detail.set(`f${L}.${k}`, g(k, len));
       }
       detail.set(`f${L}.q_n`, headNorm(detail.get(`f${L}.q_raw`)!, qk[L].subarray(0, D), H, D, cfg.eps));

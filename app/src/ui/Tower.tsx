@@ -6,7 +6,7 @@ import { pathData, piece, setFocus } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { diverging, signed } from "./color.ts";
-import { multOf } from "./describe.ts";
+import { geometryLabel, multOf } from "./describe.ts";
 import { chosen, FLOORS, HEADS, hardestFloors, headIndex, maxAbs, memIndex, towerValues } from "./word.ts";
 
 export function Tower({ compact, embedded }: { compact?: boolean; embedded?: boolean }) {
@@ -71,12 +71,13 @@ export function Tower({ compact, embedded }: { compact?: boolean; embedded?: boo
     for (let h = 0; h < HEADS; h++) {
       const v = vals?.[headIndex(L, h)];
       const m = multOf(chips, "head", L, h);
+      const geometry = chips.geometry?.find((g) => g.floor === L && g.head === h);
       const at = atlas.get(`${L}.${h}`);
       rows.push(
         <button key={`h${L}.${h}`} type="button" data-r={L} data-c={h} tabIndex={-1}
-          className={`cell${vals ? " flowing" : ""}${m !== 1 || fm !== 1 ? " edit" : ""}${m === 0 || fm === 0 ? " off" : ""}${at ? " atlas" : ""}${isOn({ kind: "head", floor: L, head: h }) ? " on" : ""}`}
+          className={`cell${vals ? " flowing" : ""}${m !== 1 || fm !== 1 || geometry ? " edit" : ""}${m === 0 || fm === 0 ? " off" : ""}${at ? " atlas" : ""}${isOn({ kind: "head", floor: L, head: h }) ? " on" : ""}`}
           style={{ background: v === undefined ? undefined : diverging(v / scale), animationDelay: `${L * 9}ms` }}
-          aria-label={`${S.floorN(L + 1)}, ${S.headN(h + 1)}${m !== 1 ? ` (${S.mult(m)})` : ""}${at ? `, ${at}, ${S.foundByTesting}` : ""}:${label(v)}`}
+          aria-label={`${S.floorN(L + 1)}, ${S.headN(h + 1)}${m !== 1 ? ` (${S.mult(m)})` : ""}${geometry ? `, ${geometryLabel(geometry)}` : ""}${at ? `, ${at}, ${S.foundByTesting}` : ""}:${label(v)}`}
           onClick={() => setFocus({ kind: "head", floor: L, head: h })} />,
       );
     }

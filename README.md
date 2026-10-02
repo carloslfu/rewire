@@ -29,6 +29,48 @@ fine-tune Qwen. The tiny model trains on 64-letter windows and works best with s
 Qwen replies identify recorded, locally generated, and mixed provenance. Neither model is a reliable
 source of facts. The visualizer reports measured contributions, not a complete causal explanation.
 
+## Play with vector geometry
+
+Enable live chat, ask a question, then choose **Turn a signal** or click a head in the tower.
+**Rotate** turns its projected output from −180° to 180° without changing its length. At 90° it is
+perpendicular to the original; at 180° it reverses. **Remove overlap** subtracts the component parallel
+to the stream entering that layer. **Scramble coordinates** permutes the same numbers into a different
+arrangement. A checkbox applies edits to every head on that floor. Restore removes all interventions.
+
+These controls modify activations during both prompt processing and generation. They do not train
+weights. Rotation uses a reproducible seeded pairing of coordinates; its plane is not a learned
+semantic direction. The angle drawing is a guide. The selected changed token separately reports
+measured before/after angle, retained length, and (for removal) alignment with the incoming stream.
+Direct contribution colors use the transformed vectors actually added to the stream.
+
+The design draws on the distinction between addition, projection and rotation in
+[Angular Steering (NeurIPS 2025)](https://proceedings.neurips.cc/paper_files/paper/2025/hash/b0223cad0e73b793f31eb6cc41cefceb-Abstract-Conference.html)
+and [Spherical Steering (ICML 2026)](https://proceedings.mlr.press/v306/you26a.html).
+Those works use behavior-related directions. Our seeded head-output interventions are exploratory
+geometry controls, not replications of their methods or demonstrated semantic steering. The Python recording writer
+rejects geometry specs until it has a matching implementation; these experiments run live.
+
+Run the local probes with:
+
+```bash
+pnpm -C engine exec tsx scripts/vector-experiment.ts
+pnpm -C engine exec tsx scripts/vector-experiment.ts ../artifacts/weights/gptqclip-g32-d4clip ../artifacts/qa/vector-experiment-layers.json --layer
+```
+
+The October 2 exploratory runs used four prompts, four candidate layers, five settings, seed 7, and
+40-token generation caps: 160 first-token comparisons and 48 generations. For each prompt, generation
+used the candidate with the largest first-token KL under a 90° rotation. This is exploratory selection,
+not a held-out behavior benchmark. The script records all candidates and outputs, the exact manifest
+hash, GPU errors, timing and restoration checks in `artifacts/qa/`.
+
+Single-head changes often moved probabilities without changing the sampled answer. On the robot/rain
+prompt, rotating all heads on floor 17 changed the response from adapting to rain to claiming the
+robot's discovery changed the weather. Removing overlap left the sampled replies unchanged in these
+trials. Arithmetic and Paris mostly survived. Every tested prompt returned to the exact baseline token
+sequence after restoration. A useful first experiment is a creative prompt, floor 17, all heads, 45°,
+90°, then 180°. Stronger does not mean more meaningful, and a perpendicular vector does not mean a
+semantic opposite.
+
 ## Layout
 
 - `app/` the page: React, Vite and TypeScript, built as static files

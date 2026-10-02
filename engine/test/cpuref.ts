@@ -1,5 +1,6 @@
 // A CPU reference of the engine's math for unit tests: same packing, same changes, float64 math,
 // half-precision keys and values. Small configurations only.
+import { transformHead } from "../src/geometry.ts";
 import { bitTable, type ChangeSpec } from "../src/changes.ts";
 import { type ModelConfig, TENSOR_ID, TENSORS, type TensorName } from "../src/config.ts";
 import { f16, fromF16 } from "../src/gpu.ts";
@@ -210,7 +211,15 @@ export function cpuForward(m: CpuModel, tokens: number[], spec: ChangeSpec = {},
           att[hh * D + d] = s * headMult(L, hh);
         }
       }
-      const o = mv(M.o, att, W);
+      const heads: Float64Array[] = [];
+      for (let hh = 0; hh < H; hh++) {
+        let ph = new Float64Array(W);
+        for (let r = 0; r < W; r++) { let s = 0; for (let d = 0; d < D; d++) s += M.o[r * H * D + hh * D + d] * att[hh * D + d]; ph[r] = s; }
+        const geometry = spec.geometry?.find((g) => g.floor === L && g.head === hh);
+        if (geometry) ph = transformHead(ph, xs[p], geometry);
+        heads.push(ph);
+      }
+      const o = Float64Array.from({ length: W }, (_, i) => heads.reduce((s, h) => s + h[i], 0));
       const mid = xs[p].map((x, i) => x + a * o[i]);
       const h2 = rms(mid, f.postNorm).y;
       const g = mv(M.gate, h2, U), u = mv(M.up, h2, U);
@@ -218,12 +227,6 @@ export function cpuForward(m: CpuModel, tokens: number[], spec: ChangeSpec = {},
       const mm = mv(M.down, act, W).map((v) => v * memMult(L));
       out.push(mid.map((x, i) => x + a * mm[i]));
       if (p === T - 1) {
-        const heads: Float64Array[] = [];
-        for (let hh = 0; hh < H; hh++) {
-          const ph = new Float64Array(W);
-          for (let r = 0; r < W; r++) { let s = 0; for (let d = 0; d < D; d++) s += M.o[r * H * D + hh * D + d] * att[hh * D + d]; ph[r] = s; }
-          heads.push(ph);
-        }
         lastParts.push({ heads, mem: mm, a });
       }
     }

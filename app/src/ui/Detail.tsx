@@ -6,6 +6,7 @@ import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { fmt, pct, signed } from "./color.ts";
 import { multOf, withMult } from "./describe.ts";
+import { HeadGeometry } from "./HeadGeometry.tsx";
 import { Knob } from "./Knob.tsx";
 import { Strip } from "./Strip.tsx";
 import { encode } from "@rewire/tiny/src/data.ts";
@@ -42,7 +43,8 @@ function Head({ kicker, title, def, std, code }: { kicker: string; title: string
 
 function useDetail(c: Chosen | null): { detail: FloorDetail | null; loading: boolean } {
   const [st, setSt] = useState<{ detail: FloorDetail | null; loading: boolean }>({ detail: null, loading: false });
-  const key = c ? `${c.ref.turn}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${c.reply.done}` : "";
+  const version = useStore((s) => s.version);
+  const key = c ? `${version}.${c.ref.turn}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${c.reply.done}` : "";
   useEffect(() => {
     if (!c || !c.reply.done) { setSt({ detail: null, loading: false }); return; }
     let live = true;
@@ -217,6 +219,14 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
         def={D.head} code={S.zeroBased(floor) + `, head ${head}`} />
       {at && <p className="note" style={{ marginTop: -10, marginBottom: 14 }}>This is {at}, {S.foundByTesting}.</p>}
       <section>
+        <div className="kicker">Signal strength</div>
+        <Knob label={`Head ${head + 1} on floor ${floor + 1}`} value={mult}
+          onChange={(v) => void chipsWith((s) => withMult(s, "head", floor, head, v))} />
+        <p className="note" style={{ marginTop: 6 }}>Off sends zero. Flip reverses the signal; ×2 and ×5 amplify it.</p>
+      </section>
+      <HeadGeometry key={`${floor}.${head}`} floor={floor} head={head} detail={detail} chosen={c} />
+      <details><summary>Attention and contribution</summary>
+      <section>
         <div className="kicker">{S.numbers}</div>
         {!c ? <NoWord /> : (
           <>
@@ -244,12 +254,7 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
           </>
         )}
       </section>
-      <section>
-        <div className="kicker">{S.control}</div>
-        <Knob label={`Head ${head + 1} on floor ${floor + 1}`} value={mult}
-          onChange={(v) => void chipsWith((s) => withMult(s, "head", floor, head, v))} />
-        <p className="note" style={{ marginTop: 6 }}>Off sets its output to zero. Studies often substitute its average output instead, so effects here can be larger than published ones.</p>
-      </section>
+      </details>
     </>
   );
 }

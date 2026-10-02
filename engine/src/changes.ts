@@ -5,8 +5,28 @@ import {
   tableLayout,
 } from "./config.ts";
 
+export type HeadGeometry = { floor: number; head: number } & (
+  | { kind: "rotate"; angle: number; seed: number }
+  | { kind: "remove"; amount: number }
+  | { kind: "shuffle"; seed: number }
+);
+
+export function geometryActive(g: HeadGeometry): boolean {
+  return g.kind === "shuffle" || (g.kind === "rotate" ? g.angle !== 0 : g.amount !== 0);
+}
+
+/** Deterministic coordinate pairing and permutation. Width must be a power of two. */
+export function geometryAxes(width: number, seed: number) {
+  let h = (Math.imul(seed >>> 0, 747796405) + 2891336453) >>> 0;
+  h = Math.imul(((h >>> ((h >>> 28) + 4)) ^ h) >>> 0, 277803737) >>> 0;
+  h = ((h >>> 22) ^ h) >>> 0;
+  const mask = 1 + h % (width - 1);
+  return { mask, bit: mask & -mask, mul: ((h >>> 12) | 1) & (width - 1), add: 1 + (h >>> 20) % (width - 1) };
+}
+
 /** Changes, as in schemas/changes.schema.json. Zero-based floors, heads, positions and token ids. */
 export interface ChangeSpec {
+  geometry?: HeadGeometry[];
   heads?: { floor: number; head: number; mult: number }[];
   memory?: { floor: number; mult: number }[];
   floors?: { floor: number; mult: number }[];
@@ -37,6 +57,7 @@ export interface ConceptLookup {
 export function isNeutral(spec: ChangeSpec | undefined | null): boolean {
   if (!spec) return true;
   return !(
+    (spec.geometry?.some(geometryActive)) ||
     (spec.heads?.some((h) => h.mult !== 1)) ||
     (spec.memory?.some((m) => m.mult !== 1)) ||
     (spec.floors?.some((m) => m.mult !== 1)) ||
@@ -60,7 +81,7 @@ export function encodeTable(
   const f = new Float32Array(buf);
   const s = spec ?? {};
   u[H_MAGIC] = TABLE_MAGIC;
-  u[H_VERSION] = 1;
+  u[H_VERSION] = 2;
   u[H_FLAGS] = isNeutral(s) ? 0 : FLAG_ANY;
   const bits = s.bits ?? 4;
   u[H_BITS] = bits;
@@ -94,6 +115,30 @@ export function encodeTable(
     u.set([z.floor, TENSOR_ID[z.tensor], z.row, z.col], lay.zeroed + 4 * i);
   });
   f.set(bitTable(bits), lay.bitTable);
+  const seen = new Set<number>();
+  for (const g of s.geometry ?? []) {
+    if (!Number.isInteger(g.floor) || g.floor < 0 || g.floor >= cfg.floors ||
+        !Number.isInteger(g.head) || g.head < 0 || g.head >= cfg.queryHeads) throw new Error("Invalid geometry head");
+    const index = g.floor * cfg.queryHeads + g.head;
+    if (seen.has(index)) throw new Error("Only one geometry transform per head");
+    seen.add(index);
+    if (cfg.width < 2 || (cfg.width & (cfg.width - 1)) !== 0) throw new Error("Geometry needs a power-of-two model width");
+    if (g.kind === "rotate" && (!Number.isFinite(g.angle) || Math.abs(g.angle) > 180)) throw new Error("Invalid rotation angle");
+    if (g.kind === "remove" && (!Number.isFinite(g.amount) || g.amount < 0 || g.amount > 1)) throw new Error("Invalid removal amount");
+    if (g.kind !== "remove" && (!Number.isInteger(g.seed) || g.seed < 0 || g.seed > 0xffffffff)) throw new Error("Invalid geometry seed");
+    if (!geometryActive(g)) continue;
+    const base = lay.geometry + index * 8;
+    u[base] = g.kind === "rotate" ? 1 : g.kind === "remove" ? 2 : 3;
+    if (g.kind === "rotate") {
+      const a = g.angle * Math.PI / 180;
+      // Exact cardinal angles make identity, tangent and flip exact at the intervention itself.
+      f[base + 1] = Math.abs(g.angle) === 90 ? 0 : Math.cos(a);
+      f[base + 2] = Math.abs(g.angle) === 180 ? 0 : Math.sin(a);
+    }
+    if (g.kind === "remove") f[base + 3] = g.amount;
+    const axes = geometryAxes(cfg.width, g.kind === "remove" ? 0 : g.seed);
+    u.set([axes.mask, axes.bit, axes.mul, axes.add], base + 4);
+  }
   return u;
 }
 

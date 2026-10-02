@@ -148,6 +148,8 @@ class Changes:
     def make(spec: dict | None, device, dtype=torch.float32, concepts: dict | None = None, rho=None,
              concept_from: int = 0) -> "Changes":
         spec = spec or {}
+        if spec.get("geometry"):
+            raise NotImplementedError("Head geometry is implemented in the WebGPU engine and its TypeScript CPU reference, not the Python recording writer.")
         head = torch.ones(FLOORS, QH, dtype=dtype)
         for h in spec.get("heads", []):
             head[h["floor"], h["head"]] = h["mult"]
