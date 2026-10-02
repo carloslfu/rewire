@@ -110,7 +110,7 @@ export default function TinyView() {
   const mutate = (kind: "noise" | "erase") => {
     if (!intact || disabled) return;
     const next = mutateWeights(intact, cfg, { kind, amount: strength, seed: mutationSeed.current++ });
-    const label = kind === "erase" ? `Erased ${Math.round(strength * 100)}% of matrix weights` : `Noise at ${Math.round(strength * 100)}% of each matrix’s RMS`;
+    const label = kind === "erase" ? `Erased approximately ${Math.round(strength * 100)}% of matrix weights` : `Noise at ${Math.round(strength * 100)}% of each matrix’s RMS`;
     setParams(next); setMutation(label); setTests(null); test(next, label);
   };
   const restore = () => {

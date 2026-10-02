@@ -121,11 +121,14 @@ export class EngineClient {
 
   private async ready<T>(msg: DistOmit<ToWorker, "id">, onTok?: (t: Tok) => void): Promise<T> {
     await this.recovery;
-    if (this.failed) throw new Error("The model could not recover. Try getting the model again.");
+    if (this.failed) throw new Error("The model could not recover. Retry loading the model.");
     return this.call(msg, onTok);
   }
 
-  check(): Promise<CheckResult> {
+  async check(): Promise<CheckResult> {
+    await this.recovery;
+    // Recheck on a working worker; load() still owns restoring models after failure.
+    if (this.failed) { this.w.terminate(); this.startWorker(); }
     return this.call({ t: "check" });
   }
   async load(base: string, phone: boolean, expectedHash?: string): Promise<{ manifestHash: string; contextCap: number; stored: boolean }> {

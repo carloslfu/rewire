@@ -95,3 +95,17 @@ it("restores the trained model after an explicit retry of failed recovery", asyn
   expect(final.messages.find((m) => m.t === "use")).toMatchObject({ model: "tiny" });
   final.finish("use"); await expect(retry).resolves.toHaveProperty("stored", true);
 });
+
+it("rechecks a failed worker before retrying automatic initialization", async () => {
+  const client = new EngineClient(), first = MockWorker.workers[0];
+  first.onerror!({ message: "Worker stopped" });
+  const checking = client.check(); await flush();
+  const checked = MockWorker.workers[1];
+  expect(checked.messages[0]).toMatchObject({ t: "check" });
+  checked.finish("check", { webgpu: true, seconds: 2 });
+  await expect(checking).resolves.toEqual({ webgpu: true, seconds: 2 });
+  const loading = client.load("https://weights/", false); await flush();
+  const loaded = MockWorker.workers[2];
+  loaded.finish("load", { manifestHash: "expected", contextCap: 1024, stored: true });
+  await expect(loading).resolves.toHaveProperty("stored", true);
+});

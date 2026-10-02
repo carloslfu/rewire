@@ -1,11 +1,11 @@
-"""Recordings of every shipping path step (section 7.4) and the page's recordings/path.json.
+"""Recordings of every shipping path step (section 7.4) and historical path metadata.
 
   uv run python tools/record.py artifacts/weights/<id> [step ...]
 
 Reads the curation results in artifacts/curate/<id>/, records each passing step's prompt at every stop
 of its control (with the changed model fed the normal reply, for the underlines and the Difference view),
 up to three recorded alternative questions, and full floor detail for the featured words. Writes to
-app/public/recordings/.
+fixtures/recordings/.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from rewire.ref import Changes, Model, generate_recorded  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import curate  # noqa: E402
 
-APP = Path(__file__).resolve().parents[2] / "app" / "public" / "recordings"
+APP = Path(__file__).resolve().parents[2] / "fixtures" / "recordings"
 STOP = set(TOK["stop"])
 
 

@@ -1,17 +1,14 @@
 // All state lives in one object in the page's memory (section 6.4). Nothing is saved to the device
-// except the model files and the crash flag.
+// except cached model files.
 import { useSyncExternalStore } from "react";
 import { type ModelInfo, QWEN_INFO } from "../model/info.ts";
 import type { ChangeSpec, Focus, Turn, WordRef } from "../model/types.ts";
 
-export type Mode = "replay" | "live";
+export type Mode = "unavailable" | "live";
 
 export type DeviceState =
   | { kind: "checking" }
   | { kind: "no-webgpu" }
-  | { kind: "slow"; seconds: number }
-  | { kind: "crashed" }
-  | { kind: "offer"; seconds: number; bytes: number | null }
   | { kind: "downloading"; loaded: number; total: number; paused: boolean; seconds: number }
   | { kind: "loading"; seconds: number }
   | { kind: "recovering" }
@@ -32,7 +29,7 @@ export interface State {
   turns: Turn[];
   /** Turn where the current chips forked the conversation (-1: not forked). */
   fork: number;
-  /** True while a reply is being written or played. */
+  /** True while a reply is being written. */
   busy: boolean;
   /** The word whose numbers are shown. */
   word: WordRef | null;
@@ -68,7 +65,7 @@ export interface State {
 
 export const initial: State = {
   model: QWEN_INFO,
-  mode: "replay",
+  mode: "unavailable",
   device: { kind: "checking" },
   chips: {},
   version: 0,

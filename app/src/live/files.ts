@@ -15,9 +15,10 @@ export class ModelFiles {
   private jsonVersion?: string;
 
   constructor(private base: string, cache: Cache | null, options: {
-    fetch?: typeof fetch; timeout?: number; retries?: number; delay?: (attempt: number) => Promise<void>; jsonVersion?: string;
+    fetch?: typeof fetch; timeout?: number; retries?: number; delay?: (attempt: number) => Promise<void>; jsonVersion?: string; paused?: boolean;
   } = {}) {
     this.cache = cache;
+    this.paused = options.paused ?? false;
     this.fetcher = options.fetch ?? ((input, init) => fetch(input, init));
     this.timeout = options.timeout ?? 30_000;
     this.retries = options.retries ?? 5;
@@ -72,6 +73,7 @@ export class ModelFiles {
   }
 
   async json(name: string): Promise<{ value: Record<string, unknown>; bytes: number }> {
+    await this.unpaused();
     const url = this.base + name;
     const key = this.jsonVersion ? `${url}?rewire-manifest=${encodeURIComponent(this.jsonVersion)}` : url;
     const hit = await this.cached(key);
@@ -111,6 +113,7 @@ export class ModelFiles {
   }
 
   async file(f: FileEntry, onBytes: (got: number) => void): Promise<ArrayBuffer> {
+    await this.unpaused();
     const url = this.base + f.name;
     const hit = await this.cached(url);
     if (hit) {

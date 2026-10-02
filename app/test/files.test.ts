@@ -107,3 +107,18 @@ it("pauses an active body and resumes without spending a retry", async () => {
   }))).toEqual(data);
   expect(fetcher.mock.calls[1][1]?.headers).toEqual({ Range: "bytes=3-" });
 });
+
+it("honors an early pause before loading either cached weights or tokenizer files", async () => {
+  const cache = cacheWith(new Response(data));
+  const fetcher = vi.fn(async () => Response.json({ ready: true }));
+  const weights = new ModelFiles("https://model/", cache as unknown as Cache, { ...options(fetcher), paused: true });
+  const tokenizer = new ModelFiles("https://model/", null, { ...options(fetcher), paused: true });
+  const loaded = weights.file(await entry(), () => {});
+  const parsed = tokenizer.json("tokenizer.json");
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  expect(cache.match).not.toHaveBeenCalled();
+  expect(fetcher).not.toHaveBeenCalled();
+  weights.pause(false); tokenizer.pause(false);
+  expect(new Uint8Array(await loaded)).toEqual(data);
+  expect((await parsed).value).toEqual({ ready: true });
+});

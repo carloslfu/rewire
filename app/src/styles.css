@@ -155,7 +155,6 @@ h3 { font-size: 15px; font-weight: 600; }
 .devicebar { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 12px; }
 .devicebar .bar { flex: 0 0 140px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .devicebar .bar > i { display: block; height: 100%; background: var(--changed); }
-.replay-alternatives { margin-top: 17px; color: var(--muted); font-size: 13px; }
 .context-full { padding: 18px 0; display: grid; gap: 12px; justify-items: start; }
 .error-message { background: var(--soft); border-left: 2px solid var(--changed); padding: 12px 16px; margin-bottom: 18px; font-size: 14px; }
 .error-message .btn { margin-top: 6px; }

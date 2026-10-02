@@ -21,5 +21,5 @@ db/**/.index.lock
 db/.index.lock
 db/.dbmd.transaction.lock
 
-# the featured-word detail files are published with the page
-!app/public/recordings/*.safetensors
+# Historical research traces are test evidence, never deployed.
+!fixtures/recordings/*.safetensors

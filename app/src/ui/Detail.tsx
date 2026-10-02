@@ -42,18 +42,18 @@ function Head({ kicker, title, def, std, code }: { kicker: string; title: string
 }
 
 function useDetail(c: Chosen | null): { detail: FloorDetail | null; loading: boolean } {
-  const [st, setSt] = useState<{ detail: FloorDetail | null; loading: boolean }>({ detail: null, loading: false });
+  const [st, setSt] = useState<{ key: string; detail: FloorDetail | null; loading: boolean }>({ key: "", detail: null, loading: false });
   const version = useStore((s) => s.version);
   const key = c ? `${version}.${c.ref.turn}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${c.reply.done}` : "";
   useEffect(() => {
-    if (!c || !c.reply.done) { setSt({ detail: null, loading: false }); return; }
+    if (!c || !c.reply.done) { setSt({ key, detail: null, loading: false }); return; }
     let live = true;
-    setSt({ detail: null, loading: true });
-    floorDetail(c.ref).then((d) => live && setSt({ detail: d, loading: false }), () => live && setSt({ detail: null, loading: false }));
+    setSt({ key, detail: null, loading: true });
+    floorDetail(c.ref).then((d) => live && setSt({ key, detail: d, loading: false }), () => live && setSt({ key, detail: null, loading: false }));
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return st;
+  return st.key === key ? st : { detail: null, loading: !!c?.reply.done };
 }
 
 function NoWord() {
@@ -80,14 +80,14 @@ function WordPanel({ c }: { c: Chosen | null }) {
   );
   const t = c.tok;
   const chosenP = t.cands.find((x) => x.id === t.id)?.p ?? 0;
-  const canPick = c.reply.done && !c.reply.stale;
+  const canPick = c.reply.done && !c.reply.stale && c.ref.turn === store.get().turns.length - 1 && store.get().mode === "live" && !store.get().busy;
   return (
     <>
       <Head kicker={model.id === "tiny" ? "Letter" : `${S.terms.token[0]} · ${S.terms.token[1]}`} title={`"${wordText(t.id)}"`} def={D.word} code={`id ${t.id}`} />
       <section>
         <div className="kicker">{S.numbers}</div>
         <dl className="kv">
-          <dt>Probability when drawn</dt><dd className="num">{pct(chosenP)} at temperature {temperature}</dd>
+          <dt>Probability when drawn</dt><dd className="num">{pct(chosenP)} at temperature {store.get().turns[c.ref.turn]?.temperature ?? temperature}</dd>
           <dt>At temperature 1</dt><dd className="num">{pct(Math.exp(t.lp1))}</dd>
           {c.forced && <><dt>Changed model</dt><dd className="num changed-text">{pct(Math.exp(c.forced.lp1))}</dd></>}
           {t.picked && <><dt>Picked by</dt><dd>you</dd></>}
@@ -175,7 +175,7 @@ function SwapControl({ id }: { id: number }) {
             <div className="suggest">
               {suggestions.map((p) => {
                 const other = p.ids[0] === id ? p.ids[1] : p.ids[0];
-                return <button key={other} type="button" className="btn change" onClick={() => void doSwap(id, other)}>Swap with "{wordText(other)}"</button>;
+                return <button key={other} type="button" className="btn change" disabled={mode !== "live"} onClick={() => void doSwap(id, other)}>Swap with "{other === p.ids[0] ? p.a : p.b}"</button>;
               })}
             </div>
           )}
@@ -224,7 +224,7 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
           onChange={(v) => void chipsWith((s) => withMult(s, "head", floor, head, v))} />
         <p className="note" style={{ marginTop: 6 }}>Off sends zero. Flip reverses the signal; ×2 and ×5 amplify it.</p>
       </section>
-      <HeadGeometry key={`${floor}.${head}`} floor={floor} head={head} detail={detail} chosen={c} />
+      <HeadGeometry key={`${floor}.${head}`} floor={floor} head={head} detail={detail} loading={loading} chosen={c} />
       <details><summary>Attention and contribution</summary>
       <section>
         <div className="kicker">{S.numbers}</div>
@@ -250,7 +250,7 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
                 <p className="note">Where head {head + 1} looks from this word, out of {n} earlier positions.</p>
               </div>
             )}
-            <FullMap c={c} floor={floor} head={head} />
+            <FullMap key={`${store.get().version}.${c.ref.turn}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${c.reply.toks.length}`} c={c} floor={floor} head={head} />
           </>
         )}
       </section>
@@ -426,6 +426,7 @@ function FloorPanel({ c, floor }: { c: Chosen | null; floor: number }) {
 }
 
 function ConceptControl({ floor }: { floor: number }) {
+  const ready = useStore((s) => s.mode === "live");
   const model = useStore((s) => s.model);
   const D = S.def(model);
   const chips = useStore((s) => s.chips);
@@ -443,7 +444,7 @@ function ConceptControl({ floor }: { floor: number }) {
           <div key={k.id} style={{ marginTop: 8 }}>
             <label className="small" htmlFor={`c-${k.id}`}>"{k.label}" · {S.strength} <span className="num">{on}</span>
               {" "}<span className="faint">({S.breakingLine} {k.breaking}{estimate ? `, ${S.breakingEstimate}` : ""})</span></label>
-            <input id={`c-${k.id}`} type="range" min={-k.breaking * 1.5} max={k.breaking * 1.5} step={k.breaking / 10} value={on}
+            <input id={`c-${k.id}`} type="range" disabled={!ready} min={-k.breaking * 1.5} max={k.breaking * 1.5} step={k.breaking / 10} value={on}
               style={{ width: "100%" }}
               onChange={(e) => void chipsWith((s) => ({ ...s, concept: Number(e.target.value) === 0 ? null : { id: k.id, floor, strength: Number(e.target.value) } }))} />
           </div>
@@ -505,7 +506,7 @@ function WordsInPanel({ c, position }: { c: Chosen | null; position?: number }) 
         {id !== undefined && <SwapControl id={id} />}
         {pos !== undefined && pos < lastReplyStart && (
           <div style={{ marginTop: 12 }}>
-            <button type="button" className={`btn change${hidden ? " on" : ""}`}
+            <button type="button" className={`btn change${hidden ? " on" : ""}`} disabled={mode !== "live"}
               onClick={() => void chipsWith((s) => ({ ...s, hidden: hidden ? (s.hidden ?? []).filter((h) => h.key !== pos) : [...(s.hidden ?? []), { key: pos, from: pos + 1 }] }))}>
               {hidden ? S.unhideWord : S.hideWord}
             </button>
@@ -564,6 +565,7 @@ function WordsOutPanel({ c }: { c: Chosen | null }) {
 // ------------------------------------------------------------------ bits
 
 function BitsPanel() {
+  const ready = useStore((s) => s.mode === "live");
   const model = useStore((s) => s.model);
   const D = S.def(model);
   const chips = useStore((s) => s.chips);
@@ -580,7 +582,7 @@ function BitsPanel() {
         <div className="kicker">{S.control}</div>
         <div className="seg change" role="radiogroup" aria-label="Bits per weight">
           {([4, 3, 2] as const).map((b) => (
-            <button key={b} type="button" role="radio" data-v={b === 4 ? 1 : b} aria-checked={bits === b} onClick={() => set(b)}>
+            <button key={b} type="button" role="radio" data-v={b === 4 ? 1 : b} aria-checked={bits === b} disabled={!ready} onClick={() => set(b)}>
               {b} bits ({2 ** b} levels)
             </button>
           ))}

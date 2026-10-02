@@ -1,7 +1,7 @@
 // The step card, change chips, composer, device line, path list and "What's real here".
 import { useState } from "react";
-import { applyChips, chipsWith, checkDevice, freshStart, openStep, pauseDownload, replayAlternative, send, setFocus, shippingSteps,
-  startDownload, stepAction, stepData, stopReply, useExperiment, canUseInChat } from "../state/actions.ts";
+import { applyChips, chipsWith, checkDevice, freshStart, openStep, pauseDownload, send, setFocus, shippingSteps,
+  stepAction, stepData, stopReply, useExperiment, canUseInChat } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { type StepData, stepCopy } from "../path/steps.ts";
 import { S } from "../strings.ts";
@@ -17,6 +17,7 @@ export function StepCard() {
   const busy = useStore((s) => s.busy);
   const turns = useStore((s) => s.turns);
   const model = useStore((s) => s.model);
+  const ready = useStore((s) => s.mode === "live");
   const st = stepData(step);
   if (model.id === "tiny") return null;
   if (!st) return turns.length ? <div className="experiment-invitation">
@@ -25,7 +26,7 @@ export function StepCard() {
   </div> : null;
   const copy = stepCopy(st);
   if (!copy || st.control.kind === "tiny") return null;
-  const isExample = turns.length === 1 && turns[0].normal.source === "recording" && turns[0].user === st.message;
+  const isExample = turns.length === 1 && turns[0].user === st.message;
   const swap = st.control.kind === "swap" ? st.control : null;
   return (
     <section className={`step${swap ? " swap-step" : ""}`} aria-labelledby="step-title">
@@ -35,13 +36,14 @@ export function StepCard() {
           <h2 id="step-title">{swap ? <>{swap.a} <span className="swap-arrow" aria-hidden="true">↔</span> {swap.b}</> : copy.title}</h2>
           {!swap && <p className="q">{copy.question}</p>}
         </div>
-        <div className="controls"><StepControlView st={st} disabled={busy || !turns.length} /></div>
+        <div className="controls"><StepControlView st={st} disabled={busy || !ready || !turns.length} /></div>
       </div>
+      {!turns.length && !ready && <p className="note">Sample selected. It needs a working model to run.</p>}
       <div className="experiment-foot">
-        {tried && isExample && <p className="why" role="status">{swap ? "Same question. Different numbers inside the model." : "Compare the replies, then look inside to see what changed."}</p>}
+        {tried && <p className="why" role="status">{swap ? "Same question. Different numbers inside the model." : "Compare the replies, then look inside to see what changed."}</p>}
         <div className="experiment-links">
-          <button type="button" className="linkish" disabled={busy || !turns.length} onClick={() => store.set({ sheet: true, inspectView: "explanation" })}>Look inside</button>
-          {!isExample && <button type="button" className="linkish muted" onClick={() => void openStep(st.n)}>See the example</button>}
+          <button type="button" className="linkish" disabled={busy || !ready || !turns.length} onClick={() => store.set({ sheet: true, inspectView: "explanation" })}>Look inside</button>
+          {!isExample && <button type="button" className="linkish muted" onClick={() => void openStep(st.n)}>Run the sample question</button>}
         </div>
       </div>
     </section>
@@ -74,7 +76,7 @@ function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) 
           {c.kind === "heads" && (
             <button type="button" className="btn" disabled={disabled}
               onClick={() => void applyChips({ heads: c.random.map(([floor, head]) => ({ floor, head, mult: 0 })) })}>
-              Turn off {c.random.length} random heads instead
+              Turn off {c.random.length} comparison heads instead
             </button>
           )}
           {c.kind === "heads" && <button type="button" className="btn quiet" onClick={() => setFocus({ kind: "head", floor: c.heads[0][0], head: c.heads[0][1] })}>Show the heads</button>}
@@ -100,10 +102,10 @@ function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) 
           <div className="seg change" role="radiogroup" aria-label={`${c.label} strength`}>
             {c.stops.map((v) => (
               <button key={v} type="button" role="radio" data-v={v === 0 ? 1 : v} aria-checked={cur === v} disabled={disabled}
-                onClick={() => void stepAction(v)}>{v === 0 ? "None" : v < 0 ? "Flip" : String(v)}{v === c.breaking ? " (breaks)" : ""}</button>
+                onClick={() => void stepAction(v)}>{v === 0 ? "None" : v < 0 ? "Flip" : String(v)}</button>
             ))}
           </div>
-          <p className="note">"{c.label}" at floor {c.floor + 1}. The breaking line is at {c.breaking}.</p>
+          <p className="note">"{c.label}" at floor {c.floor + 1}. Strong settings can disrupt the reply; the effect depends on your question.</p>
         </div>
       );
     }
@@ -153,13 +155,9 @@ export function Chips() {
 export function Composer() {
   const mode = useStore((s) => s.mode);
   const busy = useStore((s) => s.busy);
-  const step = useStore((s) => s.step);
   const model = useStore((s) => s.model);
   const full = useStore((s) => s.full);
-  const tried = useStore((s) => s.stepTried);
   const [text, setText] = useState("");
-  const st = stepData(step);
-  const alts = mode !== "live" && tried ? st?.alternatives ?? [] : [];
   const submit = () => {
     if (mode !== "live" || busy || !text.trim()) return;
     const message = text;
@@ -182,17 +180,8 @@ export function Composer() {
       </form>
       {model.id === "qwen" && <DeviceBar />}
       {mode === "live" && <p className="composer-note">{model.id === "tiny" ? "Your trained model · continues text one letter at a time" : "Runs on your device · your messages stay here"}</p>}
-      {alts.length > 0 && <details className="replay-alternatives">
-        <summary>Try another recorded question</summary>
-        <div className="suggest">{alts.map((a) => <button key={a} type="button" className="btn quiet" disabled={busy} onClick={() => void playAlternative(a)}>{a}</button>)}</div>
-      </details>}
     </div>
   );
-}
-
-async function playAlternative(message: string) {
-  const st = stepData(store.get().step);
-  if (st) await replayAlternative(st, message);
 }
 
 // ------------------------------------------------------------------ device line
@@ -206,21 +195,18 @@ export function DeviceBar() {
   switch (d.kind) {
     case "checking": return <div className="devicebar" role="status">{S.checking}</div>;
     case "no-webgpu": return <div className="devicebar" role="status">{S.noWebgpu}</div>;
-    case "slow": return <div className="devicebar" role="status">{S.slow} <button type="button" className="linkish" onClick={() => void checkDevice(true)}>{S.tryAnyway}</button></div>;
-    case "crashed": return <div className="devicebar" role="status">{S.crashed} <button type="button" className="linkish" onClick={() => void checkDevice(true)}>{S.tryAnyway}</button></div>;
-    case "offer": return <div className="devicebar" role="status">{S.offer(d.bytes ? mb(d.bytes) : null)} <button type="button" className="btn" onClick={() => void startDownload(d.seconds)}>{S.download}</button></div>;
     case "downloading":
       return (
         <div className="devicebar" role="status">
           <span>{S.downloading(mb(d.loaded), mb(d.total))}</span>
-          <span className="bar" aria-hidden="true"><i style={{ width: `${d.total ? (100 * d.loaded) / d.total : 0}%` }} /></span>
+          <span className="bar" role="progressbar" aria-label="Model download" aria-valuemin={0} aria-valuemax={d.total || undefined} aria-valuenow={d.total ? d.loaded : undefined}><i style={{ width: `${d.total ? (100 * d.loaded) / d.total : 0}%` }} /></span>
           <button type="button" className="btn quiet" onClick={() => pauseDownload(!d.paused)}>{d.paused ? S.resume : S.pause}</button>
         </div>
       );
     case "loading": return <div className="devicebar" role="status">{S.loadingModel}</div>;
     case "recovering": return <div className="devicebar" role="status">{S.recovering}</div>;
     case "ready": return stored === false ? <div className="devicebar" role="status">{S.storageRefused}</div> : null;
-    case "error": return <div className="devicebar" role="status">{S.loadError(d.message)} <button type="button" className="btn" onClick={() => void startDownload()}>{S.retry}</button></div>;
+    case "error": return <div className="devicebar" role="status">{S.loadError(d.message)} <button type="button" className="btn" onClick={() => void checkDevice()}>{S.retry}</button></div>;
   }
 }
 
@@ -234,7 +220,7 @@ export function PathList() {
   const mode = useStore((s) => s.mode);
   const model = useStore((s) => s.model);
   const turns = useStore((s) => s.turns);
-  const hasOwnChat = mode === "live" && model.id === "qwen" && turns.some((t) => t.normal.source !== "recording");
+  const hasOwnChat = mode === "live" && model.id === "qwen" && turns.length > 0;
   const steps = open ? shippingSteps().filter((s) => s.control.kind !== "tiny") : [];
   const row = (s: StepData) => {
     const copy = stepCopy(s);
@@ -243,12 +229,12 @@ export function PathList() {
       <div><h3>{copy?.title ?? s.slug}</h3><p>{copy?.question}</p></div>
       <div className="experiment-choices">
         {canApply && <button type="button" className="btn change" disabled={busy} onClick={() => void useExperiment(s.n)}>Use in this chat</button>}
-        <a className={`btn${canApply ? " quiet" : ""}`} href={`#step-${s.n}`} onClick={(e) => { e.preventDefault(); void openStep(s.n); }}>Try the example</a>
+        <button type="button" className={`btn${canApply ? " quiet" : ""}`} onClick={() => void openStep(s.n)}>Run sample question</button>
       </div>
     </li>;
   };
   return <Modal open={open} onClose={() => store.set({ pathOpen: false })} title="Experiments" className="experiment-browser">
-    <p className="modal-intro">Change one thing and see what happens. Examples are recorded runs you can explore right away.</p>
+    <p className="modal-intro">Change one thing and see what happens. Each sample question runs on your device, just like your own chat.</p>
     <ul className="experiment-list">{featuredExperiments.flatMap((n) => steps.filter((s) => s.n === n)).map(row)}</ul>
     <details className="more-experiments"><summary>More to explore</summary>
       <ul className="experiment-list">{steps.filter((s) => !featuredExperiments.includes(s.n)).map(row)}</ul>

@@ -135,7 +135,7 @@ export function Tower({ compact, embedded }: { compact?: boolean; embedded?: boo
             <p>Each cell shows one part's contribution to the selected token's score relative to the average score across all tokens. Orange adds to that relative score; blue subtracts from it. Stronger color means a larger contribution.</p>
             <p>Blue does not mean an opposite word. A token is a word, part of a word, a character or punctuation.</p>
           </> : <>
-            <p>Each cell compares the same part in both models, for the same original token and context. Blue means its contribution decreased; orange means it increased.</p>
+            <p>Each cell compares the same part in both models, forcing the original token after each side’s conversation history. Blue means its contribution decreased; orange means it increased.</p>
             <p>An increase can still leave a contribution negative. These colors show the change, not whether the part now supports the token.</p>
           </>}
           <p>The numbers are in logits, the model's score units. The color range rescales to the largest absolute value shown, so use the numbers when comparing different tokens.</p>

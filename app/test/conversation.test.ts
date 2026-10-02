@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Tok } from "../src/model/types.ts";
 
@@ -35,17 +33,10 @@ beforeEach(async () => {
   vi.stubGlobal("navigator", { gpu: {}, storage: { persist: async () => true } });
   vi.stubGlobal("screen", { width: 1200, height: 900 });
   vi.stubGlobal("addEventListener", vi.fn());
-  vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
-    if (init?.method === "HEAD") return new Response(null, { headers: { "content-length": "20" } });
-    const path = new URL(String(input), "http://localhost").pathname;
-    if (path.endsWith("manifest.json")) return Response.json({ total_bytes: 100 });
-    const data = readFileSync(resolve(__dirname, "../public", path.slice(1)));
-    return new Response(data);
-  }));
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("Page actions must not fetch prerecorded responses"); }));
   actions = await import("../src/state/actions.ts");
   store = (await import("../src/state/store.ts")).store;
   await actions.start();
-  await actions.startDownload();
   await actions.openStep(null);
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -65,12 +56,80 @@ it("opens on freeform input and keeps interventions across a fresh conversation"
   expect(store.get().turns[0].changed).toBeUndefined();
 });
 
-it("offers the chat download even on fast devices so Grow needs no pretrained model", async () => {
-  mock.check.mockResolvedValueOnce({ webgpu: true, seconds: 0.5 });
-  const loads = mock.load.mock.calls.length;
+it("loads automatically once, without requiring an enable action", async () => {
+  expect(store.get().mode).toBe("live");
+  expect(store.get().device.kind).toBe("ready");
+  expect(mock.load).toHaveBeenCalledTimes(1);
+  await Promise.all([actions.checkDevice(), actions.checkDevice()]);
+  expect(mock.load).toHaveBeenCalledTimes(1);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("loads slow devices too, and a stale crash marker cannot block it", async () => {
+  store.set({ device: { kind: "error", message: "Retry" }, mode: "unavailable" });
+  mock.check.mockResolvedValueOnce({ webgpu: true, seconds: 15 });
+  vi.stubGlobal("localStorage", { getItem: () => "1" });
   await actions.checkDevice();
-  expect(store.get().device.kind).toBe("offer");
-  expect(mock.load).toHaveBeenCalledTimes(loads);
+  expect(store.get().device).toEqual({ kind: "ready", seconds: 15 });
+  expect(store.get().mode).toBe("live");
+});
+
+it("deduplicates initialization and waits for actual model loading before accepting input", async () => {
+  const load = deferred<{ stored: boolean; contextCap: number }>();
+  store.set({ device: { kind: "error", message: "Retry" }, mode: "unavailable" });
+  mock.load.mockReturnValueOnce(load.promise);
+  const a = actions.checkDevice(), b = actions.checkDevice();
+  await flush();
+  expect(store.get().device.kind).toBe("downloading");
+  await actions.send("Too early");
+  expect(mock.write).not.toHaveBeenCalled();
+  load.resolve({ stored: true, contextCap: 1024 }); await Promise.all([a, b]);
+  expect(mock.load).toHaveBeenCalledTimes(2);
+  await actions.send("Now ready");
+  expect(store.get().turns[0].user).toBe("Now ready");
+});
+
+it("cannot generate or change a reply without WebGPU", async () => {
+  vi.stubGlobal("navigator", {});
+  store.set({ device: { kind: "checking" }, mode: "unavailable" });
+  await actions.checkDevice();
+  await actions.openStep(1);
+  await actions.applyChips({ floors: [{ floor: 0, mult: 0 }] });
+  await actions.send("Hello");
+  expect(store.get().device.kind).toBe("no-webgpu");
+  expect(store.get().turns).toHaveLength(0);
+  expect(mock.write).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("reports loading failures honestly and can retry", async () => {
+  store.set({ device: { kind: "checking" }, mode: "unavailable" });
+  mock.load.mockRejectedValueOnce(new Error("Weights unavailable"));
+  await actions.checkDevice();
+  await actions.openStep(2);
+  expect(store.get().device).toEqual({ kind: "error", message: "Weights unavailable" });
+  expect(store.get().turns).toHaveLength(0);
+  expect(fetch).not.toHaveBeenCalled();
+  await actions.checkDevice();
+  expect(store.get().mode).toBe("live");
+  expect(store.get().turns[0].user).toBe(actions.stepData(2)!.message);
+  expect(mock.write).toHaveBeenCalledTimes(1);
+});
+
+it("runs a pending preset after loading, unless the visitor has started fresh", async () => {
+  const load = deferred<{ stored: boolean; contextCap: number }>();
+  store.set({ device: { kind: "checking" }, mode: "unavailable" });
+  mock.load.mockReturnValueOnce(load.promise);
+  const pending = actions.checkDevice(); await flush();
+  await actions.openStep(1); await actions.openStep(3);
+  expect(store.get().turns).toHaveLength(0);
+  load.resolve({ stored: true, contextCap: 1024 }); await pending;
+  expect(store.get().turns[0].user).toBe(actions.stepData(3)!.message);
+  expect(mock.write).toHaveBeenCalledTimes(1);
+  actions.freshStart();
+  store.set({ device: { kind: "checking" }, mode: "unavailable" });
+  await actions.openStep(1); actions.freshStart(); await actions.checkDevice();
+  expect(store.get().turns).toHaveLength(0);
 });
 
 it("accepts only one submission while tokenization is pending", async () => {
@@ -114,12 +173,15 @@ it("changes the experiment without replacing a visitor's question", async () => 
   expect(store.get().turns.every((t) => !t.changed)).toBe(true);
 });
 
-it("keeps the recording provenance when selecting a different experiment", async () => {
+it("generates preset answers live and preserves them when selecting another intervention", async () => {
   await actions.openStep(1);
   const original = store.get().turns[0].normal;
   await actions.useExperiment(6);
   expect(store.get().turns[0].normal).toBe(original);
-  expect(original.recording).toBe("step-1.rwr");
+  expect(original.source).toBe("live");
+  expect(mock.firstTurn).toHaveBeenCalledWith(actions.stepData(1)!.message);
+  expect(mock.write).toHaveBeenCalledTimes(1);
+  expect(fetch).not.toHaveBeenCalled();
 });
 
 it("stops a reply and ignores late tokens from the cancelled job", async () => {
@@ -148,28 +210,34 @@ it("reports tokenizer errors and unlocks chat instead of leaving a stuck compose
   expect(store.get().turns).toHaveLength(1);
 });
 
-it("ignores a late example download after navigation", async () => {
-  const fetch = globalThis.fetch;
-  const pending = deferred<Response>();
-  vi.stubGlobal("fetch", vi.fn((url: string | URL, init?: RequestInit) => String(url).endsWith("step-2.rwr") ? pending.promise : fetch(url, init)));
-  const old = actions.openStep(2);
+it("ignores a sample question still being tokenized after navigation", async () => {
+  const first = deferred<number[]>(); mock.firstTurn.mockReturnValueOnce(first.promise);
+  const old = actions.openStep(2); await flush();
   await actions.openStep(3);
-  pending.resolve(await fetch("/recordings/step-2.rwr")); await old;
+  first.resolve([11, 12]); await old;
   expect(store.get().step).toBe(3);
   expect(store.get().turns).toHaveLength(1);
   expect(store.get().turns[0].user).toBe("What is the capital of France?");
-  expect(store.get().busy).toBe(false);
+  expect(mock.write).toHaveBeenCalledTimes(1);
 });
 
-
-it("labels a recorded start continued by the live engine as mixed provenance", async () => {
+it("continues live sample replies from the actual token prefix", async () => {
   await actions.openStep(9);
   const before = store.get().turns[0].normal.toks.length;
   store.set((s) => ({ turns: s.turns.map((t) => ({ ...t, normal: { ...t.normal, ended: false } })) }));
   await actions.continueReply();
-  expect(store.get().turns[0].normal.source).toBe("mixed");
+  expect(store.get().turns[0].normal.source).toBe("live");
   expect(store.get().turns[0].normal.toks).toHaveLength(before + 1);
-  expect(mock.write.mock.calls.at(-1)?.[0].prefix).toHaveLength(before);
+  expect(mock.write.mock.calls.at(-1)?.[0].prefix).toEqual([100]);
+});
+
+it("keeps the original sampling settings when re-running with a changed model", async () => {
+  await actions.send("Compare fairly");
+  store.set({ seed: 99, temperature: 1.3 });
+  await actions.applyChips({ floors: [{ floor: 0, mult: 0 }] });
+  const [normal, changed] = mock.write.mock.calls.map(([job]) => job);
+  expect(changed.seed).toBe(normal.seed);
+  expect(changed.temperature).toBe(normal.temperature);
 });
 
 it("does not attach late inspection results to a new conversation", async () => {
@@ -183,17 +251,39 @@ it("does not attach late inspection results to a new conversation", async () => 
   expect(store.get().turns[0].normal.toks[0].guesses).toBeUndefined();
 });
 
-it("keeps failed recording downloads recoverable", async () => {
-  const realFetch = globalThis.fetch;
-  vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
-    if (String(url).endsWith("step-2.rwr")) throw new Error("Offline");
-    return realFetch(url, init);
-  }));
-  await actions.replayAlternative(actions.stepData(2)!, "Another question");
-  expect(store.get().busy).toBe(false);
-  expect(store.get().error).toContain("could not load");
-  vi.stubGlobal("fetch", realFetch);
-  await actions.openStep(2);
-  expect(store.get().error).toBeNull();
-  expect(store.get().turns).toHaveLength(1);
+it("clamps inspection presets to a real token even for short replies", async () => {
+  await actions.openStep(7); await actions.stepAction();
+  expect(store.get().word).toEqual({ turn: 0, side: "normal", index: 0 });
+});
+
+it("does not relabel Qwen as unavailable when it finishes loading while using the trained model", async () => {
+  store.set({ device: { kind: "checking" }, mode: "unavailable" });
+  const load = deferred<{ stored: boolean; contextCap: number }>(); mock.load.mockReturnValueOnce(load.promise);
+  const pending = actions.checkDevice(); await flush();
+  await actions.openTiny(new Float32Array(8));
+  load.resolve({ stored: true, contextCap: 1024 }); await pending;
+  expect(store.get().model.id).toBe("tiny");
+  expect(store.get().qwenMode).toBe("live");
+  await actions.backToQwen();
+  expect(store.get().mode).toBe("live");
+  expect(store.get().model.id).toBe("qwen");
+});
+
+it("invalidates in-flight tokenization on GPU loss and allows recovery", async () => {
+  const first = deferred<number[]>(); mock.firstTurn.mockReturnValueOnce(first.promise);
+  const pending = actions.send("Interrupted question");
+  actions.liveEngine()!.onLost!();
+  first.resolve([11, 12]); await pending;
+  expect(store.get().turns).toHaveLength(0);
+  expect(store.get().mode).toBe("unavailable");
+  actions.liveEngine()!.onRecovered!();
+  expect(store.get().mode).toBe("live");
+  await actions.send("Recovered");
+  expect(store.get().turns[0].user).toBe("Recovered");
+});
+
+it("resolves swapped token names from the actual tokenizer", async () => {
+  await actions.openStep(1); await actions.stepAction();
+  expect(mock.pieces.mock.calls.some(([ids]) => ids.includes(12095) && ids.includes(21718))).toBe(true);
+  expect(actions.piece(12095)).toBe("word12095");
 });

@@ -38,7 +38,7 @@ export function WeightScope({ params, reference, step, running, mutated }: {
     <div className="seg" aria-label="Weight map" role="group"><button aria-pressed={difference} onClick={() => setDifference(true)}>Change since start</button><button aria-pressed={!difference} onClick={() => setDifference(false)}>Weights now</button></div>
     <div className="weight-image">{params ? <Strip values={values} rows={tensor.shape[0]} height={160} label={difference ? "Actual weight updates" : "Actual weights"} /> : <div className="weight-placeholder">The weight map appears when you start learning.</div>}</div>
     <p className="note">Every pixel is one weight. Blue is negative, orange is positive. Hover to read it. The color scale follows the values.</p>
-    <dl className="weight-metrics"><div><dt>Weights changed</dt><dd>{stats ? stats.changed.toLocaleString() : "0"}</dd></div><div><dt>RMS change</dt><dd>{stats?.rms.toFixed(5) ?? "0.00000"}</dd></div><div><dt>Largest change</dt><dd>{stats?.max.toFixed(5) ?? "0.00000"}</dd></div></dl>
+    <dl className="weight-metrics"><div><dt>Weights changed</dt><dd>{stats ? stats.changed.toLocaleString() : "Waiting"}</dd></div><div><dt>RMS change</dt><dd>{stats?.rms.toFixed(5) ?? "Waiting"}</dd></div><div><dt>Largest change</dt><dd>{stats?.max.toFixed(5) ?? "Waiting"}</dd></div></dl>
     <p className="scope-footnote">Measured from the parameter arrays used for inference. Training updates all layers by backpropagation. Snapshots arrive every 100 steps.</p>
   </div>;
 }

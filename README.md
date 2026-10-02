@@ -12,8 +12,9 @@ Status: in development. The build follows phases with exit checks; measurements 
 The lab has two benches. **Dismantle** starts with your own question and keeps a live visualizer
 beside the conversation on desktop. On mobile, open it with Show model. Cut layers, change individual
 heads, zero selected weights, or reduce weight precision. Original and changed replies share the same
-sampling seed. Changes persist into new questions; Restore removes them. Recorded experiments are
-optional and labeled.
+sampling seed. Changes persist into new questions; Restore removes them. The model loads automatically.
+Sample questions use the same live inference path as freeform chat. Unsupported devices or loading
+failures show an honest unavailable state; there is no replay fallback.
 
 **Grow** trains a separate 800,256-parameter transformer from random weights using actual backpropagation
 in the browser. Its editable starter language withholds six combinations from thirty training examples.
@@ -26,12 +27,12 @@ experiment reversible, and both copies generate with the same input and sampling
 in the full lab to inspect attention and direct contributions or disable components. Training does not
 fine-tune Qwen. The tiny model trains on 64-letter windows and works best with short ASCII patterns.
 
-Qwen replies identify recorded, locally generated, and mixed provenance. Neither model is a reliable
+Every reply and inspection is computed locally. Neither model is a reliable
 source of facts. The visualizer reports measured contributions, not a complete causal explanation.
 
 ## Play with vector geometry
 
-Enable live chat, ask a question, then choose **Turn a signal** or click a head in the tower.
+Ask a question, then choose **Turn a signal** or click a head in the tower.
 **Rotate** turns its projected output from −180° to 180° without changing its length. At 90° it is
 perpendicular to the original; at 180° it reverses. **Remove overlap** subtracts the component parallel
 to the stream entering that layer. **Scramble coordinates** permutes the same numbers into a different
@@ -39,8 +40,9 @@ arrangement. A checkbox applies edits to every head on that floor. Restore remov
 
 These controls modify activations during both prompt processing and generation. They do not train
 weights. Rotation uses a reproducible seeded pairing of coordinates; its plane is not a learned
-semantic direction. The angle drawing is a guide. The selected changed token separately reports
-measured before/after angle, retained length, and (for removal) alignment with the incoming stream.
+semantic direction. The diagram uses the selected token’s measured before/after angle and relative length,
+represented in two dimensions. It appears only when those measurements are available. The panel also
+reports alignment with the incoming stream for overlap removal.
 Direct contribution colors use the transformed vectors actually added to the stream.
 
 The design draws on the distinction between addition, projection and rotation in
@@ -88,8 +90,8 @@ pnpm install
 pnpm -C app dev
 ```
 
-Load Qwen explicitly with Enable live chat. Recorded runs are available while it downloads. Grow needs
-no pretrained model download and does not start the Qwen download in the background. To run chat live in development,
+Qwen starts loading when the page opens, with real byte progress and Pause/Resume. The browser tries
+to cache the model for later visits. Grow trains its own model independently. To run chat in development,
 convert the weights (`py/tools/convert.py`, see `py/`) into `artifacts/weights/<id>/`; the dev server serves
 them at `/weights/`. Tests: `pnpm test` runs the engine, tiny-model and app suites; `uv run pytest` in `py/` runs the reference checks.
 
@@ -103,7 +105,9 @@ node app/scripts/throttled-serve.mjs 5199 0 0
 
 Open `http://localhost:5199/`. The local server applies the deployment's response headers, including its
 content security policy. Use `5199 1100 170` for the shared slow connection. The preflight checks every
-weight chunk, the manifest against all ten path recordings, the tokenizer files and license notices.
+weight chunk, the manifest against the bundled experiment parameters, the tokenizer files and license
+notices. It also refuses builds that contain archived recordings. Historical traces are preserved in
+`fixtures/recordings/` for research and format tests, outside the deployed app.
 
 For isolated fallback checks, run `node app/scripts/browser-qa.mjs`. Its local page at
 `http://localhost:5200/?scenario=reset` adds a button that sends a simulated GPU-loss notification to the
@@ -114,7 +118,7 @@ from the production build. Phone layout checks on a desktop do not qualify phone
 
 ## Deploying
 
-The page is static; the weights are a separate public Hugging Face model repository. After recording and
+The page is static; the weights are a separate public Hugging Face model repository. After
 publication approval, upload the exact `artifacts/weights/gptqclip-g32-d4clip/` folder using
 [Hugging Face's upload CLI](https://huggingface.co/docs/huggingface_hub/guides/cli). Keep its Apache 2.0
 license, model card and original tokenizer files together. Use the resulting immutable commit in

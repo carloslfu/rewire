@@ -60,7 +60,7 @@ export function App() {
             <h1>{model.id === "tiny" ? "Meet the brain you grew." : "Pull it apart.\nSee what survives."}</h1>
             <p>{model.id === "tiny" ? "Give it a few letters. Inspect what it learned, cut a connection, and try again." : "Ask anything. Cut a layer. Zero real weights. Follow every word through the machinery."}</p>
           </div>}
-          {!turns.length && busy && <p className="opening" role="status">Opening the example…</p>}
+          {!turns.length && busy && <p className="opening" role="status">Reading your question…</p>}
           <Conversation />
           {error && <div className="error-message" role="alert"><p>{error}</p><button type="button" className="btn quiet" onClick={() => store.set({ error: null })}>Dismiss</button></div>}
           {step !== null && <StepCard />}
@@ -68,7 +68,7 @@ export function App() {
             <Chips />
             <Composer />
           </section>
-          <div className="lab-onramp"><button className="linkish" onClick={() => store.set({ pathOpen: true })}>Explore recorded experiments</button><button className="linkish" onClick={train}>Grow your own model</button></div>
+          <div className="lab-onramp"><button className="linkish" onClick={() => store.set({ pathOpen: true })}>Explore experiments</button><button className="linkish" onClick={train}>Grow your own model</button></div>
         </main>
         {!narrow && <aside id="chat-scope" className="lab-scope" aria-label="Live model visualizer"><LabScope /></aside>}
       </div>

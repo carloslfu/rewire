@@ -27,7 +27,7 @@ export function Inspector() {
           <div><span>Row used after the swap</span><strong>{st.control.a}</strong></div>
           <p>The same dictionary also turns the final numbers back into words. Your prompt stays the same.</p>
         </div>}
-        <p className="note">This explanation describes the recorded example. Try your own questions to see how far the effect carries.</p>
+        <p className="note">This describes the intervention. The reply and measurements above come from your current run; the effect can vary with the question.</p>
         <button type="button" className="btn" onClick={() => store.set({ inspectView: "word", focus: { kind: "word" } })}>Inspect a word</button>
       </div> : <>
         {word && reply && <div className="inspect-selection">
@@ -39,7 +39,7 @@ export function Inspector() {
           }}>
             {reply.toks.map((t, i) => [151645, 151643].includes(t.id) ? null : <option value={i} key={i}>{i + 1}. {piece(t.id).trim() || JSON.stringify(piece(t.id))}</option>)}
           </select>
-          <span className="note">{word.side === "changed" ? "Changed reply" : "Original reply"} · {reply.source === "recording" ? "Recorded" : reply.source === "mixed" ? "Recorded start · continued here" : "On this device"}</span>
+          <span className="note">{word.side === "changed" ? "Changed reply" : "Original reply"} · On this device</span>
         </div>}
         <div className="inspector-navigation">
           <button type="button" className="btn quiet" onClick={() => store.set({ inspectView: view === "model" ? "word" : "model" })}>

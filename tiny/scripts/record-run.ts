@@ -1,4 +1,4 @@
-// A recorded training run for devices without WebGPU (section 4.5): the loss at every step and samples
+// An archived training run for research comparisons: the loss at every step and samples
 // every 100 steps, from the same settings the page uses, on the built-in Alice text.
 //   npx tsx scripts/record-run.ts
 import { readFileSync, writeFileSync } from "node:fs";
@@ -41,7 +41,7 @@ async function main() {
     }
   }
   const ms = (performance.now() - t0) / STEPS;
-  writeFileSync(join(app, "recordings", "tiny-run.json"), JSON.stringify({ text: "alice", steps, samples, ms, device: "recorded" }));
+  writeFileSync(join(app, "..", "..", "fixtures", "recordings", "tiny-run.json"), JSON.stringify({ text: "alice", steps, samples, ms, device: "recorded" }));
   console.log("wrote tiny-run.json", ms.toFixed(1), "ms per step (CPU, recording machine)");
 }
 

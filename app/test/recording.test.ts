@@ -1,8 +1,8 @@
-// The page reads recordings exactly as the Python writer wrote them.
+// The archive reader reads recordings exactly as the Python writer wrote them.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { canonical, parseRecording } from "../src/model/recording.ts";
+import { canonical, parseRecording } from "./support/recording.ts";
 
 const FX = join(__dirname, "..", "..", "artifacts", "test");
 const have = existsSync(join(FX, "fixture.rwr"));

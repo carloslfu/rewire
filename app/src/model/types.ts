@@ -1,4 +1,4 @@
-// What the page shows about a conversation. Recordings and the live engine produce the same shapes.
+// Measurements produced by the running model.
 import type { ChangeSpec } from "@rewire/engine/src/changes.ts";
 
 export type { ChangeSpec };
@@ -21,7 +21,7 @@ export interface Tok {
   cands: Cand[];
   /** Direct pushes toward this piece: the dictionary row, then per floor its 16 heads and its memory block. */
   pushes: Float32Array;
-  /** Top five floor guesses per floor (recordings, or after the word is inspected live). */
+  /** Top five floor guesses per floor (after the word is inspected). */
   guesses?: Cand[][];
   /** The visitor picked this piece from the candidates. */
   picked?: boolean;
@@ -50,23 +50,19 @@ export interface Reply {
   /** Written under chips that are no longer on screen: shown as plain text, not inspectable. */
   stale?: boolean;
   /** Where it came from. */
-  source: "recording" | "live" | "mixed";
-  /** Retain provenance when the visitor changes experiments without clearing their chat. */
-  recording?: string;
+  source: "live";
   /** The reply before the visitor picked a word (Undo). */
   original?: Reply;
   /** Index of the picked word. */
   pickedAt?: number;
-  /** A replay-only device asked for a change that was not recorded. */
-  missing?: boolean;
-  /** Recorded words with full floor detail (replay). */
-  featured?: number[];
+
 }
 
 export interface Turn {
   user: string;
-  /** The seed both sides draw with (a recording's own, or the page's). */
+  /** Sampling settings shared by both sides, retained across interventions. */
   seed?: number;
+  temperature?: number;
   normal: Reply;
   changed?: Reply;
 }
@@ -92,5 +88,5 @@ export type Focus =
   | { kind: "bits" }
   | { kind: "reads" };
 
-/** Full detail of one word on every floor (featured recordings, or the live inspection pass). */
+/** Full detail of one word on every floor (the live inspection pass). */
 export type FloorDetail = Map<string, Float32Array>;

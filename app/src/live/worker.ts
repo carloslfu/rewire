@@ -9,7 +9,7 @@ import { type Conversation, type InspectHost, Model, RING, type Weights } from "
 import { ChatTokenizer } from "@rewire/engine/src/tokenizer.ts";
 import { engineConfig, engineWeights } from "@rewire/tiny/src/engine.ts";
 import type { TinyConfig } from "@rewire/tiny/src/config.ts";
-import { canonical } from "../model/recording.ts";
+import { canonical } from "../model/change-key.ts";
 import type { Cand, Forced, Tok } from "../model/types.ts";
 import type { WriteJob } from "./engine.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
@@ -37,6 +37,7 @@ let host: Omit<InspectHost, "table"> | null = null;
 let version = 0;
 let writeEpoch = 0;
 let files: ModelFiles | null = null;
+let downloadPaused = false;
 
 interface Slot {
   c: Conversation;
@@ -56,6 +57,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
   try {
     switch (m.t) {
       case "pause":
+        downloadPaused = m.paused;
         files?.pause(m.paused);
         return;
       case "version":
@@ -198,18 +200,18 @@ function syntheticWeights(d: GPUDevice, cfg: ModelConfig): Weights {
 async function load(b: string, isPhone: boolean, expectedHash?: string) {
   base = b.endsWith("/") ? b : b + "/";
   phone = isPhone;
-  const response = await fetch(base + "manifest.json", { cache: "no-cache" });
+  const response = await fetch(base + "manifest.json", { cache: "no-cache", signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`manifest.json: ${response.status}`);
   const bytes = await response.arrayBuffer();
   const manifest = JSON.parse(new TextDecoder().decode(bytes)) as Manifest;
-  // Recordings identify the exact manifest bytes, as the Python reference does.
+  // Experiment parameters identify the exact model release.
   const hash = await sha256(bytes);
-  if (expectedHash && hash !== expectedHash) throw new Error("The model files do not match these recordings");
+  if (expectedHash && hash !== expectedHash) throw new Error("The model files do not match this release");
   man = manifest;
   const cache = await openCache();
-  files = new ModelFiles(base, cache, { jsonVersion: hash });
+  files = new ModelFiles(base, cache, { jsonVersion: hash, paused: downloadPaused });
   const [tj, tc] = await Promise.all([files.json("tokenizer.json"), files.json("tokenizer_config.json")]);
-  // the tokenizer counts toward the download the page offered, so progress and offer agree
+  // Include tokenizer bytes in actual loading progress.
   extraBytes = tj.bytes + tc.bytes;
   tok = new ChatTokenizer(tj.value, tc.value, manifest.tokens, manifest.chat.system_prompt);
   await build();

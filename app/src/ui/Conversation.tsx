@@ -80,7 +80,7 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
   };
   return (
     <div className={`reply${changed ? " changed" : ""}${reply.stale ? " stale" : ""}`}>
-      <div className="reply-heading"><span className="who">{label}</span><span className="provenance">{reply.source === "recording" ? "Recorded example" : reply.source === "mixed" ? "Recorded start · continued here" : "On this device"}</span></div>
+      <div className="reply-heading"><span className="who">{label}</span><span className="provenance">On this device</span></div>
       <div className="text" ref={textRef} onKeyDown={inspectable ? onKey : undefined}
         role={inspectable ? "group" : undefined} aria-label={inspectable ? `${label ?? S.reply}: ${plain}` : undefined}
         aria-description={inspectable ? S.replyWords : undefined}>
@@ -94,7 +94,7 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
           const spoken = txt.trim() || (txt.includes("\n") ? "Line break" : "Space");
           if (!inspectable) return <Fragment key={i}>{txt}</Fragment>;
           return (
-            <button key={i} type="button" className={`tok${sel ? " sel" : ""}${under ? " under" : ""}${t.picked ? " picked" : ""}${reply.featured?.includes(i) ? " featured" : ""}`}
+            <button key={i} type="button" className={`tok${sel ? " sel" : ""}${under ? " under" : ""}${t.picked ? " picked" : ""}`}
               data-i={i} tabIndex={i === roving ? 0 : -1} aria-pressed={!!sel && inspecting}
               aria-label={under ? `${spoken}: the changed model gives it ${pct(pc!)}` : !txt.trim() ? spoken : undefined}
               title={under ? `Normal ${pct(pn)}, changed ${pct(pc!)}` : undefined}
@@ -105,7 +105,6 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
         })}</span>)}
         {!reply.done && <span className="tok cursor" aria-hidden="true" />}
       </div>
-      {reply.missing && <p className="note">{S.notRecorded}</p>}
       {moved && <p className="moved">{moved}</p>}
       <div className="foot">
         {reply.pickedAt !== undefined && reply.original && (

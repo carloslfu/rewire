@@ -1,6 +1,7 @@
-import { geometryActive } from "@rewire/engine/src/changes.ts";
+import { canonical } from "../../src/model/change-key.ts";
+export { canonical } from "../../src/model/change-key.ts";
 // Reads recordings (py/rewire/recording.py writes them; section 7.4) and featured-word detail files.
-import type { Cand, ChangeSpec, FloorDetail, Forced, Tok } from "./types.ts";
+import type { Cand, ChangeSpec, FloorDetail, Forced, Tok } from "../../src/model/types.ts";
 
 let F16: Float32Array | null = null;
 /** Half float to float, through a 65,536-entry table built on first use. */
@@ -133,39 +134,6 @@ export function parseRecording(buf: ArrayBuffer, url: string): Recording {
   off = forcedBase + header.forced_records * f.size;
   if (off > buf.byteLength) throw new Error("recording is truncated");
   return rec;
-}
-
-/** A canonical string for a change spec: neutral entries dropped, lists sorted. */
-export function canonical(spec: ChangeSpec | undefined | null): string {
-  if (!spec) return "{}";
-  const o: Record<string, unknown> = {};
-  const heads = (spec.heads ?? []).filter((x) => x.mult !== 1).map((x) => [x.floor, x.head, x.mult]).sort(cmp);
-  const memory = (spec.memory ?? []).filter((x) => x.mult !== 1).map((x) => [x.floor, x.mult]).sort(cmp);
-  const floors = (spec.floors ?? []).filter((x) => x.mult !== 1).map((x) => [x.floor, x.mult]).sort(cmp);
-  const swaps = (spec.swaps ?? []).map(([a, b]) => (a < b ? [a, b] : [b, a])).sort(cmp);
-  const hidden = (spec.hidden ?? []).map((x) => [x.key, x.from]).sort(cmp);
-  const zeroed = (spec.zeroed ?? []).map((x) => [x.floor, x.tensor, x.row, x.col]).sort(cmp);
-  const geometry = (spec.geometry ?? []).filter(geometryActive).map((g) => g.kind === "rotate"
-    ? [g.floor, g.head, g.kind, g.angle, g.seed] : g.kind === "remove"
-      ? [g.floor, g.head, g.kind, g.amount] : [g.floor, g.head, g.kind, g.seed]).sort(cmp);
-  if (geometry.length) o.geometry = geometry;
-  if (heads.length) o.heads = heads;
-  if (memory.length) o.memory = memory;
-  if (floors.length) o.floors = floors;
-  if (spec.concept && spec.concept.strength !== 0) o.concept = [spec.concept.id, spec.concept.floor, spec.concept.strength];
-  if (swaps.length) o.swaps = swaps;
-  if (hidden.length) o.hidden = hidden;
-  if (zeroed.length) o.zeroed = zeroed;
-  if (spec.bits && spec.bits !== 4) o.bits = spec.bits;
-  return JSON.stringify(o);
-}
-
-function cmp(a: unknown[], b: unknown[]): number {
-  for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    if (a[i] === b[i]) continue;
-    return (a[i] as number) < (b[i] as number) ? -1 : 1;
-  }
-  return a.length - b.length;
 }
 
 /** Featured-word detail: a safetensors file of half floats (ids in float32). */
