@@ -33,4 +33,3 @@ function cmp(a: unknown[], b: unknown[]): number {
   }
   return a.length - b.length;
 }
-
