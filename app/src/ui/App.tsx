@@ -104,6 +104,7 @@ export function App() {
         <p>Qwen3-0.6B runs in your browser. Ask your own questions and change its computation. Teach trains a small addition to its final MLP using your examples. Grow trains a separate tiny transformer from random weights, then lets you physically scramble or erase its learned weights.</p>
         <p>This is a small model for exploring how AI works. It can give confident, incorrect answers.</p>
         <p>Conversations and changes last for this visit. Nothing you type leaves this device.</p>
+        <p>Made by <a href="https://www.carlosgalarza.com">Carlos Galarza</a>. <a href="https://github.com/carloslfu/rewire" target="_blank" rel="noreferrer">Source code</a> is available under the MIT license.</p>
         <WhatsReal expanded />
       </Modal>
     </>

@@ -9,6 +9,7 @@ import { encode, letter } from "@rewire/tiny/src/data.ts";
 import { TINY, type TinyConfig } from "@rewire/tiny/src/config.ts";
 import { QWEN_INFO, TINY_INFO } from "../model/info.ts";
 import { type DeviceState, store } from "./store.ts";
+import release from "../live/release.json";
 
 export const REPLY_CAP = 64;
 
@@ -614,7 +615,8 @@ async function initialize() {
 }
 
 function weightsBase() {
-  const b = (import.meta.env.VITE_WEIGHTS_URL as string | undefined) ?? `${location.origin}/weights/`;
+  const b = (import.meta.env.VITE_WEIGHTS_URL as string | undefined)
+    ?? `https://huggingface.co/${release.repository}/resolve/${release.revision}/`;
   return b.endsWith("/") ? b : b + "/";
 }
 

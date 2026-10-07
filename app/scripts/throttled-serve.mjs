@@ -41,6 +41,9 @@ createServer((req, res) => {
     try { url = decodeURIComponent((req.url ?? "/").split("?")[0]); }
     catch { res.statusCode = 400; return res.end(); }
     if (url.includes("\0")) { res.statusCode = 400; return res.end(); }
+    // Match the deployed subpath while keeping the old local root URL usable.
+    if (url === "/rewire" || url === "/rewire/") url = "/";
+    else if (url.startsWith("/rewire/")) url = url.slice("/rewire".length);
     for (const policy of policies) {
       if (policy.path.endsWith("*") ? url.startsWith(policy.path.slice(0, -1)) : url === policy.path) {
         for (const [name, value] of policy.headers) res.setHeader(name, value);

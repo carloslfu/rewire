@@ -5,6 +5,10 @@ __pycache__/
 .pytest_cache/
 dist/
 .DS_Store
+.vercel/
+.env
+.env.*
+!.env.example
 # generated, never committed
 artifacts/
 py/.cache/
@@ -23,3 +27,5 @@ db/.dbmd.transaction.lock
 
 # Historical research traces are test evidence, never deployed.
 !fixtures/recordings/*.safetensors
+.vercel
+.env*

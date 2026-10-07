@@ -51,9 +51,10 @@ function localWeights(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === "build" ? "/rewire/" : "/",
   plugins: [react(), localWeights()],
   worker: { format: "es" },
   build: { target: "es2022", sourcemap: true },
   server: { port: 5178 },
-});
+}));

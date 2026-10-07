@@ -1,11 +1,14 @@
 # Rewire
 
-A real chat AI, Qwen3-0.6B, running in the browser with every step it computes shown with its real
-numbers, and its parts changeable: turn heads, memory blocks and floors off or up, swap two words, hide a
-word, push a concept, squeeze the weights to fewer bits. A tiny model with the same design learns from your
-own writing in front of you. No server does the thinking and nothing you type leaves the device.
+[Open the lab](https://www.carlosgalarza.com/rewire).
 
-Status: in development. The build follows phases with exit checks; measurements and decisions are in `db/`.
+Talk to Qwen3-0.6B in your browser. Change its attention heads and MLPs, cut transformer layers,
+or zero real weights. Teach the same model with your own examples, or grow a separate tiny
+transformer from random weights. The visualizer shows actual computations and parameters.
+Inference and training run on your device; prompts and examples are never sent to a server.
+
+This is an experimental learning tool, not a reliable assistant. Measurements, limitations,
+and earlier development decisions are in `db/`.
 
 ## The experience
 
@@ -111,27 +114,38 @@ semantic opposite.
 ## Running it
 
 ```bash
-pnpm install
+corepack enable
+pnpm install --frozen-lockfile
 pnpm -C app dev
 ```
 
-Qwen starts loading when the page opens, with real byte progress and Pause/Resume. The browser tries
-to cache the model for later visits. Grow trains its own model independently. To run chat in development,
-convert the weights (`py/tools/convert.py`, see `py/`) into `artifacts/weights/<id>/`; the dev server serves
-them at `/weights/`. Tests: `pnpm test` runs the engine, tiny-model and app suites; `uv run pytest` in `py/` runs the reference checks.
+Use Node.js 22.18 or newer. Qwen starts loading when the page opens, with real byte progress and
+Pause/Resume. The default download uses the public model release pinned in
+`app/src/live/release.json`; no login or API key is needed. The browser tries to cache it for later
+visits. Grow trains its own model independently.
+
+For local model files, convert the weights (`py/tools/convert.py`, see `py/`) into
+`artifacts/weights/<id>/`, then run `VITE_WEIGHTS_URL=/weights/ pnpm -C app dev`.
+The dev server serves those files at `/weights/`.
+
+`pnpm test` runs the engine, tiny-model and app suites, including actual WebGPU tests, on a
+machine with a compatible GPU. `pnpm test:deploy` runs the app and resource-lifecycle tests plus
+all TypeScript checks without requiring a GPU. `uv run pytest` in `py/` runs the Python reference checks.
 
 ## Checking the production build
 
 ```bash
 pnpm build
-node app/scripts/preflight.mjs
+node app/scripts/check-deployment.mjs
 node app/scripts/throttled-serve.mjs 5199 0 0
 ```
 
-Open `http://localhost:5199/`. The local server applies the deployment's response headers, including its
-content security policy. Use `5199 1100 170` for the shared slow connection. The preflight checks every
-weight chunk, the manifest against the bundled experiment parameters, the tokenizer files and license
-notices. It also refuses builds that contain archived recordings. Historical traces are preserved in
+Open `http://localhost:5199/rewire`. The local server applies the response policies in `_headers`,
+including its content security policy. Use `5199 1100 170` with local weights for the shared slow
+connection. Before publishing new model weights, `node app/scripts/preflight.mjs gptqclip-g32-d4clip`
+checks every local weight chunk, the manifest against the bundled experiment parameters,
+the tokenizer files and license notices. Deployment checks verify the public manifest and built
+subpath assets. Both refuse builds that contain archived recordings. Historical traces are preserved in
 `fixtures/recordings/` for research and format tests, outside the deployed app.
 
 For isolated fallback checks, run `node app/scripts/browser-qa.mjs`. Its local page at
@@ -143,22 +157,27 @@ from the production build. Phone layout checks on a desktop do not qualify phone
 
 ## Deploying
 
-The page is static; the weights are a separate public Hugging Face model repository. After
-publication approval, upload the exact `artifacts/weights/gptqclip-g32-d4clip/` folder using
-[Hugging Face's upload CLI](https://huggingface.co/docs/huggingface_hub/guides/cli). Keep its Apache 2.0
-license, model card and original tokenizer files together. Use the resulting immutable commit in
-`VITE_WEIGHTS_URL`, rather than a moving branch:
+The `rewire` Vercel project builds this repository using `vercel.json` and publishes `app/dist`.
+`main` is the production branch; other branches get protected previews. Each deployment runs
+`pnpm build:deploy`: the tests that do not require a GPU, all type checks, the Vite build, and
+a check that the pinned public manifest matches the application. Run the full GPU tests locally
+after engine changes; the cloud build does not certify GPU correctness or phone performance.
 
-```bash
-VITE_WEIGHTS_URL=https://huggingface.co/OWNER/MODEL/resolve/COMMIT/ pnpm build
-```
+The personal website forwards `/rewire` and `/rewire/*` to this project's stable production
+alias, preserving the path. Rewire's own rewrites serve both the entry page and its assets under
+that prefix, so direct Vercel previews also work. A push to Rewire updates the lab without a
+portfolio rebuild. The website's Projects entry is maintained in its existing project-record export.
 
-Create a Cloudflare Pages project and deploy `app/dist`, including `_headers`, following
-[Cloudflare's Direct Upload instructions](https://developers.cloudflare.com/pages/get-started/direct-upload/).
-Direct Upload and Git integration are different project choices; choose Git integration when automatic
-deployments are wanted. For a Direct Upload project, `npx wrangler pages deploy app/dist --branch=staging`
-creates the staging deployment. Check the remote model download, hashes, CSP, caching and the physical
-device matrix there before launching. No analytics or server inference is part of this build.
+Weights are served directly from
+[carloslfu/Qwen3-0.6B-Rewire-4bit](https://huggingface.co/carloslfu/Qwen3-0.6B-Rewire-4bit),
+with an immutable commit pinned in `app/src/live/release.json`. The 385 MB model is not part of
+the website deployment. Before replacing it, run the local model preflight, publish the files
+with their Apache 2.0 license and original tokenizer, update the pin, and verify a fresh browser
+download. `VITE_WEIGHTS_URL` is an optional development override.
+
+No analytics, paid inference API, or server inference is part of this build. Learned adapters
+stay in memory for the visit and are lost on reload. The application needs WebGPU; unsupported
+devices receive an unavailable message rather than a simulated answer.
 
 ## Credits
 

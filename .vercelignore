@@ -1,0 +1,6 @@
+artifacts
+db
+py
+**/node_modules
+**/dist
+.git
