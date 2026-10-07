@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.21.0",
-  "engines": { "node": ">=22.18.0" },
+  "engines": { "node": "22.x || 24.x" },
   "scripts": {
-    "test": "pnpm -r test",
-    "test:deploy": "pnpm --filter @rewire/app test && pnpm --filter @rewire/engine exec vitest run test/lifecycle.test.ts && pnpm -r typecheck",
-    "build": "pnpm --filter @rewire/app build",
-    "build:deploy": "pnpm test:deploy && pnpm build && node app/scripts/check-deployment.mjs"
+    "test": "corepack pnpm -r test",
+    "test:deploy": "corepack pnpm --filter @rewire/app test && corepack pnpm --filter @rewire/engine exec vitest run test/lifecycle.test.ts && corepack pnpm -r typecheck",
+    "build": "corepack pnpm --filter @rewire/app build",
+    "build:deploy": "corepack pnpm test:deploy && corepack pnpm build && node app/scripts/check-deployment.mjs"
   }
 }
