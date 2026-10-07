@@ -54,7 +54,7 @@ export function HeadGeometry({ floor, head, detail, loading, chosen }: { floor: 
       <label className="geometry-scope"><input type="checkbox" disabled={!live} checked={all} onChange={(e) => {
         if (e.target.checked) commit(current, true);
         else void chipsWith((s) => ({ ...s, geometry: [...(s.geometry ?? []).filter((g) => g.floor !== floor), current] }));
-      }} />Transform all {model.heads} heads on this floor</label>
+      }} />Transform all {model.heads} attention heads on this layer</label>
       {kind !== "shuffle" && <>
         <div className="geometry-range-label"><label htmlFor={`${id}-range`}>{kind === "rotate" ? "Angle" : "Overlap removed"}</label><output htmlFor={`${id}-range`} className="num">{draft}{kind === "rotate" ? "°" : "%"}</output></div>
         <input id={`${id}-range`} aria-label={kind === "rotate" ? "Rotation angle" : "Overlap removed"} type="range" disabled={!live}

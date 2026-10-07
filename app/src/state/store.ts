@@ -31,6 +31,8 @@ export interface State {
   fork: number;
   /** True while a reply is being written. */
   busy: boolean;
+  /** Ordered replay after changing the model. An interrupted replay must be restarted before sending. */
+  replay: { turn: number; status: "running" | "stopped" | "error" } | null;
   /** The word whose numbers are shown. */
   word: WordRef | null;
   /** The tower follows the word being written until the visitor taps one. */
@@ -48,6 +50,9 @@ export interface State {
   stepTried: boolean;
   /** The tiny model is open instead of Qwen3-0.6B. */
   tiny: boolean;
+  teach: boolean;
+  teachingBusy: boolean;
+  lessonRevision: number;
   /** A message for screen readers and the status line. */
   announce: string;
   /** Phone: the detail sheet is open. */
@@ -72,6 +77,7 @@ export const initial: State = {
   turns: [],
   fork: -1,
   busy: false,
+  replay: null,
   word: null,
   follow: true,
   focus: { kind: "word" },
@@ -82,6 +88,9 @@ export const initial: State = {
   pathOpen: false,
   stepTried: false,
   tiny: false,
+  teach: false,
+  teachingBusy: false,
+  lessonRevision: 0,
   announce: "",
   sheet: false,
   inspectView: "word",

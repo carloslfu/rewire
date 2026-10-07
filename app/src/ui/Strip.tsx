@@ -33,7 +33,8 @@ export function Strip({ values, rows = 1, label, scale, names, height }: {
   }, [values, rows, cols, s, theme]);
   const at = (e: React.PointerEvent) => {
     const r = (e.target as HTMLElement).getBoundingClientRect();
-    const c = Math.floor(((e.clientX - r.left) / r.width) * cols), ro = Math.floor(((e.clientY - r.top) / r.height) * rows);
+    const c = Math.max(0, Math.min(cols - 1, Math.floor(((e.clientX - r.left) / r.width) * cols)));
+    const ro = Math.max(0, Math.min(rows - 1, Math.floor(((e.clientY - r.top) / r.height) * rows)));
     const i = ro * cols + c;
     if (i < 0 || i >= values.length) return;
     setHover(`${names ? names(ro, c) : rows > 1 ? `row ${ro + 1}, ${c + 1}` : `${c + 1}`}: ${fmt(values[i], 3)}`);
@@ -44,7 +45,7 @@ export function Strip({ values, rows = 1, label, scale, names, height }: {
     <div>
       <canvas ref={ref} className="strip" style={{ height: height ?? (rows > 1 ? Math.min(160, rows * 6) : 22) }}
         role="img" aria-label={`${label}: ${values.length} numbers from ${fmt(min)} to ${fmt(max)}`}
-        onPointerMove={at} onPointerDown={at} onPointerLeave={() => setHover("")} />
+        onPointerMove={at} onPointerDown={at} onPointerLeave={(e) => { if (e.pointerType === "mouse") setHover(""); }} />
       <div className="hover-val">{hover || `${values.length.toLocaleString()} numbers, ${fmt(min)} to ${fmt(max)}`}</div>
     </div>
   );

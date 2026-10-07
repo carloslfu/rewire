@@ -46,8 +46,44 @@ export function chosen(s: Pick<State, "turns" | "word" | "fork">): Chosen | null
     position += r.read.length + r.toks.length;
   }
   position += reply.read.length + w.index - 1;
-  const forced = w.side === "normal" ? turn.changed?.compare?.[w.index] : undefined;
+  const comparison = turn.changed?.compare;
+  const sameReply = comparison?.length === turn.normal.toks.length && comparison?.every((x, i) => x.id === turn.normal.toks[i].id);
+  const compared = w.side === "normal" && !turn.changed?.stale && sameReply ? comparison?.[w.index] : undefined;
+  const forced = compared?.id === tok.id && compared.pushes.length === tok.pushes.length ? compared : undefined;
   return { ref: w, turn, reply, tok, input, position, forced };
+}
+
+/** Use an explicitly identified original token, never subtract unrelated generated tokens. */
+export function originalWord(s: Pick<State, "turns" | "word">): WordRef | null {
+  const turn = s.word?.turn ?? s.turns.length - 1;
+  const toks = s.turns[turn]?.normal.toks;
+  if (!toks?.length) return null;
+  const visible = toks.map((t, i) => [151643, 151645].includes(t.id) ? -1 : i).filter((i) => i >= 0);
+  if (!visible.length) return null;
+  const wanted = s.word?.index ?? visible[visible.length - 1];
+  const index = visible.find((i) => i >= wanted) ?? visible[visible.length - 1];
+  return { turn, side: "normal", index };
+}
+
+/** A comparison can be opened while following either reply. Its reference is always original. */
+export function comparisonTarget(s: Pick<State, "turns" | "word" | "fork">): WordRef | null {
+  const word = originalWord(s);
+  return word && chosen({ ...s, word })?.forced ? word : null;
+}
+
+/** Resume at the newest visible output, retaining the original reference in comparison view. */
+export function latestWord(s: Pick<State, "turns" | "view">): WordRef | null {
+  const turn = s.turns.length - 1;
+  const t = s.turns[turn];
+  if (!t) return null;
+  const sides = s.view === "difference" || t.changed?.stale ? ["normal"] as const : ["changed", "normal"] as const;
+  for (const side of sides) {
+    const toks = (side === "normal" ? t.normal : t.changed)?.toks ?? [];
+    for (let index = toks.length - 1; index >= 0; index--) {
+      if (![151643, 151645].includes(toks[index].id)) return { turn, side, index };
+    }
+  }
+  return null;
 }
 
 /** Pushes the tower shows: each part's push, or changed minus normal on the same word. */

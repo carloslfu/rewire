@@ -71,14 +71,14 @@ export const COPY: Record<string, StepCopy> = {
   "step-2": {
     title: (f) => `${capital(count(f.k, 5))} numbers out of 596 million`,
     question: "Can a handful of numbers break it?",
-    action: (f) => `Zero ${count(f.k, 5)} weights on floor ${f.floor ?? 3}`,
+    action: (f) => `Zero ${count(f.k, 5)} weights on layer ${f.floor ?? 3}`,
     why: () => "The selected connections contribute zero during this run. Their effects propagate through later layers. Compare the actual reply before and after; a few weights can matter much more than their count suggests.",
   },
   "step-3": {
-    title: "Skip a floor",
-    question: "The model has 28 floors, each adding to the stream of numbers. Can it lose one?",
-    action: "Turn off a floor",
-    why: () => "Turning a floor off removes its contribution to the stream. Later floors then work from that altered state. The reply may change a little, change a lot, or use the same words with different probabilities.",
+    title: "Skip a layer",
+    question: "The model has 28 layers, each adding to the stream of numbers. Can it lose one?",
+    action: "Turn off a layer",
+    why: () => "Turning a layer off removes its contribution to the stream. Later layers then work from that altered state. The reply may change a little, change a lot, or use the same words with different probabilities.",
     term: "floor",
     suggestions: ["What is the tallest mountain on Earth?", "Name three colors of the rainbow."],
   },
@@ -86,7 +86,7 @@ export const COPY: Record<string, StepCopy> = {
     title: "Hide the start marker",
     question: "Many heads rest their attention on the marker that starts the text. What if they couldn't see it?",
     action: "Hide the start marker",
-    why: () => "This blocks later attention from landing on the start marker from the selected floor onward. That attention is redistributed to the remaining positions. The result depends on the prompt.",
+    why: () => "This blocks later attention from landing on the start marker from the selected layer onward. That attention is redistributed to the remaining positions. The result depends on the prompt.",
     term: "head",
   },
   "step-5": {
@@ -106,9 +106,9 @@ export const COPY: Record<string, StepCopy> = {
   },
   "step-7": {
     title: "Where does the answer form?",
-    question: "If the model stopped at each floor, what would it say?",
-    action: "Show the floor guesses",
-    why: () => "The same output dictionary reads the stream after each floor. These intermediate predictions are computed for the selected token; early layers were not trained to answer on their own.",
+    question: "If the model stopped at each layer, what would it say?",
+    action: "Show the layer predictions",
+    why: () => "The same output dictionary reads the stream after each layer. These intermediate predictions are computed for the selected token; early layers were not trained to answer on their own.",
     term: "lens",
   },
   "step-8": {
@@ -126,7 +126,7 @@ export const COPY: Record<string, StepCopy> = {
   },
   "step-10": {
     title: "Squeeze the numbers",
-    question: "Each weight inside its floors can take 16 values. How few can it live with?",
+    question: "Each weight inside its layers can take 16 values. How few can it live with?",
     action: "Cut the levels",
     why: () => "The computation rounds each quantized weight to fewer levels. This adds error to the learned numbers. The effects on a reply depend on the prompt and precision.",
     term: "bits",

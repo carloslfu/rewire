@@ -3,6 +3,7 @@ import { encodeTable } from "./changes.ts";
 import { type ModelConfig, type TableLayout, tableLayout, TENSOR_ID } from "./config.ts";
 import { BU, bind, type Dispatch, download, encode, Pipelines, storage, upload } from "./gpu.ts";
 import * as K from "./kernels.ts";
+import { LESSON_RANK, loraDownKernel, loraUpKernel, validateLesson, type LessonWeights } from "./lora.ts";
 
 export interface FloorWeights {
   q: GPUBuffer; k: GPUBuffer; v: GPUBuffer; o: GPUBuffer; gate: GPUBuffer; up: GPUBuffer; down: GPUBuffer;
@@ -48,11 +49,16 @@ export class Model {
   /** The mean dictionary row followed by the final normalization weights (for the pushes). */
   readonly aux: GPUBuffer;
   readonly kc: K.KernelConsts;
+  readonly lessonA: GPUBuffer;
+  readonly lessonB: GPUBuffer;
+  lesson: LessonWeights | null = null;
 
   constructor(readonly dev: GPUDevice, readonly cfg: ModelConfig, readonly w: Weights) {
     this.lay = tableLayout(cfg);
     this.pipes = new Pipelines(dev);
     this.kc = { cfg, lay: this.lay };
+    this.lessonA = storage(dev, LESSON_RANK * cfg.units * 4, "learned A");
+    this.lessonB = storage(dev, LESSON_RANK * cfg.width * 4, "learned B");
     for (let L = 0; L < cfg.floors; L++) {
       this.floorUniforms.push(this.uniform([L, 0, 0, 0]));
     }
@@ -100,6 +106,15 @@ export class Model {
     return c;
   }
 
+  setLesson(p: LessonWeights) {
+    validateLesson(this.cfg, p);
+    this.lesson = { a: p.a.slice(), b: p.b.slice() };
+    this.dev.queue.writeBuffer(this.lessonA, 0, p.a);
+    this.dev.queue.writeBuffer(this.lessonB, 0, p.b);
+  }
+
+  release(c: Conversation) { this.conversations.delete(c); c.destroy(); }
+
   /** Release a replaced model, including conversations and uniforms created by inspection plans. */
   destroy() {
     for (const c of this.conversations) c.destroy();
@@ -107,7 +122,7 @@ export class Model {
     for (const b of this.uniforms) b.destroy();
     this.uniforms.clear();
     for (const f of this.w.floors) for (const b of Object.values(f)) (b as GPUBuffer).destroy();
-    for (const b of [this.w.dict, this.w.finalNorm, this.w.meanRow, this.rope, this.aux]) b.destroy();
+    for (const b of [this.w.dict, this.w.finalNorm, this.w.meanRow, this.rope, this.aux, this.lessonA, this.lessonB]) b.destroy();
   }
 }
 
@@ -131,6 +146,7 @@ export class Conversation {
   readonly v: GPUBuffer; readonly att: GPUBuffer; readonly o: GPUBuffer; readonly mid: GPUBuffer; readonly h2: GPUBuffer;
   readonly act: GPUBuffer; readonly m: GPUBuffer; readonly xn: GPUBuffer; readonly rinv: GPUBuffer;
   readonly intok: GPUBuffer; readonly tok: GPUBuffer;
+  readonly lessonZ: GPUBuffer;
   // per-step outputs
   /** Per floor, each head's output and the memory block's output at the last position: [floors][heads + 1][width]. */
   readonly parts: GPUBuffer; readonly scores: GPUBuffer; readonly cand: GPUBuffer;
@@ -165,6 +181,7 @@ export class Conversation {
     this.o = f(T * W, "o"); this.mid = f(T * W, "mid"); this.h2 = f(T * W, "h2"); this.act = f(T * U, "act");
     this.m = f(T * W, "m"); this.xn = f(T * W, "xn"); this.rinv = f(T, "rinv");
     this.intok = f(T, "intok"); this.tok = f(8, "tok");
+    this.lessonZ = f(T * LESSON_RANK, "lesson z");
     this.parts = f(cfg.floors * (H + 1) * W, "parts");
     this.scores = f(cfg.vocabRows, "scores");
     this.cand = f(K.TOPK_SLICES * K.TOPK * 2, "cand");
@@ -183,7 +200,7 @@ export class Conversation {
   destroy() {
     for (const b of [this.ct, this.SP, this.x, this.h, this.q, this.k, this.kout, this.v, this.att, this.o,
       this.mid, this.h2, this.act, this.m, this.xn, this.rinv, this.intok, this.tok, this.parts, this.scores,
-      this.cand, this.sampleOut, this.pushes, this.forced, ...this.kcache, ...this.vcache, ...this.stage, this.capture,
+      this.cand, this.sampleOut, this.pushes, this.forced, this.lessonZ, ...this.kcache, ...this.vcache, ...this.stage, this.capture,
       this.geometryBuffers?.before, this.geometryBuffers?.after, this.insp?.buf, this.insp?.rows, this.insp?.g, this.insp?.u]) b?.destroy();
   }
 
@@ -264,6 +281,17 @@ export class Conversation {
   /** Where the chunk plan splits after floor L's rotation (the attention map keeps queries there). */
   private ropeAt: number[] = [];
 
+  private lessonPlan(L: number, rows: number): Dispatch[] {
+    if (L !== this.cfg.floors - 1) return [];
+    const m = this.model;
+    const a = m.pipe("lesson-down", () => loraDownKernel(this.cfg));
+    const b = m.pipe("lesson-up", () => loraUpKernel(this.cfg));
+    return [
+      { pipeline: a, group: bind(this.dev, a, [m.lessonA, this.act, this.ct, this.SP, this.lessonZ]), x: rows, y: LESSON_RANK },
+      { pipeline: b, group: bind(this.dev, b, [m.lessonB, this.lessonZ, this.ct, this.SP, this.m, m.lessonA, this.act]), x: rows },
+    ];
+  }
+
   private forwardPlan(TB: number, single: boolean): Dispatch[] {
     const m = this.model, cfg = this.cfg, dev = this.dev, kc = m.kc;
     const W = cfg.width, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, U = cfg.units;
@@ -301,6 +329,7 @@ export class Conversation {
       plan.push({ pipeline: ares, group: bind(dev, ares, [this.x, this.o, fw.postNorm, this.ct, this.SP, uni, this.mid, this.h2]), x: rows });
       plan.push(this.mm("gu", W, U, TB, rows, fw.gate, this.h2, this.act, m.mmUniform(L, "gate", "up"), { gateup: fw.up }));
       plan.push(this.mm("down", U, W, TB, rows, fw.down, this.act, this.m, m.mmUniform(L, "down")));
+      plan.push(...this.lessonPlan(L, rows));
       plan.push({ pipeline: mres, group: bind(dev, mres, [this.mid, this.m, this.ct, this.SP, uni, this.x, this.parts]), x: rows });
     }
     plan.push(...this.captureAt(cfg.floors, rows));
@@ -341,6 +370,26 @@ export class Conversation {
       this.dev.queue.submit([enc.finish()]);
       this.length += part.length;
     }
+  }
+
+  /** Frozen features for exact training of the last MLP. Its output cannot affect any layer's KV cache. */
+  async lessonFeatures(tokens: number[], from: number): Promise<{ x: Float32Array; act: Float32Array }> {
+    if (tokens.length > this.cfg.maxContext || from < 0 || from >= tokens.length) throw new Error("Lesson example exceeds context");
+    this.setTable(encodeTable({}, this.cfg)); this.length = 0;
+    const W = this.cfg.width, U = this.cfg.units, n = tokens.length - from;
+    const x = new Float32Array(n * W), act = new Float32Array(n * U);
+    for (let start = 0; start < tokens.length; start += CHUNK) {
+      const part = tokens.slice(start, start + CHUNK);
+      this.read(part);
+      const lo = Math.max(from, start), hi = start + part.length;
+      if (lo >= hi) continue;
+      const [xr, ar] = await Promise.all([
+        download(this.dev, this.x, (hi - lo) * W * 4, (lo - start) * W * 4),
+        download(this.dev, this.act, (hi - lo) * U * 4, (lo - start) * U * 4),
+      ]);
+      x.set(new Float32Array(xr), (lo - from) * W); act.set(new Float32Array(ar), (lo - from) * U);
+    }
+    return { x, act };
   }
 
   // ------------------------------------------------------------------ inspection (section 6.2, "Reads")
@@ -397,6 +446,7 @@ export class Conversation {
       prog.push(this.mm("gu", W, U, 1, 1, fw.gate, this.h2, this.act, m.mmUniform(L, "gate", "up"), { gateup: fw.up }));
       cp(this.act, L, "act", U);
       prog.push(this.mm("down", U, W, 1, 1, fw.down, this.act, this.m, m.mmUniform(L, "down")));
+      prog.push(...this.lessonPlan(L, 1));
       prog.push({ pipeline: mres, group: bind(dev, mres, [this.mid, this.m, this.ct, this.SP, uni, this.x, this.parts]), x: 1 });
       cp(this.m, L, "mem", W);
     }
@@ -467,6 +517,21 @@ export class Conversation {
     const uv = new Float32Array(W);
     for (let i = 0; i < W; i++) uv[i] = (row[i] - host.meanRow[i]) * host.finalNorm[i] * rinv;
     const dots = await this.columnDots(uv);
+    // The unit-level decomposition must include the trained down-projection update too.
+    if (table[10] && m.lesson) {
+      const { a, b } = m.lesson;
+      for (let r = 0; r < LESSON_RANK; r++) {
+        let br = 0; for (let i = 0; i < W; i++) br += uv[i] * b[i * LESSON_RANK + r];
+        for (let j = 0; j < U; j++) dots[(F - 1) * U + j] += br * a[r * U + j];
+      }
+      for (let k = 0; k < Math.min(table[9], 8); k++) {
+        const e = m.lay.zeroed + k * 4;
+        if (table[e] !== F - 1 || table[e + 1] !== TENSOR_ID.down) continue;
+        const i = table[e + 2], j = table[e + 3];
+        let delta = 0; for (let r = 0; r < LESSON_RANK; r++) delta += b[i * LESSON_RANK + r] * a[r * U + j];
+        dots[(F - 1) * U + j] -= uv[i] * delta;
+      }
+    }
     for (let L = 0; L < F; L++) {
       const act = detail.get(`f${L}.act`)!;
       const a = fl(m.lay.floor + L), mm = fl(m.lay.mem + L);
@@ -505,7 +570,7 @@ export class Conversation {
       const pipeline = m.pipe("coldot", () => K.colDotKernel(m.kc));
       const ub = storage(dev, cfg.width * 4, "u"), out = storage(dev, cfg.floors * U * 4, "unit dots");
       const list = m.w.floors.map((fw, L) => ({ pipeline, group: bind(dev, pipeline, [fw.down, ub, this.ct,
-        { buffer: out, offset: L * U * 4, size: U * 4 }]), x: Math.ceil(U / 64) }));
+        { buffer: out, offset: L * U * 4, size: U * 4 }, m.floorUniforms[L]]), x: Math.ceil(U / 64) }));
       this.colPipe = { u: ub, out, list };
     }
     dev.queue.writeBuffer(this.colPipe.u, 0, u);

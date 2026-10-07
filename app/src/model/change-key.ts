@@ -5,6 +5,7 @@ import type { ChangeSpec } from "./types.ts";
 export function canonical(spec: ChangeSpec | undefined | null): string {
   if (!spec) return "{}";
   const o: Record<string, unknown> = {};
+  if (spec.lesson) o.lesson = spec.lesson;
   const heads = (spec.heads ?? []).filter((x) => x.mult !== 1).map((x) => [x.floor, x.head, x.mult]).sort(cmp);
   const memory = (spec.memory ?? []).filter((x) => x.mult !== 1).map((x) => [x.floor, x.mult]).sort(cmp);
   const floors = (spec.floors ?? []).filter((x) => x.mult !== 1).map((x) => [x.floor, x.mult]).sort(cmp);

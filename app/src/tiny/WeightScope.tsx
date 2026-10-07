@@ -23,6 +23,13 @@ export function WeightScope({ params, reference, step, running, mutated }: {
   return <div className="weight-scope">
     <div className="scope-title"><div><p className="eyebrow">Live weights</p><h2>{mutated ? "Under the knife" : running ? "A brain taking shape" : params ? "Your specimen" : "Waiting for its first lesson"}</h2></div><span className="num">{step.toLocaleString()} steps</span></div>
     <p className="note">4 transformer layers · {layout({ ...TINY, vocab: VOCAB }).total.toLocaleString()} trainable numbers</p>
+    <div className="scope-settings"><label htmlFor="weight-matrix">Matrix</label><select id="weight-matrix" value={selected} onChange={(e) => setSelected(e.target.value)}>
+      {tensors.filter((t) => t.shape.length === 2).map((t) => <option value={t.name} key={t.name}>{t.name === "dict" ? "Letter embeddings" : `Layer ${Number(t.name[1]) + 1} · ${t.name.split(".")[1]}`}</option>)}
+    </select></div>
+    <div className="seg" aria-label="Weight map" role="group"><button aria-pressed={difference} onClick={() => setDifference(true)}>Change since start</button><button aria-pressed={!difference} onClick={() => setDifference(false)}>Weights now</button></div>
+    <div className="weight-image">{params ? <Strip values={values} rows={tensor.shape[0]} height={160} label={difference ? "Actual weight updates" : "Actual weights"} /> : <div className="weight-placeholder">The weight map appears when you start learning.</div>}</div>
+    <p className="note">Every pixel is one weight. Blue is negative, orange is positive. Hover or tap to read it. The color scale follows the values.</p>
+    <dl className="weight-metrics"><div><dt>Weights changed</dt><dd>{stats ? stats.changed.toLocaleString() : "Waiting"}</dd></div><div><dt>RMS change</dt><dd>{stats?.rms.toFixed(5) ?? "Waiting"}</dd></div><div><dt>Largest change</dt><dd>{stats?.max.toFixed(5) ?? "Waiting"}</dd></div></dl>
     <div className="weight-layers" aria-label="Choose a layer to inspect">
       {[0, 1, 2, 3].map((floor) => <button key={floor} type="button" aria-pressed={selected.startsWith(`f${floor}.`)} onClick={() => setSelected(`f${floor}.down`)}>
         <span>Layer {floor + 1}</span><span className="weight-trace" aria-hidden="true">{["q", "k", "v", "o", "gate", "up", "down"].map((name) => {
@@ -32,13 +39,6 @@ export function WeightScope({ params, reference, step, running, mutated }: {
         })}</span>
       </button>)}
     </div>
-    <div className="scope-settings"><label htmlFor="weight-matrix">Matrix</label><select id="weight-matrix" value={selected} onChange={(e) => setSelected(e.target.value)}>
-      {tensors.filter((t) => t.shape.length === 2).map((t) => <option value={t.name} key={t.name}>{t.name === "dict" ? "Letter embeddings" : `Layer ${Number(t.name[1]) + 1} · ${t.name.split(".")[1]}`}</option>)}
-    </select></div>
-    <div className="seg" aria-label="Weight map" role="group"><button aria-pressed={difference} onClick={() => setDifference(true)}>Change since start</button><button aria-pressed={!difference} onClick={() => setDifference(false)}>Weights now</button></div>
-    <div className="weight-image">{params ? <Strip values={values} rows={tensor.shape[0]} height={160} label={difference ? "Actual weight updates" : "Actual weights"} /> : <div className="weight-placeholder">The weight map appears when you start learning.</div>}</div>
-    <p className="note">Every pixel is one weight. Blue is negative, orange is positive. Hover to read it. The color scale follows the values.</p>
-    <dl className="weight-metrics"><div><dt>Weights changed</dt><dd>{stats ? stats.changed.toLocaleString() : "Waiting"}</dd></div><div><dt>RMS change</dt><dd>{stats?.rms.toFixed(5) ?? "Waiting"}</dd></div><div><dt>Largest change</dt><dd>{stats?.max.toFixed(5) ?? "Waiting"}</dd></div></dl>
     <p className="scope-footnote">Measured from the parameter arrays used for inference. Training updates all layers by backpropagation. Snapshots arrive every 100 steps.</p>
   </div>;
 }

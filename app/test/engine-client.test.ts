@@ -21,6 +21,39 @@ const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve()
 beforeEach(() => { MockWorker.workers = []; vi.stubGlobal("Worker", MockWorker); });
 afterEach(() => vi.unstubAllGlobals());
 
+it("streams real lesson progress without completing the training promise and stops independently of chat",async()=>{
+  const client=new EngineClient(),w=MockWorker.workers[0],progress=vi.fn(),finished=vi.fn();
+  const task=client.trainLesson([{prompt:"Q",answer:"A"}],200,0.003,progress).then(finished);
+  await flush();const m=w.messages.find(m=>m.t==="lesson-train")!;
+  expect(m).toMatchObject({continueLesson:false});
+  w.emit({t:"lesson-progress",id:m.id,update:{phase:"training",step:10,total:200,loss:1}});
+  await flush();expect(progress).toHaveBeenCalledOnce();expect(finished).not.toHaveBeenCalled();
+  client.stopLesson();expect(w.messages.at(-1)).toEqual({t:"lesson-stop",id:0});
+  w.finish("lesson-train",{steps:10,stopped:true});await task;
+  expect(finished).toHaveBeenCalledWith({steps:10,stopped:true});
+});
+
+it("explicitly requests continuation without replacing the installed checkpoint",async()=>{
+  const client=new EngineClient(),w=MockWorker.workers[0];
+  const task=client.trainLesson([{prompt:"Q",answer:"A"}],80,0.001,()=>{},true);
+  await flush();expect(w.messages.at(-1)).toMatchObject({t:"lesson-train",continueLesson:true});
+  w.finish("lesson-train",{steps:80});await task;
+  expect(w.messages.some(m=>m.t==="lesson-install")).toBe(false);
+});
+
+it("restores installed learned weights after device loss before any new inference",async()=>{
+  const client=new EngineClient(),w=MockWorker.workers[0];
+  const load=client.load("https://weights/",false);await flush();w.finish("load");await load;
+  const p={a:new Float32Array([1,2]),b:new Float32Array([3,4])};
+  const install=client.installLesson(p);await flush();w.finish("lesson-install");await install;p.a.fill(0);
+  w.emit({t:"lost"});const replacement=MockWorker.workers[1];replacement.finish("load");await flush();
+  expect(replacement.messages.at(-1)).toMatchObject({t:"lesson-install",weights:{a:new Float32Array([1,2])}});
+  const test=client.probeLesson("fresh question",true);await flush();expect(replacement.messages.some(m=>m.t==="lesson-probe")).toBe(false);
+  replacement.finish("lesson-install");await flush();replacement.finish("use");await flush();
+  expect(replacement.messages.at(-1)).toMatchObject({t:"lesson-probe",prompt:"fresh question",lesson:true});
+  replacement.finish("lesson-probe",{text:"answer",ended:true,cancelled:false});await expect(test).resolves.toHaveProperty("text","answer");
+});
+
 it("cancels old writes, reloads the model and holds inspections until recovery finishes", async () => {
   const client = new EngineClient(), lost = vi.fn(), recovered = vi.fn();
   client.onLost = lost; client.onRecovered = recovered;

@@ -42,7 +42,7 @@ fn swapped(id: u32) -> u32 {
 }
 
 /** Reads one dictionary row element: q4, q8 or f32. */
-function dictRead(c: KernelConsts) {
+export function dictRead(c: KernelConsts) {
   const W = c.cfg.width;
   if (c.cfg.dictBits === 32) return `fn dict_at(row: u32, i: u32) -> f32 { return bitcast<f32>(dict[row * ${W}u + i]); }`;
   if (c.cfg.dictBits === 8) {
@@ -785,6 +785,15 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
   }
   if (li == 0u) {
     let temp = bitcast<f32>(sp(6));
+    if (temp <= 0.0) {
+      tok[row] = topi[0];
+      let o = row * 42u;
+      out[o] = topi[0]; out[o + 1u] = 1u;
+      for (var k = 0u; k < ${TOPK}u; k++) {
+        out[o + 2u + k] = topi[k]; out[o + 22u + k] = bitcast<u32>(select(0.0, 1.0, k == 0u));
+      }
+      return;
+    }
     let topp = bitcast<f32>(sp(8));
     var e: array<f32, ${TOPK}>;
     let m = topv[0] / temp;
@@ -957,6 +966,7 @@ export function colDotKernel(c: KernelConsts) {
 @group(0) @binding(1) var<storage, read> u: array<f32>;
 @group(0) @binding(2) var<storage, read> ct: array<u32>;
 @group(0) @binding(3) var<storage, read_write> out: array<f32>;
+@group(0) @binding(4) var<uniform> F: vec4u;
 ${header(c)}
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
@@ -966,6 +976,14 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   for (var i = 0u; i < ${W}u; i++) {
     ${f32w ? "" : `let pp = unpack2x16float(Wd[${codeWords}u + i * ${U / G}u + j / ${G}u]);`}
     acc += ${at} * u[i];
+  }
+  for (var k = 0u; k < min(ct[9], 8u); k++) {
+    let z = L_ZEROED + 4u * k;
+    if (ct[z] == F.x && ct[z + 1u] == 6u && ct[z + 3u] == j) {
+      let i = ct[z + 2u];
+      ${f32w ? "" : `let pp = unpack2x16float(Wd[${codeWords}u + i * ${U / G}u + j / ${G}u]);`}
+      acc -= ${at} * u[i];
+    }
   }
   out[j] = acc;
 }`;

@@ -9,12 +9,37 @@ Status: in development. The build follows phases with exit checks; measurements 
 
 ## The experience
 
-The lab has two benches. **Dismantle** starts with your own question and keeps a live visualizer
+The lab has three benches. **Dismantle** starts with your own question and keeps a live visualizer
 beside the conversation on desktop. On mobile, open it with Show model. Cut layers, change individual
 heads, zero selected weights, or reduce weight precision. Original and changed replies share the same
 sampling seed. Changes persist into new questions; Restore removes them. The model loads automatically.
 Sample questions use the same live inference path as freeform chat. Unsupported devices or loading
 failures show an honest unavailable state; there is no replay fallback.
+
+**Teach** fine-tunes the same Qwen model using editable question/answer pairs. A rank-8 LoRA adds
+32,768 trainable float32 parameters to layer 28's MLP down projection; original Qwen weights stay
+frozen. It uses full-vocabulary cross entropy, answer-only targets including the end marker, and Adam
+with gradient clipping and weight decay. The frozen prefix is cached exactly: changes to the final
+MLP cannot affect earlier layers or any attention KV cache. Both adapter matrices receive gradients.
+Continue learning starts from both installed adapter matrices. Each round resets Adam's moments
+and trains on the examples currently in the paired question/answer editor; retaining old examples
+rehearses them, while removing an example does not erase it from existing weights. Train from original
+explicitly starts a fresh adapter. Stop retains completed steps; stopping before the first step leaves
+the previous lesson unchanged. A GPU reset restores the last installed adapter. Examples, checkpoints,
+and the adapter stay in memory for the visit.
+
+Fresh tests include no training examples in the prompt and use greedy decoding with a 64-token cap.
+Every completed round automatically compares a taught example, an optional visitor-editable test
+question, and a general knowledge control. Test questions are never added to training. The UI tracks
+questions used across continued rounds, even after removal from the editor, so a previously taught
+question is not mislabeled as unseen. Expected answers are display-only, with no automatic success
+score. Original and trained answers appear together, including failures. Off/On beside the results
+switches between those actual generated answers; Dismantle's Off/On changes the live intervention.
+General knowledge checks expose possible forgetting; rephrasing alone does not establish rule learning.
+The live map shows real A/B parameters, not activation pushes. Dismantle this model installs the
+same adapter as a removable intervention and replays the existing chat. MLP scaling, cutting its layer,
+and individual down-weight zeroing act on the learned addition too. Precision controls affect the
+quantized base weights; the learned adapter remains float32.
 
 **Grow** trains a separate 800,256-parameter transformer from random weights using actual backpropagation
 in the browser. Its editable starter language withholds six combinations from thirty training examples.
@@ -24,7 +49,7 @@ continues from current weights with a fresh optimizer, including after changing 
 
 Scramble and Erase rewrite the learned matrix parameters themselves. A retained intact copy makes the
 experiment reversible, and both copies generate with the same input and sampling seed. Open the result
-in the full lab to inspect attention and direct contributions or disable components. Training does not
+in the full lab to inspect attention and direct contributions or disable components. Grow does not
 fine-tune Qwen. The tiny model trains on 64-letter windows and works best with short ASCII patterns.
 
 Every reply and inspection is computed locally. Neither model is a reliable

@@ -47,6 +47,9 @@ export interface Reply {
   changes: ChangeSpec;
   /** For a changed reply: the changed model fed the normal reply of the same turn. */
   compare?: Forced[];
+  /** A live pass measuring the changed model on the original reply's tokens. */
+  comparing?: boolean;
+  compareError?: string;
   /** Written under chips that are no longer on screen: shown as plain text, not inspectable. */
   stale?: boolean;
   /** Where it came from. */
@@ -83,7 +86,7 @@ export type Focus =
   | { kind: "memory"; floor: number }
   | { kind: "floor"; floor: number }
   | { kind: "dictionary" }
-  | { kind: "words-in"; position?: number }
+  | { kind: "words-in"; position?: number; side?: Side }
   | { kind: "words-out" }
   | { kind: "bits" }
   | { kind: "reads" };

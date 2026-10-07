@@ -2,9 +2,16 @@
 import type { Cand, ChangeSpec, FloorDetail, Forced, Tok } from "../model/types.ts";
 import type { TinyConfig } from "@rewire/tiny/src/config.ts";
 import type { ConvId, WriteJob } from "./engine.ts";
+import type { LessonWeights } from "@rewire/engine/src/lora.ts";
+import type { LessonUpdate } from "../teach/types.ts";
+import type { Example } from "../teach/lessons.ts";
 
 export type ToWorker = { id: number } & (
   | { t: "check" }
+  | { t: "lesson-train"; examples: Example[]; steps: number; lr: number; continueLesson: boolean }
+  | { t: "lesson-stop" }
+  | { t: "lesson-install"; weights: LessonWeights }
+  | { t: "lesson-probe"; prompt: string; lesson: boolean }
   | { t: "load"; base: string; phone: boolean; expectedHash?: string }
   | { t: "pause"; paused: boolean }
   | { t: "version"; version: number }
@@ -24,6 +31,7 @@ export type ToWorker = { id: number } & (
 );
 
 export type FromWorker =
+  | { t: "lesson-progress"; id: number; update: LessonUpdate }
   | { t: "progress"; loaded: number; total: number }
   | { t: "lost" }
   | { t: "tok"; id: number; tok: Tok; pieces?: [number, string][] }

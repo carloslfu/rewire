@@ -2,6 +2,9 @@
 // changed, and the underline pass), versioned jobs so newer changes skip older work.
 import type { Cand, ChangeSpec, FloorDetail, Forced, Tok } from "../model/types.ts";
 import type { TinyConfig } from "@rewire/tiny/src/config.ts";
+import type { LessonWeights } from "@rewire/engine/src/lora.ts";
+import type { LessonResult, LessonUpdate, ProbeResult } from "../teach/types.ts";
+import type { Example } from "../teach/lessons.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
 
 export type ConvId = 0 | 1 | 2;
@@ -31,7 +34,7 @@ export interface CheckResult {
 }
 
 type DistOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; onTok?: (t: Tok) => void };
+type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; onTok?: (t: Tok) => void; onLesson?: (p: LessonUpdate) => void };
 
 export class EngineClient {
   private w!: Worker;
@@ -39,6 +42,7 @@ export class EngineClient {
   private pending = new Map<number, Pending>();
   private loaded: { base: string; phone: boolean; expectedHash?: string } | null = null;
   private trained: { params: Float32Array; config: TinyConfig } | null = null;
+  private lesson: LessonWeights | null = null;
   private model: "qwen" | "tiny" = "qwen";
   private version = 0;
   private recovery: Promise<void> | null = null;
@@ -80,6 +84,7 @@ export class EngineClient {
     this.w.terminate();
     this.startWorker();
     if (this.loaded) await this.call({ t: "load", ...this.loaded });
+    if (this.lesson) await this.call({t:"lesson-install",weights:this.lesson});
     if (this.trained) await this.call({ t: "tiny", ...this.trained });
     await this.call({ t: "use", model: this.model });
     this.setVersion(this.version);
@@ -102,6 +107,7 @@ export class EngineClient {
     }
     const p = this.pending.get(m.id);
     if (!p) return;
+    if (m.t === "lesson-progress") { p.onLesson?.(m.update); return; }
     if (m.t === "tok") {
       if (m.pieces) this.onPieces?.(m.pieces);
       return p.onTok?.(m.tok);
@@ -111,10 +117,10 @@ export class EngineClient {
     else p.resolve(m.result);
   }
 
-  private call<T>(msg: DistOmit<ToWorker, "id">, onTok?: (t: Tok) => void, transfer: Transferable[] = []): Promise<T> {
+  private call<T>(msg: DistOmit<ToWorker, "id">, onTok?: (t: Tok) => void, transfer: Transferable[] = [], onLesson?: (p: LessonUpdate) => void): Promise<T> {
     const id = this.seq++;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, onTok });
+      this.pending.set(id, { resolve, reject, onTok, onLesson });
       this.w.postMessage({ ...msg, id } as ToWorker, transfer);
     });
   }
@@ -137,6 +143,7 @@ export class EngineClient {
     if (replaced) { this.w.terminate(); this.startWorker(); this.failed = false; }
     this.loaded = { base, phone, expectedHash };
     const info = await this.call<{ manifestHash: string; contextCap: number; stored: boolean }>({ t: "load", ...this.loaded });
+    if (this.lesson) await this.call({t:"lesson-install",weights:this.lesson});
     if (replaced && this.trained) await this.call({ t: "tiny", ...this.trained });
     if (replaced && this.model === "tiny") await this.call({ t: "use", model: "tiny" });
     this.setVersion(this.version);
@@ -162,6 +169,17 @@ export class EngineClient {
   pieces(ids: number[]): Promise<string[]> {
     return this.call({ t: "pieces", ids });
   }
+  async trainLesson(examples:Example[],steps:number,lr:number,onProgress:(p:LessonUpdate)=>void,continueLesson=false):Promise<LessonResult> {
+    await this.recovery;
+    if(this.failed)throw new Error("Reload the model before teaching it.");
+    return this.call({t:"lesson-train",examples,steps,lr,continueLesson},undefined,[],onProgress);
+  }
+  stopLesson() { this.w.postMessage({t:"lesson-stop",id:0} satisfies ToWorker); }
+  async installLesson(weights:LessonWeights):Promise<void> {
+    await this.ready({t:"lesson-install",weights});
+    this.lesson={a:weights.a.slice(),b:weights.b.slice()};
+  }
+  probeLesson(prompt:string,lesson:boolean):Promise<ProbeResult> { return this.ready({t:"lesson-probe",prompt,lesson}); }
   write(job: WriteJob, onTok: (t: Tok) => void): Promise<{ ended: boolean; cancelled: boolean }> {
     return this.ready({ t: "write", job }, onTok);
   }

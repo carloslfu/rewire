@@ -250,7 +250,7 @@ function SlowMotion({ params, corpus, worker }: { params: Float32Array; corpus: 
               </tbody></table>
               <h3 style={{ marginTop: 8 }}>The update to the dictionary ({VOCAB} letters × 128 numbers)</h3>
               <Strip values={res.grad.slice(dictT.offset, dictT.offset + dictT.size).map((g) => -res.lr * g)} rows={VOCAB} label="update to the dictionary" height={160} />
-              <h3 style={{ marginTop: 8 }}>The update to floor 4's memory block (down projection)</h3>
+              <h3 style={{ marginTop: 8 }}>The update to layer 4's MLP (down projection)</h3>
               <Strip values={res.grad.slice(downT.offset, downT.offset + downT.size).map((g) => -res.lr * g)} rows={128} label="update to the down projection" height={160} />
             </div>
           )}

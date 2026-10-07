@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { piece, selectWord, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { stepCopy } from "../path/steps.ts";
@@ -11,6 +12,12 @@ export function Inspector() {
   const word = useStore((s) => s.word);
   const turns = useStore((s) => s.turns);
   const step = useStore((s) => s.step);
+  const focusKey = useStore((s) => JSON.stringify(s.focus));
+  const content = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const body = content.current?.closest(".modal-body");
+    if (body) body.scrollTop = 0;
+  }, [open, view, focusKey]);
   const st = stepData(step), copy = st && stepCopy(st);
   const turn = word && turns[word.turn];
   const reply = turn && (word.side === "normal" ? turn.normal : turn.changed);
@@ -18,6 +25,7 @@ export function Inspector() {
   return (
     <Modal open={open} onClose={() => store.set({ sheet: false })} title={changeView ? "Inside this experiment" : "Inside the model"}
       className={`inspector${view === "model" ? " full-model" : ""}`}>
+      <div ref={content}>
       {changeView ? <div className="experiment-explanation">
         <h3>{copy.title}</h3>
         <p>{copy.question}</p>
@@ -52,6 +60,7 @@ export function Inspector() {
           <section className="detail" aria-label="Details"><Detail /></section>
         </div>
       </>}
+      </div>
     </Modal>
   );
 }

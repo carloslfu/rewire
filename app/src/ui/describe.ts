@@ -19,6 +19,7 @@ function conceptLabel(id: string) {
 export function chips(spec: ChangeSpec, readTokens?: number[]): ChipDef[] {
   const out: ChipDef[] = [];
   const copy = () => structuredClone(spec);
+  if (spec.lesson) out.push({ key: "lesson", label: "Learned weights in layer 28 MLP", without: () => ({ ...copy(), lesson: undefined }) });
   const groups = new Map<string, HeadGeometry[]>();
   for (const g of spec.geometry ?? []) {
     if (!geometryActive(g)) continue;
@@ -27,7 +28,7 @@ export function chips(spec: ChangeSpec, readTokens?: number[]): ChipDef[] {
   }
   for (const [key, group] of groups) {
     const g = group[0];
-    const name = group.length === 1 ? `Head ${g.head + 1}, floor ${g.floor + 1}` : `${group.length} heads on floor ${g.floor + 1}`;
+    const name = group.length === 1 ? `Attention head ${g.head + 1}, layer ${g.floor + 1}` : `${group.length} attention heads on layer ${g.floor + 1}`;
     out.push({ key: `g${key}`, label: `${name}: ${geometryLabel(g)}`,
       without: () => ({ ...copy(), geometry: spec.geometry!.filter((v) => !group.includes(v)) }) });
   }
@@ -59,7 +60,7 @@ export function chips(spec: ChangeSpec, readTokens?: number[]): ChipDef[] {
     out.push({ key: "c", label: S.chip.concept(conceptLabel(spec.concept.id), spec.concept.floor + 1, spec.concept.strength),
       without: () => ({ ...copy(), concept: null }) });
   }
-  // zeroed weights read as one chip per floor ("5 weights on floor 3 set to zero")
+  // zeroed weights read as one chip per layer ("5 weights on layer 3 set to zero")
   const perFloor = new Map<number, number>();
   for (const z of spec.zeroed ?? []) perFloor.set(z.floor, (perFloor.get(z.floor) ?? 0) + 1);
   for (const [floor, n] of perFloor) {

@@ -76,10 +76,10 @@ function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) 
           {c.kind === "heads" && (
             <button type="button" className="btn" disabled={disabled}
               onClick={() => void applyChips({ heads: c.random.map(([floor, head]) => ({ floor, head, mult: 0 })) })}>
-              Turn off {c.random.length} comparison heads instead
+              Turn off {c.random.length} comparison attention heads instead
             </button>
           )}
-          {c.kind === "heads" && <button type="button" className="btn quiet" onClick={() => setFocus({ kind: "head", floor: c.heads[0][0], head: c.heads[0][1] })}>Show the heads</button>}
+          {c.kind === "heads" && <button type="button" className="btn quiet" onClick={() => setFocus({ kind: "head", floor: c.heads[0][0], head: c.heads[0][1] })}>Show the attention heads</button>}
         </>
       );
     }
@@ -105,7 +105,7 @@ function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) 
                 onClick={() => void stepAction(v)}>{v === 0 ? "None" : v < 0 ? "Flip" : String(v)}</button>
             ))}
           </div>
-          <p className="note">"{c.label}" at floor {c.floor + 1}. Strong settings can disrupt the reply; the effect depends on your question.</p>
+          <p className="note">"{c.label}" at layer {c.floor + 1}. Strong settings can disrupt the reply; the effect depends on your question.</p>
         </div>
       );
     }
@@ -155,11 +155,12 @@ export function Chips() {
 export function Composer() {
   const mode = useStore((s) => s.mode);
   const busy = useStore((s) => s.busy);
+  const replay = useStore((s) => s.replay);
   const model = useStore((s) => s.model);
   const full = useStore((s) => s.full);
   const [text, setText] = useState("");
   const submit = () => {
-    if (mode !== "live" || busy || !text.trim()) return;
+    if (mode !== "live" || busy || replay || !text.trim()) return;
     const message = text;
     setText("");
     void send(message);
@@ -176,8 +177,9 @@ export function Composer() {
           placeholder={model.id === "tiny" ? S.placeholderTiny : S.placeholderLive} aria-label="Message" autoComplete="off"
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }} />
         {busy ? <button type="button" className="btn stop" onClick={stopReply}>Stop</button>
-          : <button type="submit" className="btn primary" disabled={mode !== "live" || !text.trim()}>{S.send}</button>}
+          : <button type="submit" className="btn primary" disabled={mode !== "live" || !!replay || !text.trim()}>{S.send}</button>}
       </form>
+      {replay && replay.status !== "running" && <p className="note">Restart the replay or restore the original conversation to send this message.</p>}
       {model.id === "qwen" && <DeviceBar />}
       {mode === "live" && <p className="composer-note">{model.id === "tiny" ? "Your trained model · continues text one letter at a time" : "Runs on your device · your messages stay here"}</p>}
     </div>

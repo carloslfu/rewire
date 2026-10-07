@@ -6,6 +6,7 @@ import { useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { pct } from "./color.ts";
 import { describe } from "./describe.ts";
+import { ReplayStatus } from "./ReplayStatus.tsx";
 
 const STOP = new Set([151645, 151643]);
 const MARKERS: Record<number, string> = { 151644: "<|im_start|>", 151645: "<|im_end|>", 151643: "<|endoftext|>", 151667: "<think>", 151668: "</think>" };
@@ -21,6 +22,7 @@ export function Conversation() {
   if (!turns.length) return null;
   return (
     <div className="conversation" aria-live="off">
+      <ReplayStatus />
       {turns.map((t, k) => <TurnView key={k} turn={t} k={k} last={k === turns.length - 1} live={mode === "live"} />)}
       <div ref={end} />
       <details className="reads-toggle" open={reads} onToggle={(e) => setReads(e.currentTarget.open)}>
@@ -48,13 +50,16 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
   const word = useStore((s) => s.word);
   const inspecting = useStore((s) => s.sheet);
   const busy = useStore((s) => s.busy);
+  const replay = useStore((s) => s.replay);
   const model = useStore((s) => s.model);
   const compare = side === "normal" ? turn.changed?.compare : undefined;
   const changed = side === "changed";
   const label = !changed ? (turn.changed ? "Original" : model.id === "tiny" ? "Your tiny model" : "Rewire")
     : reply.stale ? S.writtenUnder(describe(reply.changes, turn.normal.read)) : S.changedBy(describe(reply.changes, turn.normal.read));
   const toks = reply.toks;
-  const moved = changed && reply.done && !reply.stale ? whatMoved(turn) : null;
+  const pending = changed && replay && k >= replay.turn;
+  const queued = pending && k > replay.turn;
+  const moved = changed && reply.done && !reply.stale && !pending ? whatMoved(turn) : null;
   const inspectable = !reply.stale;
   // One Tab stop per reply; arrow keys move between its words (roving tabindex, like the tower).
   const textRef = useRef<HTMLDivElement>(null);
@@ -103,17 +108,19 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
             </button>
           );
         })}</span>)}
-        {!reply.done && <span className="tok cursor" aria-hidden="true" />}
+        {!reply.done && !queued && <span className="tok cursor" aria-hidden="true" />}
       </div>
+      {queued && <p className="note">{replay.status === "running" ? "Waiting for earlier replies…" : "Not replayed yet."}</p>}
+      {pending && !queued && replay.status !== "running" && <p className="note">Replay interrupted here.</p>}
       {moved && <p className="moved">{moved}</p>}
       <div className="foot">
         {reply.pickedAt !== undefined && reply.original && (
           <>
             <span>{S.youPicked}: "{piece(toks[reply.pickedAt]?.id ?? 0).trim()}"</span>
-            <button type="button" className="btn quiet" onClick={() => undoPick(k, side)}>{S.undo}</button>
+            <button type="button" className="btn quiet" disabled={busy || !!replay} onClick={() => undoPick(k, side)}>{S.undo}</button>
           </>
         )}
-        {reply.done && !reply.ended && !reply.stale && last && (
+        {reply.done && !reply.ended && !reply.stale && last && !replay && (
           <>
             <span>{S.stopped(reply.toks.length, model.piece)}</span>
             {live && <button type="button" className="btn" disabled={busy} onClick={() => void continueReply()}>{S.cont}</button>}
@@ -140,9 +147,10 @@ function wordGroups(toks: Tok[]) {
 export function FinishedReplies() {
   const turns = useStore((s) => s.turns);
   const busy = useStore((s) => s.busy);
+  const replay = useStore((s) => s.replay);
   let text = "";
   const t = turns[turns.length - 1];
-  if (!busy && t) {
+  if (!busy && !replay && t) {
     const words = (r: Reply) => r.toks.filter((x) => !STOP.has(x.id)).map((x) => piece(x.id)).join("").trim();
     const parts: string[] = [];
     if (t.normal.done) parts.push(t.changed ? `${S.normal}: ${words(t.normal)}` : words(t.normal));
@@ -172,15 +180,25 @@ function whatMoved(turn: Turn): string | null {
 /** What the model actually reads: the full input as word pieces, markers included. */
 function Reads({ turns }: { turns: Turn[] }) {
   const chips = useStore((s) => s.chips);
+  const [side, setSide] = useState<Side>("normal");
+  const forked = turns.some((t) => t.changed);
+  const changed = forked && side === "changed";
   const hidden = new Set((chips.hidden ?? []).map((h) => h.key));
   let pos = 0;
   const items: { id: number; pos: number; reply: boolean }[] = [];
   for (const t of turns) {
-    for (const id of t.normal.read) items.push({ id, pos: pos++, reply: false });
-    for (const tk of t.normal.toks) items.push({ id: tk.id, pos: pos++, reply: true });
+    const r = changed ? t.changed : t.normal;
+    if (!r) break;
+    for (const id of r.read) items.push({ id, pos: pos++, reply: false });
+    for (const tk of r.toks) items.push({ id: tk.id, pos: pos++, reply: true });
   }
   return (
     <div className="reads">
+      {forked && <div className="seg" role="group" aria-label="Conversation history">
+        <button aria-pressed={!changed} onClick={() => setSide("normal")}>Original history</button>
+        <button aria-pressed={changed} onClick={() => setSide("changed")}>Changed history</button>
+      </div>}
+      {changed && <p className="note">The replay uses these regenerated answers as context. Unreplayed turns are not included.</p>}
       <p className="note">{S.readsNote}</p>
       <p className="note">{S.thinkingOff}</p>
       <div style={{ marginTop: 6 }}>
@@ -189,7 +207,7 @@ function Reads({ turns }: { turns: Turn[] }) {
           const txt = m ?? piece(x.id);
           return (
             <button key={x.pos} type="button" className={`piece${m ? " marker" : ""}${hidden.has(x.pos) ? " hidden" : ""}`}
-              title={`position ${x.pos}, id ${x.id}`} aria-label={!txt.trim() ? txt.includes("\n") ? "Line break" : "Space" : undefined} onClick={() => setFocus({ kind: "words-in", position: x.pos })}>
+              title={`position ${x.pos}, id ${x.id}`} aria-label={!txt.trim() ? txt.includes("\n") ? "Line break" : "Space" : undefined} onClick={() => setFocus({ kind: "words-in", position: x.pos, side: changed ? "changed" : "normal" })}>
               {txt.replace(/\n/g, "↵")}
             </button>
           );

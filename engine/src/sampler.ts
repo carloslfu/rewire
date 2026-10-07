@@ -18,7 +18,7 @@ export interface Candidates {
 }
 
 export function candidates(scores: ArrayLike<number>, vocabReal: number, temperature = 0.7, topK = 20, topP = 0.8): Candidates {
-  const t = Math.fround(temperature);
+  const t = temperature <= 0 ? 1 : Math.fround(temperature);
   // top-k by score, ties by lower id
   const idx: number[] = [];
   const val: number[] = [];
@@ -32,6 +32,7 @@ export function candidates(scores: ArrayLike<number>, vocabReal: number, tempera
       if (idx.length > topK) { idx.pop(); val.pop(); }
     }
   }
+  if (temperature <= 0) return { ids: idx, probs: idx.map((_, i) => i === 0 ? 1 : 0), cut: 1 };
   const m = val[0];
   const e = val.map((v) => Math.fround(Math.exp(Math.fround(v - m))));
   let total = 0;

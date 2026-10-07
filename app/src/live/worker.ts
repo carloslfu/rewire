@@ -14,6 +14,7 @@ import type { Cand, Forced, Tok } from "../model/types.ts";
 import type { WriteJob } from "./engine.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
 import { ModelFiles } from "./files.ts";
+import { LessonRuntime } from "../teach/runtime.ts";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -38,6 +39,7 @@ let version = 0;
 let writeEpoch = 0;
 let files: ModelFiles | null = null;
 let downloadPaused = false;
+let lessonRuntime: LessonRuntime | null = null;
 
 interface Slot {
   c: Conversation;
@@ -56,6 +58,16 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
   const m = e.data;
   try {
     switch (m.t) {
+      case "lesson-stop": lessonRuntime?.stop(); return;
+      case "lesson-train": return done(m.id, await need(lessonRuntime).train(m.examples,m.steps,m.lr,
+        update => post({t:"lesson-progress",id:m.id,update}),m.continueLesson));
+      case "lesson-probe": return done(m.id,await need(lessonRuntime).probe(m.prompt,m.lesson));
+      case "lesson-install": {
+        await Promise.all(slots.map(s=>s.lock));
+        need(model).setLesson(m.weights);
+        for(const s of slots){s.tokens=[];s.c.rewind(0);s.key="";}
+        return done(m.id,true);
+      }
       case "pause":
         downloadPaused = m.paused;
         files?.pause(m.paused);
@@ -232,6 +244,7 @@ async function build() {
   concepts = loaded.concepts;
   model?.destroy();
   model = new Model(d, cfg, loaded.weights);
+  lessonRuntime = new LessonRuntime(model, need(tok));
   const qkNorm = await Promise.all(loaded.weights.floors.map(async (f) => new Float32Array(await download(d, f.qkNorm))));
   host = {
     qkNorm,

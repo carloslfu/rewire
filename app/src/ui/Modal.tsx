@@ -27,7 +27,7 @@ export function Modal({ open, onClose, title, className = "", children }: {
       onClick={(e) => { if (e.target === e.currentTarget) close.current(); }}>
       {open && <div className="modal-content">
         <header className="modal-head"><h2>{title}</h2><button type="button" className="btn quiet" onClick={onClose}>Close</button></header>
-        {children}
+        <div className="modal-body">{children}</div>
       </div>}
     </dialog>
   );

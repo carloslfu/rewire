@@ -6,6 +6,7 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "lesson": {"type": "integer", "minimum": 1, "description": "Revision of the locally trained final-MLP LoRA. Requires the corresponding session weights."},
     "heads": {"type": "array", "maxItems": 448, "items": {"type": "object", "additionalProperties": false, "required": ["floor", "head", "mult"], "properties": {"floor": {"type": "integer", "minimum": 0, "maximum": 27}, "head": {"type": "integer", "minimum": 0, "maximum": 15}, "mult": {"type": "number"}}}},
     "memory": {"type": "array", "maxItems": 28, "items": {"type": "object", "additionalProperties": false, "required": ["floor", "mult"], "properties": {"floor": {"type": "integer", "minimum": 0, "maximum": 27}, "mult": {"type": "number"}}}},
     "floors": {"type": "array", "maxItems": 28, "items": {"type": "object", "additionalProperties": false, "required": ["floor", "mult"], "properties": {"floor": {"type": "integer", "minimum": 0, "maximum": 27}, "mult": {"type": "number"}}}},

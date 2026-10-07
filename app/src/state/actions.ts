@@ -4,7 +4,7 @@ import type { EngineClient } from "../live/engine.ts";
 import type { Cand, ChangeSpec, FloorDetail, Focus, Reply, Side, Tok, Turn, WordRef } from "../model/types.ts";
 import { loadPath, type PathData, type StepData, stepChanges } from "../path/steps.ts";
 import { S } from "../strings.ts";
-import { setDims } from "../ui/word.ts";
+import { comparisonTarget, latestWord, originalWord, setDims } from "../ui/word.ts";
 import { encode, letter } from "@rewire/tiny/src/data.ts";
 import { TINY, type TinyConfig } from "@rewire/tiny/src/config.ts";
 import { QWEN_INFO, TINY_INFO } from "../model/info.ts";
@@ -65,7 +65,8 @@ function current(side: Side, job: number) {
   return sideJob[side] === job;
 }
 function busy() {
-  const t = store.get().turns;
+  const { turns: t, replay } = store.get();
+  if (replay?.status === "running") return true;
   return t.some((x) => !x.normal.done || (x.changed && !x.changed.done));
 }
 
@@ -88,10 +89,11 @@ function patchReply(turn: number, side: Side, f: (r: Reply) => Reply) {
 function pushTok(turn: number, side: Side, tok: Tok) {
   patchReply(turn, side, (r) => ({ ...r, toks: [...r.toks, tok] }));
   const s = store.get();
-  // While writing, the tower follows the newest word (the changed side when there is one) until the visitor taps a word.
+  // Follow changed output in Push; comparisons always keep an original token as their reference.
   const t = s.turns[turn];
   const isStop = tok.id === 151645 || tok.id === 151643;
-  if (s.follow && !isStop && (side === "changed" || !t.changed || t.changed.done)) {
+  const followsSide = s.view === "difference" ? side === "normal" : side === "changed" || !t.changed || t.changed.done;
+  if (s.follow && !isStop && followsSide) {
     const r = side === "normal" ? t.normal : t.changed!;
     store.set({ word: { turn, side, index: r.toks.length - 1 } });
   }
@@ -117,7 +119,7 @@ export async function openStep(n: number | null) {
   const s = store.get();
   store.set({
     step: n, stepTried: false, pathOpen: false, chips: {}, version: s.version + 1, turns: [], fork: -1, word: null, follow: true,
-    focus: { kind: "word" }, view: "push", tiny: false, busy: false, full: false, sheet: false, error: null,
+    focus: { kind: "word" }, view: "push", tiny: false, busy: false, replay: null, full: false, sheet: false, error: null,
   });
   engine?.setVersion(store.get().version);
   setHash(n);
@@ -177,42 +179,64 @@ export async function stepAction(stop?: number) {
 
 }
 
-// ---------------------------------------------------------------- changes and the fork rule
+// ---------------------------------------------------------------- changes and conversation replay
 
 export function chipsWith(f: (c: ChangeSpec) => ChangeSpec) {
   return applyChips(f(structuredClone(store.get().chips)));
 }
 
-/** Sets the chips. The first change forks at the latest message; a later change re-forks there. */
+/** Replay every question with the changed model, preserving the original branch exactly. */
 export async function applyChips(spec: ChangeSpec) {
   const s = store.get();
-  if (s.mode !== "live" || !engine) return;
-  if (s.model.id === "qwen" && spec.swaps?.length) {
-    const visit = navigation;
-    try { await ensurePieces(spec.swaps.flat()); }
-    catch (e) { if (visit === navigation) endWithError(e); return; }
-    if (visit !== navigation || store.get().version !== s.version || store.get().mode !== "live") return;
-  }
+  if (s.mode !== "live" || !engine || (s.busy && !s.replay)) return;
+  spec = structuredClone(spec);
   const version = s.version + 1;
+  const visit = navigation;
   engine?.setVersion(version);
   claim("changed");
   if (isNeutral(spec)) {
-    store.set({ chips: {}, version, fork: -1, view: "push", turns: s.turns.map((t) => ({ ...t, changed: undefined })) });
-    const w = store.get().word;
-    if (w?.side === "changed") store.set({ word: { ...w, side: "normal" } });
+    const word = s.word?.side === "changed" ? originalWord(s) : s.word;
+    // The exact original replies already exist. Restoring them needs no simulated or duplicate output.
+    store.set({ chips: {}, version, fork: -1, view: "push", word, replay: null, error: null, full: false,
+      announce: "Original conversation restored.", turns: s.turns.map((t) => ({ ...t, changed: undefined })) });
     store.set({ busy: busy() });
     return;
   }
-  const last = s.turns.length - 1;
-  const turns = s.turns.map((t, i): Turn => {
-    if (i < last) return t.changed ? { ...t, changed: { ...t.changed, stale: true } } : t;
-    return { ...t, changed: emptyReply(spec, t.normal.read, "live") };
-  });
-  store.set({ chips: spec, version, turns, fork: last, busy: last >= 0, follow: true });
-  if (last >= 0) {
-    try { await writeChanged(last, version); }
-    catch (e) { if (store.get().version === version) endWithError(e); }
+  const turns = s.turns.map((t): Turn => ({ ...t, changed: emptyReply(spec, [], "live") }));
+  const hasTurns = turns.length > 0;
+  const word = s.view === "difference" && hasTurns ? originalWord({ turns, word: { turn: 0, side: "normal", index: 0 } }) : null;
+  store.set({ chips: spec, version, turns, fork: hasTurns ? 0 : -1, busy: hasTurns, follow: true, word,
+    replay: hasTurns ? { turn: 0, status: "running" } : null, error: null, full: false });
+  const active = () => navigation === visit && store.get().version === version && store.get().replay?.status === "running";
+  try {
+    if (s.model.id === "qwen" && spec.swaps?.length) await ensurePieces(spec.swaps.flat());
+    for (let k = 0; k < turns.length; k++) {
+      if (!active()) return;
+      store.set({ replay: { turn: k, status: "running" } });
+      // Chat delimiters depend on whether the preceding regenerated answer ended naturally.
+      // Reusing the original turn's read would be wrong when the new reply hits its token limit.
+      const read = k === 0 || s.model.id === "tiny" ? turns[k].normal.read
+        : await engine.nextTurn(store.get().turns[k - 1].changed!.toks.map((t) => t.id), turns[k].user);
+      if (!active()) return;
+      if (s.model.id === "qwen") await ensurePieces(read);
+      if (!active()) return;
+      patchReply(k, "changed", (r) => ({ ...r, read }));
+      if (store.get().follow && store.get().view === "difference") {
+        store.set({ word: originalWord({ turns, word: { turn: k, side: "normal", index: 0 } }) });
+      }
+      const completed = await writeChangedLive(k, [], undefined, Math.max(s.model.replyCap, turns[k].normal.toks.length));
+      if (!active()) return;
+      if (!completed) { stopReply(); return; }
+    }
+    if (active()) store.set({ replay: null, busy: false, announce: "Conversation replay complete." });
+  } catch (e) {
+    if (active()) endWithError(e);
   }
+}
+
+export async function restartReplay() {
+  const s = store.get();
+  if (s.replay && !s.busy) await applyChips(s.chips);
 }
 
 /** Tokens the given side has read before turn k's reply. */
@@ -227,21 +251,53 @@ function historyBefore(k: number, side: Side, turns = store.get().turns, fork = 
   return out;
 }
 
-async function writeChanged(k: number, version: number) {
-  if (!engine || store.get().mode !== "live" || store.get().version !== version) return;
-  await writeChangedLive(k);
-}
+let comparisonSeq = 0;
+const comparisonJobs = new Map<number, number>();
 
-/** The changed model fed the normal reply: underlines and the Difference view. */
+/** The changed model fed the normal reply: underlines and the change-from-original view. */
 async function compareTurn(k: number, version: number) {
   const s = store.get();
   const t = s.turns[k];
-  if (!engine || !t?.changed || !t.normal.done) return;
+  if (s.replay && (k > s.replay.turn || (k === s.replay.turn && s.replay.status !== "running"))) return;
+  if (!engine || s.version !== version || !t?.changed || t.changed.stale || t.changed.comparing || !t.normal.done || !t.changed.done) return;
+  const visit = navigation, job = ++comparisonSeq;
+  comparisonJobs.set(k, job);
+  const tokens = t.normal.toks.map((x) => x.id);
+  const currentComparison = () => {
+    const now = store.get(), turn = now.turns[k];
+    return visit === navigation && now.version === version && comparisonJobs.get(k) === job && !!turn?.changed && !turn.changed.stale
+      && turn.normal.toks.length === tokens.length && turn.normal.toks.every((x, i) => x.id === tokens[i]);
+  };
   const history = historyBefore(k, "changed");
+  patchReply(k, "changed", (r) => ({ ...r, comparing: true, compare: undefined, compareError: undefined }));
   // the changed side's own history up to this turn's read, then the normal reply
-  const forced = await engine.compare(2, s.chips, history, t.normal.toks.map((x) => x.id), version);
-  if (!forced || store.get().version !== version) return;
-  patchReply(k, "changed", (r) => ({ ...r, compare: forced }));
+  try {
+    const forced = await engine.compare(2, t.changed.changes, history, tokens, version);
+    if (!currentComparison()) return;
+    if (!forced || forced.length !== tokens.length || forced.some((x, i) => x.id !== tokens[i])) {
+      throw new Error("The comparison did not finish. Try again.");
+    }
+    patchReply(k, "changed", (r) => ({ ...r, compare: forced, comparing: false }));
+  } catch (e) {
+    if (currentComparison()) patchReply(k, "changed", (r) => ({ ...r, comparing: false, compareError: String((e as Error)?.message ?? e) }));
+  }
+}
+
+export async function retryComparison() {
+  const s = store.get();
+  if (s.mode !== "live" || s.busy) return;
+  await compareTurn(s.word?.turn ?? s.turns.length - 1, s.version);
+}
+
+export function setTowerView(view: "push" | "difference") {
+  const s = store.get();
+  if (view === "push") { store.set({ view }); return; }
+  const word = comparisonTarget(s);
+  if (word) store.set({ view, word, follow: false });
+}
+
+export function setFollowing(follow: boolean) {
+  store.set(follow ? { follow, word: latestWord(store.get()) } : { follow });
 }
 
 // ---------------------------------------------------------------- talking
@@ -250,7 +306,7 @@ export async function send(message: string) {
   const text = message.trim();
   if (!text || !engine || store.get().mode !== "live") return;
   const s = store.get();
-  if (s.busy) return;
+  if (s.busy || s.replay) return;
   const visit = navigation;
   // Lock before tokenization, so a double submit cannot create two turns with the same history.
   store.set({ busy: true, error: null, full: false });
@@ -284,6 +340,7 @@ function endWithError(e: unknown) {
   const msg = String((e as Error)?.message ?? e);
   store.set((s) => ({
     turns: s.turns.map((t) => ({ ...t, normal: { ...t.normal, done: true }, changed: t.changed && { ...t.changed, done: true } })),
+    replay: s.replay ? { ...s.replay, status: "error" } : null,
     busy: false, full: msg.includes("context-full") ? true : s.full, announce: msg.includes("context-full") ? S.contextFull : msg,
     error: msg.includes("context-full") ? null : msg,
   }));
@@ -295,7 +352,7 @@ export function freshStart() {
   engine?.cancel();
   claim("normal");
   claim("changed");
-  store.set((s) => ({ turns: [], fork: -1, word: null, step: null, stepTried: false, full: false, busy: false, follow: true, sheet: false, error: null, version: s.version + 1 }));
+  store.set((s) => ({ turns: [], fork: -1, word: null, view: "push", step: null, stepTried: false, full: false, busy: false, replay: null, follow: true, sheet: false, error: null, version: s.version + 1 }));
   engine?.setVersion(store.get().version);
 }
 
@@ -303,9 +360,10 @@ export function stopReply() {
   navigation++;
   engine?.cancel();
   claim("normal"); claim("changed");
-  store.set((s) => ({ busy: false, turns: s.turns.map((t) => ({ ...t,
-    normal: { ...t.normal, done: true }, changed: t.changed && { ...t.changed, done: true } })),
-    announce: "Stopped. You can continue the reply or ask another question." }));
+  store.set((s) => ({ busy: false, replay: s.replay ? { ...s.replay, status: "stopped" } : null, turns: s.turns.map((t) => ({ ...t,
+    normal: { ...t.normal, done: true }, changed: t.changed && { ...t.changed, done: true, comparing: false,
+      compareError: t.changed.comparing ? "The comparison was interrupted. Try again." : t.changed.compareError } })),
+    announce: s.replay ? "Replay stopped. Restart it or restore the original conversation before sending another message." : "Stopped. You can continue the reply or ask another question." }));
 }
 
 /** The tiny model continues the text you type (letters, no chat template). Each message starts fresh. */
@@ -342,7 +400,7 @@ export async function openTiny(params: Float32Array) {
   setDims(TINY_INFO);
   const s = store.get();
   store.set({ model: TINY_INFO, tiny: false, mode: "live", step: null, chips: {}, version: s.version + 1, turns: [], fork: -1, word: null,
-    focus: { kind: "word" }, view: "push", qwenMode: s.model.id === "qwen" ? s.mode : s.qwenMode, busy: false, full: false, error: null, sheet: false });
+    focus: { kind: "word" }, view: "push", qwenMode: s.model.id === "qwen" ? s.mode : s.qwenMode, busy: false, replay: null, full: false, error: null, sheet: false });
   engine.setVersion(store.get().version);
   setHash(null);
 }
@@ -366,6 +424,8 @@ async function writeNormal(k: number, prefix: Tok[] = [], force?: number, cap = 
   if (!engine) return;
   const s = store.get();
   const job = claim("normal");
+  comparisonJobs.delete(k);
+  patchReply(k, "changed", (r) => ({ ...r, compare: undefined, comparing: false, compareError: undefined }));
   patchReply(k, "normal", (r) => ({ ...r, source: "live" }));
   const history = historyBefore(k, "normal");
   const res = await engine.write({ conv: 0, changes: {}, history, prefix: prefix.map((x) => x.id), force, seed: s.turns[k]?.seed ?? s.seed, turn: k, cap,
@@ -377,24 +437,28 @@ async function writeNormal(k: number, prefix: Tok[] = [], force?: number, cap = 
 }
 
 async function writeChangedLive(k: number, prefix: Tok[] = [], force?: number, cap = REPLY_CAP) {
-  if (!engine) return;
+  if (!engine) return false;
   const s = store.get();
   const job = claim("changed");
   const version = s.version;
-  patchReply(k, "changed", (r) => ({ ...r, source: "live" }));
+  const visit = navigation;
+  const active = () => current("changed", job) && navigation === visit && store.get().version === version;
+  comparisonJobs.delete(k);
+  patchReply(k, "changed", (r) => ({ ...r, source: "live", compare: undefined, comparing: false, compareError: undefined }));
   const history = historyBefore(k, "changed");
   const res = await engine.write({ conv: 1, changes: s.chips, history, prefix: prefix.map((x) => x.id), force, seed: s.turns[k]?.seed ?? s.seed, turn: k,
-    cap, temperature: s.turns[k]?.temperature ?? s.temperature, version }, (tok) => { if (current("changed", job)) pushTok(k, "changed", tok); });
-  if (!current("changed", job) || res.cancelled) return;
+    cap, temperature: s.turns[k]?.temperature ?? s.temperature, version }, (tok) => { if (active()) pushTok(k, "changed", tok); });
+  if (!active() || res.cancelled) return false;
   patchReply(k, "changed", (r) => ({ ...r, done: true, ended: res.ended }));
   if (store.get().turns[k].normal.done) await compareTurn(k, version);
+  return active();
 }
 
 /** Continue: up to 64 more pieces for the latest turn, on both sides. */
 export async function continueReply() {
   const s = store.get();
   const k = s.turns.length - 1;
-  if (k < 0 || s.mode !== "live" || s.busy) return;
+  if (k < 0 || s.mode !== "live" || s.busy || s.replay) return;
   const visit = navigation;
   try {
     await continueInner(s, k);
@@ -405,7 +469,7 @@ export async function continueReply() {
 
 async function continueInner(s: ReturnType<typeof store.get>, k: number) {
   const t = s.turns[k];
-  const jobs: Promise<void>[] = [];
+  const jobs: Promise<unknown>[] = [];
   if (!t.normal.ended) {
     patchReply(k, "normal", (r) => ({ ...r, done: false }));
     jobs.push(writeNormal(k, t.normal.toks, undefined, REPLY_CAP));
@@ -428,7 +492,7 @@ async function pickInner(w: WordRef, candId: number, visit: number) {
   const s = store.get();
   const t = s.turns[w.turn];
   const r = w.side === "normal" ? t?.normal : t?.changed;
-  if (!r || !r.done || s.busy || s.mode !== "live" || w.turn !== s.turns.length - 1) return;
+  if (!r || !r.done || s.busy || s.replay || s.mode !== "live" || w.turn !== s.turns.length - 1) return;
   const original = r.original ?? r;
   const keep = r.toks.slice(0, w.index);
   if (!engine) return;
@@ -442,6 +506,7 @@ async function pickInner(w: WordRef, candId: number, visit: number) {
 }
 
 export function undoPick(turn: number, side: Side) {
+  if (store.get().busy || store.get().replay) return;
   claim(side);
   patchReply(turn, side, (r) => (r.original ? { ...r.original } : r));
 }
@@ -487,7 +552,9 @@ export async function attentionMap(w: WordRef, floor: number, head: number): Pro
 }
 
 export function selectWord(w: WordRef | null, focus?: Focus) {
-  store.set({ word: w, follow: false, focus: focus ?? { kind: "word" }, sheet: true, inspectView: "word" });
+  const s = store.get();
+  const view = w?.side === "normal" && comparisonTarget({ ...s, word: w }) ? s.view : "push";
+  store.set({ word: w, view, follow: false, focus: focus ?? { kind: "word" }, sheet: true, inspectView: "word" });
 }
 
 export function setFocus(focus: Focus) {
@@ -554,7 +621,7 @@ function weightsBase() {
 /** An explicitly selected preset waits for the model, never substitutes a saved answer. */
 async function runPendingExperiment() {
   const s = store.get(), st = stepData(s.step);
-  if (!s.tiny && s.model.id === "qwen" && s.mode === "live" && !s.busy && !s.turns.length && st?.message) await send(st.message);
+  if (!s.tiny && !s.teach && s.model.id === "qwen" && s.mode === "live" && !s.busy && !s.turns.length && st?.message) await send(st.message);
 }
 
 /** One reset cancels current writes; the rebuilt worker re-reads their tokens when Continue is used. */
@@ -605,12 +672,25 @@ export function pauseDownload(paused: boolean) {
 // ---------------------------------------------------------------- start
 
 export async function start() {
+  const bench = location.hash === "#teach" ? "teach" : location.hash === "#grow" ? "grow" : null;
+  if (bench) store.set({ teach: bench === "teach", tiny: bench === "grow" });
   const m = /^#step-(\d+)$/.exec(location.hash);
   const n = m ? Number(m[1]) : null;
   const exists = path?.steps.some((s) => s.n === n);
   if (m && !exists) store.set({ pathOpen: true });
-  await Promise.all([openStep(exists ? n : null), checkDevice()]);
+  await Promise.all([openStep(exists ? n : null).then(() => {
+    if (bench) { store.set({ teach: bench === "teach", tiny: bench === "grow" }); history.replaceState(null, "", `#${bench}`); }
+  }), checkDevice()]);
   addEventListener("hashchange", () => {
+    if (store.get().teachingBusy) return;
+    if (location.hash === "#teach" || location.hash === "#grow") {
+      if (store.get().busy) stopReply();
+      const teach = location.hash === "#teach";
+      const show = () => store.set({teach,tiny:!teach,sheet:false,pathOpen:false});
+      if (teach && store.get().model.id === "tiny") void backToQwen().then(show);
+      else show();
+      return;
+    }
     const mm = /^#step-(\d+)$/.exec(location.hash);
     if (!mm) return;
     const k = Number(mm[1]);

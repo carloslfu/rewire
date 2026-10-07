@@ -23,7 +23,7 @@ export function Detail() {
     case "memory": return <MemoryPanel c={c} floor={focus.floor} />;
     case "floor": return <FloorPanel c={c} floor={focus.floor} />;
     case "dictionary": return <WordsInPanel c={c} />;
-    case "words-in": return <WordsInPanel c={c} position={focus.position} />;
+    case "words-in": return <WordsInPanel c={c} position={focus.position} side={focus.side} />;
     case "words-out": return <WordsOutPanel c={c} />;
     case "bits": return <BitsPanel />;
     default: return <WordPanel c={c} />;
@@ -215,12 +215,12 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
   const ctx = c ? contextTokens(c) : [];
   return (
     <>
-      <Head kicker={`${S.terms.head[0]} · ${S.terms.head[1]}`} title={`${S.headN(head + 1)} on ${S.floorN(floor + 1).toLowerCase()}`}
+      <Head kicker={S.terms.head[1]} title={`${S.headN(head + 1)} · ${S.floorN(floor + 1)}`}
         def={D.head} code={S.zeroBased(floor) + `, head ${head}`} />
       {at && <p className="note" style={{ marginTop: -10, marginBottom: 14 }}>This is {at}, {S.foundByTesting}.</p>}
       <section>
         <div className="kicker">Signal strength</div>
-        <Knob label={`Head ${head + 1} on floor ${floor + 1}`} value={mult}
+        <Knob label={`Attention head ${head + 1} on layer ${floor + 1}`} value={mult}
           onChange={(v) => void chipsWith((s) => withMult(s, "head", floor, head, v))} />
         <p className="note" style={{ marginTop: 6 }}>Off sends zero. Flip reverses the signal; ×2 and ×5 amplify it.</p>
       </section>
@@ -279,7 +279,7 @@ function FullMap({ c, floor, head }: { c: Chosen; floor: number; head: number })
     <div style={{ marginTop: 10 }}>
       <h3>{S.attentionMap}</h3>
       <p className="note">Each row is a word looking back at earlier words{from ? ` (the last ${n - from} of ${n} positions)` : ""}. Darker means more attention.</p>
-      <Strip values={sub} rows={n - from} scale={1} label={`Attention of head ${head + 1} on floor ${floor + 1}`}
+      <Strip values={sub} rows={n - from} scale={1} label={`Attention of head ${head + 1} on layer ${floor + 1}`}
         names={(r, k) => `"${piece(res.tokens[from + r])}" looks at "${piece(res.tokens[from + k])}"`} height={Math.min(320, (n - from) * 6)} />
     </div>
   );
@@ -298,7 +298,7 @@ function contextTokens(c: Chosen): number[] {
   return out;
 }
 
-// ------------------------------------------------------------------ memory block
+// ------------------------------------------------------------------ MLP
 
 function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
   const model = useStore((s) => s.model);
@@ -313,8 +313,14 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
   const topPush = unitPush ? [...unitPush].map((v, j) => ({ v, j })).sort((a, b) => b.v - a.v).slice(0, 8) : [];
   return (
     <>
-      <Head kicker={`${S.terms.mlp[0]} · ${S.terms.mlp[1]}`} title={`${S.memoryBlock} on ${S.floorN(floor + 1).toLowerCase()}`}
+      <Head kicker={S.terms.mlp[1]} title={`${S.memoryBlock} · ${S.floorN(floor + 1)}`}
         def={D.memory} code={S.zeroBased(floor)} />
+      {model.id === "qwen" && floor === 27 && chips.lesson && <p className="note changed-text">This MLP includes the weights you trained in Teach. Its output and neuron contributions include that addition.</p>}
+      <section>
+        <div className="kicker">Output strength</div>
+        <Knob label={`MLP on layer ${floor + 1}`} value={mult} onChange={(v) => void chipsWith((s) => withMult(s, "memory", floor, 0, v))} />
+        <p className="note" style={{ marginTop: 6 }}>These controls scale the whole MLP's output activation. Off sends zero; Flip reverses it; ×2 and ×5 amplify it. They do not train or edit its weights.</p>
+      </section>
       <section>
         <div className="kicker">{S.numbers}</div>
         {!c ? <NoWord /> : (
@@ -341,13 +347,9 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
                 </div>
               </>
             )}
-            {act && <div style={{ marginTop: 10 }}><Strip values={act} label={`All ${act.length.toLocaleString("en-US")} units`} /></div>}
+            {act && <div style={{ marginTop: 10 }}><Strip values={act} label={`All ${act.length.toLocaleString("en-US")} MLP neurons`} /></div>}
           </>
         )}
-      </section>
-      <section>
-        <div className="kicker">{S.control}</div>
-        <Knob label={`Memory block on floor ${floor + 1}`} value={mult} onChange={(v) => void chipsWith((s) => withMult(s, "memory", floor, 0, v))} />
       </section>
     </>
   );
@@ -356,7 +358,7 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
 function Unit({ j, v, a }: { j: number; v?: number; a?: number }) {
   return (
     <>
-      <span className="num">unit {j + 1}</span>
+      <span className="num">neuron {j + 1}</span>
       <span className="num muted">{a !== undefined ? `activity ${fmt(a)}` : ""}</span>
       <span className="num">{v !== undefined ? `${signed(v)} push` : ""}</span>
     </>
@@ -374,18 +376,18 @@ function FloorPanel({ c, floor }: { c: Chosen | null; floor: number }) {
   const g = (k: string) => detail?.get(`f${floor}.${k}`);
   const n = g("probs") ? g("probs")!.length / HEADS : 0;
   const steps: { t: string; f: string; k: string; rows?: number; names?: (r: number, c: number) => string }[] = [
-    { t: "The stream entering the floor", f: "x", k: "x" },
+    { t: "The stream entering the layer", f: "x", k: "x" },
     { t: "Normalize the stream", f: "h = x / rms(x) · w_in", k: "h" },
-    { t: `Make queries (${HEADS} heads)`, f: "q = W_q h", k: "q_raw", rows: HEADS, names: (r, i) => `head ${r + 1}, ${i + 1}` },
+    { t: `Make queries (${HEADS} attention heads)`, f: "q = W_q h", k: "q_raw", rows: HEADS, names: (r, i) => `head ${r + 1}, ${i + 1}` },
     { t: `Make keys and values (${HEADS / 2} shared)`, f: "k = W_k h, v = W_v h", k: "k_raw", rows: HEADS / 2, names: (r, i) => `key ${r + 1}, ${i + 1}` },
     { t: "Normalize each head's queries and keys", f: "q ← q / rms(q) · w_q", k: "q_n", rows: HEADS, names: (r, i) => `head ${r + 1}, ${i + 1}` },
     { t: "Rotate them by position", f: "q ← q·cos θp + rot(q)·sin θp", k: "q", rows: HEADS, names: (r, i) => `head ${r + 1}, ${i + 1}` },
     { t: "Score each earlier word, divided by √128", f: "s_j = q · k_j / √128", k: "scores", rows: HEADS, names: (r, i) => `head ${r + 1}, position ${i}` },
     { t: "Turn the scores into attention", f: "a_j = softmax(s)_j", k: "probs", rows: HEADS, names: (r, i) => `head ${r + 1}, position ${i}` },
     { t: "Mix the values", f: "o_h = Σ a_j v_j", k: "att", rows: HEADS, names: (r, i) => `head ${r + 1}, ${i + 1}` },
-    { t: "Combine the heads (output projection)", f: "o = W_o [o_1 … o_16]", k: "o" },
+    { t: "Combine the attention heads (output projection)", f: "o = W_o [o_1 … o_16]", k: "o" },
     { t: "Add the result to the stream", f: "middle = x + o", k: "mid" },
-    { t: "Memory block: normalize", f: "h₂ = middle / rms(middle) · w_post", k: "h2" },
+    { t: "MLP: normalize", f: "h₂ = middle / rms(middle) · w_post", k: "h2" },
     { t: `Project up to the gate (${model.units.toLocaleString("en-US")})`, f: "g = W_gate h₂", k: "gate" },
     { t: `Project up again (${model.units.toLocaleString("en-US")})`, f: "u = W_up h₂", k: "up" },
     { t: "Pass the gate through SiLU and multiply", f: "a = silu(g) · u", k: "act" },
@@ -393,7 +395,7 @@ function FloorPanel({ c, floor }: { c: Chosen | null; floor: number }) {
   ];
   return (
     <>
-      <Head kicker={`${S.terms.layer[0]} · ${S.terms.layer[1]}`} title={S.floorN(floor + 1)} def={D.floor} code={S.zeroBased(floor)} />
+      <Head kicker={S.terms.layer[1]} title={S.floorN(floor + 1)} def={D.floor} code={S.zeroBased(floor)} />
       <section>
         <div className="kicker">{S.numbers}</div>
         {!c ? <NoWord /> : loading ? <p className="note">{S.inspecting}</p> : !detail ? <p className="note">{S.noDetail}</p> : (
@@ -411,14 +413,14 @@ function FloorPanel({ c, floor }: { c: Chosen | null; floor: number }) {
                 </li>
               );
             })}
-            <li><div>Add the memory block's output to the stream</div><div className="formula">output = middle + m</div></li>
+            <li><div>Add the MLP's output to the stream</div><div className="formula">output = middle + m</div></li>
           </ol>
         )}
       </section>
       <section>
         <div className="kicker">{S.control}</div>
-        <Knob label={`Floor ${floor + 1}`} value={mult} onChange={(v) => void chipsWith((s) => withMult(s, "floor", floor, 0, v))} />
-        <p className="note" style={{ marginTop: 6 }}>Off skips the floor: middle = x + α·attention(x), output = middle + α·memory(middle), with α = 0.</p>
+        <Knob label={`Layer ${floor + 1}`} value={mult} onChange={(v) => void chipsWith((s) => withMult(s, "floor", floor, 0, v))} />
+        <p className="note" style={{ marginTop: 6 }}>Off skips the layer: middle = x + α·attention(x), output = middle + α·MLP(middle), with α = 0.</p>
         <ConceptControl floor={floor} />
       </section>
     </>
@@ -456,7 +458,7 @@ function ConceptControl({ floor }: { floor: number }) {
 
 // ------------------------------------------------------------------ words in and out
 
-function WordsInPanel({ c, position }: { c: Chosen | null; position?: number }) {
+function WordsInPanel({ c, position, side }: { c: Chosen | null; position?: number; side?: "normal" | "changed" }) {
   const model = useStore((s) => s.model);
   const D = S.def(model);
   const chips = useStore((s) => s.chips);
@@ -464,11 +466,15 @@ function WordsInPanel({ c, position }: { c: Chosen | null; position?: number }) 
   const mode = useStore((s) => s.mode);
   const { detail } = useDetail(position === undefined ? c : null);
   const [row, setRow] = useState<Float32Array | null>(null);
+  const changedHistory = (side ?? c?.ref.side) === "changed";
   const all = useMemo(() => {
     const out: number[] = [];
-    for (const t of turns) { out.push(...t.normal.read, ...t.normal.toks.map((x) => x.id)); }
+    for (const t of turns) {
+      const r = changedHistory ? t.changed : t.normal;
+      if (r) out.push(...r.read, ...r.toks.map((x) => x.id));
+    }
     return out;
-  }, [turns]);
+  }, [turns, changedHistory]);
   const pos = position ?? c?.position;
   const id = position !== undefined ? all[position] : c?.input;
   useEffect(() => {
@@ -484,7 +490,10 @@ function WordsInPanel({ c, position }: { c: Chosen | null; position?: number }) 
   const hidden = (chips.hidden ?? []).find((h) => h.key === pos);
   const lastReplyStart = (() => {
     let n = 0;
-    for (let i = 0; i < turns.length; i++) { n += turns[i].normal.read.length; if (i < turns.length - 1) n += turns[i].normal.toks.length; }
+    for (let i = 0; i < turns.length; i++) {
+      const r = changedHistory ? turns[i].changed : turns[i].normal;
+      if (r) { n += r.read.length; if (i < turns.length - 1) n += r.toks.length; }
+    }
     return n;
   })();
   return (
@@ -510,7 +519,7 @@ function WordsInPanel({ c, position }: { c: Chosen | null; position?: number }) 
               onClick={() => void chipsWith((s) => ({ ...s, hidden: hidden ? (s.hidden ?? []).filter((h) => h.key !== pos) : [...(s.hidden ?? []), { key: pos, from: pos + 1 }] }))}>
               {hidden ? S.unhideWord : S.hideWord}
             </button>
-            <p className="note" style={{ marginTop: 4 }}>Every head on every floor skips this word from the next word on.</p>
+            <p className="note" style={{ marginTop: 4 }}>Every head on every layer skips this word from the next word on.</p>
           </div>
         )}
       </section>
@@ -587,7 +596,7 @@ function BitsPanel() {
             </button>
           ))}
         </div>
-        <p className="note" style={{ marginTop: 6 }}>Plain rounding of every weight inside the floors to fewer levels, with no recalibration.</p>
+        <p className="note" style={{ marginTop: 6 }}>Plain rounding of every weight inside the layers to fewer levels, with no recalibration.</p>
         <button type="button" className="linkish small" style={{ marginTop: 8 }} onClick={() => setFocus({ kind: "word" })}>{S.back}</button>
       </section>
     </>

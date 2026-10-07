@@ -26,6 +26,8 @@ export function geometryAxes(width: number, seed: number) {
 
 /** Changes, as in schemas/changes.schema.json. Zero-based floors, heads, positions and token ids. */
 export interface ChangeSpec {
+  /** Revision of the session's trained final-MLP LoRA, or absent for the original weights. */
+  lesson?: number;
   geometry?: HeadGeometry[];
   heads?: { floor: number; head: number; mult: number }[];
   memory?: { floor: number; mult: number }[];
@@ -57,6 +59,7 @@ export interface ConceptLookup {
 export function isNeutral(spec: ChangeSpec | undefined | null): boolean {
   if (!spec) return true;
   return !(
+    spec.lesson ||
     (spec.geometry?.some(geometryActive)) ||
     (spec.heads?.some((h) => h.mult !== 1)) ||
     (spec.memory?.some((m) => m.mult !== 1)) ||
@@ -83,6 +86,7 @@ export function encodeTable(
   u[H_MAGIC] = TABLE_MAGIC;
   u[H_VERSION] = 2;
   u[H_FLAGS] = isNeutral(s) ? 0 : FLAG_ANY;
+  u[10] = s.lesson ? 1 : 0;
   const bits = s.bits ?? 4;
   u[H_BITS] = bits;
   f.fill(1, lay.head, lay.head + cfg.floors * cfg.queryHeads + 2 * cfg.floors);
