@@ -280,7 +280,8 @@ html:has(dialog[open]) { overflow: hidden; }
 .seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--fg); color: var(--bg); }
 .seg.change button[aria-checked="true"]:not([data-v="1"]) { background: var(--changed); color: var(--panel); }
 .tower { display: grid; gap: 1px; align-items: stretch; max-width: 100%; }
-.tower-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+/* Keep edge-cell markers and focus rings inside the scrollable viewport. */
+.tower-scroll { overflow-x: auto; overscroll-behavior-x: contain; padding: 4px; margin: -4px; }
 .tower-anatomy { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
 .tower-column { font-size: 12px; font-weight: 600; color: var(--fg); text-align: center; padding-top: 12px; }
 .tower-head-index { font-size: 10px; font-variant-numeric: tabular-nums; color: var(--muted); text-align: center; padding: 2px 0 5px; }
