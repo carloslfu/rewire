@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-10-28T23:05:50.867929Z
+updated: 2026-10-28T23:34:05.408524Z
 ---
 
 # records/run
 
+- [[records/run/2026/10/2026-10-28-evil-questions]] — Screen 12 questions and recheck two at evil strength 0.2
 - [[records/run/2026/10/2026-10-28-guided-chrome]] — Manual guided example flow in Chrome desktop and phone viewport
 - [[records/run/2026/10/2026-10-28-guided-examples]] — Recheck love manipulation and the France head flip with production WebGPU
 - [[records/run/2026/10/2026-10-28-persona-chrome]] — Love and evil live Chrome verification

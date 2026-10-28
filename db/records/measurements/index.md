@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/measurements
-updated: 2026-10-28T23:06:59.634974Z
+updated: 2026-10-28T23:34:05.457248Z
 ---
 
 # records/measurements
 
+- [[records/measurements/2026-10-28-evil-questions]] — World and power questions show clearer changes at strength 0.2
 - [[records/measurements/2026-10-28-guided-examples]] — Recheck France love and manipulation with manual guided examples
 - [[records/measurements/2026-10-28-love-evil-neurons]] — Exploratory love and evil neuron steering candidates
 - [[records/measurements/2026-10-01-conversation-first-ux]] — Conversation-first UI, real chat, ten experiments, training and fallback checks

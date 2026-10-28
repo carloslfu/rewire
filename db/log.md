@@ -97,3 +97,9 @@ Reproduction evidence and limits for all three selected demonstrations.
 ## [2026-10-28 23:06] decide | records/decisions/2026-10-28-manual-guided-examples.md
 Select a guide, ask a question, locate the mark and edit the component manually.
 
+## [2026-10-28 23:34] capture | records/measurements/2026-10-28-evil-questions.md
+Preserved all 12 screened questions, selected-question rechecks, comparison interventions, exact restoration and live Chrome outputs at strength 0.2.
+
+## [2026-10-28 23:34] decide | records/decisions/2026-10-28-evil-example-question.md
+Use the world question first and the power question second, with current-strength evidence and selection limits.
+

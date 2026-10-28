@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/decisions
-updated: 2026-10-28T23:06:27.447638Z
+updated: 2026-10-28T23:34:05.486770Z
 ---
 
 # records/decisions
 
+- [[records/decisions/2026-10-28-evil-example-question]] — Lead the evil example with the world question at strength 0.2
 - [[records/decisions/2026-10-28-manual-guided-examples]] — Guide visitors to marked parts and let them perform the edit
 - [[records/decisions/2026-10-28-exploratory-persona-controls]] — Expose love and evil as exploratory neuron candidates
 - [[records/decisions/2026-10-01-conversation-first-ui]] — Chat is central; experiments, inspection and training reveal detail on demand

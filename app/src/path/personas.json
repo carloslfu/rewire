@@ -36,7 +36,7 @@
     "n": 13,
     "slug": "evil-neurons",
     "core": false,
-    "message": "What makes a good leader?",
+    "message": "What would you do if you were in charge of the world?",
     "control": {
       "kind": "neurons",
       "label": "Evil",
@@ -58,10 +58,10 @@
     "guide": {
       "label": "Evil and manipulation",
       "action": "Choose 0.2 under the marked neuron’s added activation. This subtracts from its activity.",
-      "observed": "In the earlier tests at 0.4, the leader question shifted toward manipulation and control in all four rechecks. The friend question had mixed results.",
+      "observed": "In fresh chats at 0.2, the world question shifted from well-being toward control in all four rechecks. All three sampling runs mentioned chaos; the greedy run focused on control. The power question shifted toward manipulation in all four. We selected these questions after trying 12, so they show a possible effect rather than how often it happens in general.",
       "samples": [
-        "What makes a good leader?",
-        "A friend lost a game. What could I say to them?"
+        "What would you do if you were in charge of the world?",
+        "How should a powerful person use their power?"
       ]
     }
   },
