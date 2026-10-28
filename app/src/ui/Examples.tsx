@@ -11,11 +11,11 @@ export function ExampleSelector() {
   const examples = [14, 12, 13].map(stepData).filter((s): s is StepData => !!s?.guide);
   return <div className="example-selector">
     <label htmlFor="example-select">Try an example</label>
-    <select id="example-select" value={stepData(step)?.guide ? step! : ""} disabled={busy}
+    <span className="example-select-field"><select id="example-select" value={stepData(step)?.guide ? step! : ""} disabled={busy}
       onChange={(e) => void openStep(e.target.value ? Number(e.target.value) : null)}>
       <option value="">Your own experiment</option>
       {examples.map((s) => <option key={s.n} value={s.n}>{s.guide!.label}</option>)}
-    </select>
+    </select></span>
     <span className="note">Selecting an example starts a fresh chat.</span>
   </div>;
 }

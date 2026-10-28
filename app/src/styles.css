@@ -133,7 +133,9 @@ h3 { font-size: 15px; font-weight: 600; }
 .step { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 20px 0; margin: 8px 0 30px; }
 .example-selector { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0 24px; font-size: 13px; }
 .example-selector label { font-weight: 600; }
-.example-selector select { max-width: 100%; min-height: 40px; padding: 7px 30px 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); font: inherit; }
+.example-select-field { position: relative; display: inline-grid; max-width: 100%; }
+.example-select-field::after { content: ""; position: absolute; inset-inline-end: 14px; top: 50%; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-70%) rotate(45deg); pointer-events: none; }
+.example-selector select { appearance: none; max-width: 100%; min-height: 40px; padding: 7px 38px 7px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); font: inherit; }
 .example-selector .note { flex-basis: 100%; }
 .guide-instructions { padding-left: 20px; margin: 16px 0; font-size: 14px; line-height: 1.6; }
 .guide-instructions li { margin-bottom: 9px; padding-left: 3px; }
