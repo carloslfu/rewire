@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/measurements
-updated: 2026-10-01T21:56:12.652833Z
+updated: 2026-10-28T22:39:56.956696Z
 ---
 
 # records/measurements
 
+- [[records/measurements/2026-10-28-love-evil-neurons]] — Exploratory love and evil neuron steering candidates
 - [[records/measurements/2026-10-01-conversation-first-ux]] — Conversation-first UI, real chat, ten experiments, training and fallback checks
 - [[records/measurements/2026-10-01-launch-readiness-continuation]] — Launch-readiness continuation: downloads, recovery and phone layout
 - [[records/measurements/2026-10-01-phase-3-agent-checks]] — Phase 3 agent checks: step 1 plays from its recording at 1.4 s on a 9 Mbps link before the model arrives; keyboard-only flow, accessibility tree, targets and copy fixed and verified

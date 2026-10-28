@@ -5,6 +5,7 @@ checked against. Float32 by default (float64 on the CPU for the 64-bit reference
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -143,6 +144,7 @@ class Changes:
     bits: int = 4
     concept: tuple | None = None  # (floor, strength, vector[1024], first position)
     spec: dict = field(default_factory=dict)
+    neurons: list = field(default_factory=list)  # [(floor, unit, additive delta)]
 
     @staticmethod
     def make(spec: dict | None, device, dtype=torch.float32, concepts: dict | None = None, rho=None,
@@ -169,10 +171,16 @@ class Changes:
             if isinstance(vec, (list, tuple)):  # one unit vector per floor
                 vec = vec[c["floor"]]
             concept = (c["floor"], float(c["strength"]) * float(rho[c["floor"]]), vec.to(device, dtype), concept_from)
+        neurons = [(n["floor"], n["unit"], n["delta"]) for n in spec.get("neurons", [])]
+        if len(neurons) > 16 or len({(L, n) for L, n, _ in neurons}) != len(neurons):
+            raise ValueError("At most 16 unique neuron pushes")
+        for L, n, d in neurons:
+            if type(L) is not int or type(n) is not int or not 0 <= L < FLOORS or not 0 <= n < UNITS or not math.isfinite(d) or abs(d) > torch.finfo(torch.float32).max:
+                raise ValueError("Invalid neuron push")
         return Changes(head.to(device), mem.to(device), flo.to(device), swap.to(device),
                        [(h["key"], h["from"]) for h in spec.get("hidden", [])],
                        [(z["floor"], z["tensor"], z["row"], z["col"]) for z in spec.get("zeroed", [])],
-                       spec.get("bits", 4), concept, spec)
+                       spec.get("bits", 4), concept, spec, neurons)
 
 
 class Cache:
@@ -227,7 +235,8 @@ class Model:
             mats[L][t][r, c] = 0
         return mats
 
-    def run(self, tokens: torch.Tensor, cache: Cache, ch: Changes, capture: dict | None = None) -> torch.Tensor:
+    def run(self, tokens: torch.Tensor, cache: Cache, ch: Changes, capture: dict | None = None,
+            mlp_hook: Callable[[int, torch.Tensor], torch.Tensor] | None = None) -> torch.Tensor:
         """Read `tokens` [B, T] after the cache; return the final stream [B, T, 1024] before the
         final normalization. `capture` collects per-floor values when given."""
         B, T = tokens.shape
@@ -282,6 +291,12 @@ class Model:
             g = h2 @ m["gate"].T
             u = h2 @ m["up"].T
             act = torch.nn.functional.silu(g) * u
+            if ch.neurons:
+                for floor, unit, delta in ch.neurons:
+                    if floor == L:
+                        act[:, :, unit] += delta
+            if mlp_hook is not None:
+                act = mlp_hook(L, act)
             mo = (act @ m["down"].T) * ch.mem[L]
             x = mid + a * mo
             if capture is not None:

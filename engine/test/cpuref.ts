@@ -224,6 +224,7 @@ export function cpuForward(m: CpuModel, tokens: number[], spec: ChangeSpec = {},
       const h2 = rms(mid, f.postNorm).y;
       const g = mv(M.gate, h2, U), u = mv(M.up, h2, U);
       const act = g.map((gv, i) => (gv / (1 + Math.exp(-gv))) * u[i]);
+      for (const n of spec.neurons ?? []) if (n.floor === L) act[n.unit] += Math.fround(n.delta);
       const mm = mv(M.down, act, W).map((v) => v * memMult(L));
       out.push(mid.map((x, i) => x + a * mm[i]));
       if (p === T - 1) {

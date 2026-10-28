@@ -1,5 +1,6 @@
 // Experiment prompts and parameters. Every response is generated on this device.
 import experiments from "./experiments.json";
+import personas from "./personas.json";
 import type { ChangeSpec } from "../model/types.ts";
 
 export type StepControl =
@@ -9,6 +10,7 @@ export type StepControl =
   | { kind: "hide"; key: number; from: number }
   | { kind: "heads"; heads: [number, number][]; random: [number, number][] }
   | { kind: "concept"; id: string; label: string; floor: number; stops: number[]; breaking: number }
+  | { kind: "neurons"; label: string; units: { floor: number; unit: number; deltaPerDose: number }[]; stops: number[]; evidence: string }
   | { kind: "guesses"; index: number }
   | { kind: "madeup"; index: number }
   | { kind: "pick"; index: number; rank: number }
@@ -138,6 +140,20 @@ export const COPY: Record<string, StepCopy> = {
     action: "Teach a tiny model",
     why: () => "Backpropagation computes gradients from next-letter prediction errors and updates the tiny model’s weights. Learning is imperfect; new combinations test whether it generalized beyond the training text.",
   },
+  "love-neurons": {
+    title: "Love: turn up attachment",
+    question: "Can adding to one neuron make an ordinary reply sound affectionate?",
+    action: "Change the love candidate",
+    why: () => "Adding to this neuron shifted some replies toward affection, connection and attachment in local tests. It can also cause apologies, repetition or unrelated text. Try a new question and compare with Off; this is a candidate effect, not a complete explanation of love inside the model.",
+    suggestions: ["Describe a rainy afternoon.", "What matters most to you?", "Write a message to a new neighbor."],
+  },
+  "evil-neurons": {
+    title: "Evil: test a manipulation candidate",
+    question: "Can reducing one neuron's activity change the character of a reply?",
+    action: "Change the evil candidate",
+    why: () => "Reducing this neuron produced manipulation language in some local tests. Other replies stayed ordinary or became incoherent. That does not establish an evil neuron or a reliable personality switch. Compare strengths, try unrelated questions, and restore the original.",
+    suggestions: ["Tell me something about yourself.", "What makes a good leader?", "Write a message to a new neighbor."],
+  },
 };
 
 /** A step's copy with its measured facts filled in. */
@@ -165,11 +181,12 @@ export function stepChanges(c: StepControl, stop?: number): ChangeSpec {
     case "hide": return { hidden: [{ key: c.key, from: c.from }] };
     case "heads": return { heads: c.heads.map(([floor, head]) => ({ floor, head, mult: 0 })) };
     case "concept": return { concept: { id: c.id, floor: c.floor, strength: stop ?? 0 } };
+    case "neurons": return { neurons: c.units.map(({ floor, unit, deltaPerDose }) => ({ floor, unit, delta: (stop ?? 0) * deltaPerDose })) };
     case "bits": return stop === 3 || stop === 2 ? { bits: stop } : {};
     default: return {};
   }
 }
 
 export function loadPath(): PathData {
-  return experiments as PathData;
+  return { ...experiments, steps: [...experiments.steps, ...personas] } as PathData;
 }

@@ -2,11 +2,13 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-10-01T21:56:12.637162Z
+updated: 2026-10-28T22:39:56.939970Z
 ---
 
 # records/run
 
+- [[records/run/2026/10/2026-10-28-persona-chrome]] — Love and evil live Chrome verification
+- [[records/run/2026/10/2026-10-28-love-evil-discovery]] — Love and evil discovery on the exact converted model
 - [[records/run/2026/10/2026-10-01-conversation-first-browser]] — Browser evidence for experiments, training, recovery, provenance and responsive layouts
 - [[records/run/2026/10/2026-10-01-conversation-first-checks]] — Conversation-first regression, typecheck, build and preflight output
 - [[records/run/2026/10/2026-10-01-trained-model-retry]] — Trained-model retry regression and final production build

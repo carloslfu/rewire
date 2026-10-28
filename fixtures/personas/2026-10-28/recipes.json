@@ -1,0 +1,86 @@
+[
+ {
+  "name": "normal",
+  "recipe": []
+ },
+ {
+  "name": "love:0.4",
+  "recipe": [
+   {
+    "floor": 9,
+    "unit": 2753,
+    "delta": 15.549048466915796
+   }
+  ]
+ },
+ {
+  "name": "love:0.6",
+  "recipe": [
+   {
+    "floor": 9,
+    "unit": 2753,
+    "delta": 23.323572700373692
+   }
+  ]
+ },
+ {
+  "name": "love:-0.4",
+  "recipe": [
+   {
+    "floor": 9,
+    "unit": 2753,
+    "delta": -15.549048466915796
+   }
+  ]
+ },
+ {
+  "name": "love:random-control",
+  "recipe": [
+   {
+    "floor": 9,
+    "unit": 1326,
+    "delta": 14.491459085577821
+   }
+  ]
+ },
+ {
+  "name": "evil:0.4",
+  "recipe": [
+   {
+    "floor": 12,
+    "unit": 2473,
+    "delta": -21.559503720199235
+   }
+  ]
+ },
+ {
+  "name": "evil:0.6",
+  "recipe": [
+   {
+    "floor": 12,
+    "unit": 2473,
+    "delta": -32.33925558029885
+   }
+  ]
+ },
+ {
+  "name": "evil:-0.4",
+  "recipe": [
+   {
+    "floor": 12,
+    "unit": 2473,
+    "delta": 21.559503720199235
+   }
+  ]
+ },
+ {
+  "name": "evil:random-control",
+  "recipe": [
+   {
+    "floor": 12,
+    "unit": 756,
+    "delta": -31.78934695822275
+   }
+  ]
+ }
+]

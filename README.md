@@ -58,6 +58,48 @@ fine-tune Qwen. The tiny model trains on 64-letter windows and works best with s
 Every reply and inspection is computed locally. Neither model is a reliable
 source of facts. The visualizer reports measured contributions, not a complete causal explanation.
 
+## Love and evil candidates
+
+Open Experiments and choose **Love: turn up attachment** or **Evil: test a manipulation candidate**.
+Compare Off, 0.2, 0.4 and 0.6, then try your own question. Look inside shows the exact address,
+activation addition and the selected word's measured neuron contribution. These controls add to
+one MLP activation at every token, after the gate and before the down projection. They do not
+rewrite prompts or train weights.
+
+The research addresses are zero based: **L9N2753** for attachment and **L12N2473** for the
+manipulation candidate. The interface calls these layer 10, neuron 2754 and layer 13, neuron 2474.
+Strength 0.4 adds approximately +15.549 and −21.560 activation units respectively. Strength is
+normalized against a reference residual norm and the selected down-projection column's norm.
+
+The October 28 exploratory search used this app's exact converted 4-bit model, 20 contrasting
+reply pairs per concept, activation rankings, teacher-forced screening and fresh generation.
+After selection, both candidates were tested on 12 unused prompts with reverse pushes and
+same-layer random controls. The attachment candidate redirected several unrelated questions
+toward connection and affection. The manipulation candidate changed a leadership reply toward
+fear, deception and control, but many other replies stayed ordinary or became repetitive.
+Higher strengths often lose the question. Reverse pushes did not establish opposite personalities.
+These observations support candidate effects, not dedicated love or evil neurons or a reliable
+personality switch. The samples were chosen after reviewing the results.
+
+The corpus and search implementation live in `py/data/personas.json` and `py/tools/persona_search.py`.
+All screened rows and generated replies, including failures and controls, are retained in
+`fixtures/personas/2026-10-28/`; none of these recorded replies ship in the app. The research method
+is inspired by [neuron-explorer](https://github.com/lyramakesmusic/neuron-explorer), with our own
+corpus, screening heuristic and model-specific validation.
+
+Reproduce the final greedy tests from the repository root, with the converted weights available:
+
+```bash
+py/.venv/bin/python -u py/tools/persona_search.py generate \
+  --recipes fixtures/personas/2026-10-28/recipes.json \
+  --out artifacts/personas/reproduction --phase heldout --batch 8 --cap 64
+```
+
+Use `rank`, `screen` and `bundles` to repeat or extend discovery. Inspect the output rather than
+treating likelihood scores as semantic labels. The expanded screen was intentionally stopped
+before its planned totals; the retained data states exactly which variants ran. This is a small
+exploratory study on one quantized checkpoint and one device, without an independent semantic rater.
+
 ## Play with vector geometry
 
 Ask a question, then choose **Turn a signal** or click a head in the tower.

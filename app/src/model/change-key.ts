@@ -6,6 +6,8 @@ export function canonical(spec: ChangeSpec | undefined | null): string {
   if (!spec) return "{}";
   const o: Record<string, unknown> = {};
   if (spec.lesson) o.lesson = spec.lesson;
+  const neurons = (spec.neurons ?? []).filter((n) => n.delta !== 0).map((n) => [n.floor, n.unit, n.delta]).sort(cmp);
+  if (neurons.length) o.neurons = neurons;
   const heads = (spec.heads ?? []).filter((x) => x.mult !== 1).map((x) => [x.floor, x.head, x.mult]).sort(cmp);
   const memory = (spec.memory ?? []).filter((x) => x.mult !== 1).map((x) => [x.floor, x.mult]).sort(cmp);
   const floors = (spec.floors ?? []).filter((x) => x.mult !== 1).map((x) => [x.floor, x.mult]).sort(cmp);

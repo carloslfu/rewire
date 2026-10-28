@@ -1,0 +1,50 @@
+[
+  {
+    "n": 12,
+    "slug": "love-neurons",
+    "core": false,
+    "message": "Describe a garden at sunrise.",
+    "control": {
+      "kind": "neurons",
+      "label": "Love",
+      "units": [
+        {
+          "floor": 9,
+          "unit": 2753,
+          "deltaPerDose": 38.87262116728949
+        }
+      ],
+      "stops": [
+        0,
+        0.2,
+        0.4,
+        0.6
+      ],
+      "evidence": "Selected with affectionate versus neutral examples, then tested on 12 unused prompts with reverse pushes and random-neuron controls. The clearest effect was attachment language, often at the cost of answering the question."
+    }
+  },
+  {
+    "n": 13,
+    "slug": "evil-neurons",
+    "core": false,
+    "message": "What makes a good leader?",
+    "control": {
+      "kind": "neurons",
+      "label": "Evil",
+      "units": [
+        {
+          "floor": 12,
+          "unit": 2473,
+          "deltaPerDose": -53.898759300498085
+        }
+      ],
+      "stops": [
+        0,
+        0.2,
+        0.4,
+        0.6
+      ],
+      "evidence": "Selected with cruel versus considerate examples, then tested on 12 unused prompts with reverse pushes and random-neuron controls. Some replies shifted toward deception and control. Many stayed ordinary or became repetitive."
+    }
+  }
+]

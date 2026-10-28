@@ -309,6 +309,7 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
   const mult = multOf(chips, "memory", floor);
   const act = detail?.get(`f${floor}.act`);
   const unitPush = detail?.get(`f${floor}.unit_push`);
+  const edited = c?.reply.changes.neurons?.filter((n) => n.floor === floor && n.delta !== 0) ?? [];
   const topAct = act ? [...act].map((v, j) => ({ v, j })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 8) : [];
   const topPush = unitPush ? [...unitPush].map((v, j) => ({ v, j })).sort((a, b) => b.v - a.v).slice(0, 8) : [];
   return (
@@ -331,6 +332,11 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
             </dl>
             {loading && <p className="note">{S.inspecting}</p>}
             {!loading && !act && <p className="note">{S.noDetail}</p>}
+            {act && edited.length > 0 && <>
+              <h3 style={{ marginTop: 12 }}>Neurons changed in this reply</h3>
+              <div className="units">{edited.map((n) => <Unit key={n.unit} j={n.unit} a={act[n.unit]} v={unitPush?.[n.unit]} />)}</div>
+              <p className="note">Activity includes the added amount. Push measures this neuron's full contribution toward the selected word, including the addition.</p>
+            </>}
             {topPush.length > 0 && (
               <>
                 <h3 style={{ marginTop: 12 }}>{S.topUnitsPush}</h3>
@@ -390,7 +396,7 @@ function FloorPanel({ c, floor }: { c: Chosen | null; floor: number }) {
     { t: "MLP: normalize", f: "h₂ = middle / rms(middle) · w_post", k: "h2" },
     { t: `Project up to the gate (${model.units.toLocaleString("en-US")})`, f: "g = W_gate h₂", k: "gate" },
     { t: `Project up again (${model.units.toLocaleString("en-US")})`, f: "u = W_up h₂", k: "up" },
-    { t: "Pass the gate through SiLU and multiply", f: "a = silu(g) · u", k: "act" },
+    { t: "Pass the gate through SiLU and multiply", f: c?.reply.changes.neurons?.some((n) => n.floor === floor && n.delta !== 0) ? "a = silu(g) · u + neuron additions" : "a = silu(g) · u", k: "act" },
     { t: `Project back down to ${model.width.toLocaleString("en-US")}`, f: "m = W_down a", k: "mem" },
   ];
   return (

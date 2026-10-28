@@ -109,6 +109,17 @@ function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) 
         </div>
       );
     }
+    case "neurons": {
+      const dose = c.units.length ? (chips.neurons?.find((n) => n.floor === c.units[0].floor && n.unit === c.units[0].unit)?.delta ?? 0) / c.units[0].deltaPerDose : 0;
+      return <div style={{ display: "grid", gap: 6, width: "100%" }}>
+        <div className="seg change" role="radiogroup" aria-label={`${c.label} strength`}>
+          {c.stops.map((v) => <button key={v} type="button" role="radio" data-v={v === 0 ? 1 : v}
+            aria-checked={Math.abs(dose - v) < 1e-6} disabled={disabled}
+            onClick={() => void stepAction(v)}>{v === 0 ? "Off" : String(v)}</button>)}
+        </div>
+        <p className="note">{c.units.length === 1 ? `Neuron ${c.units[0].unit + 1} in layer ${c.units[0].floor + 1}` : `${c.units.length} neurons`}. Higher strengths can cause repetition or nonsense.</p>
+      </div>;
+    }
     case "bits": {
       const b = chips.bits ?? 4;
       return (
@@ -214,7 +225,7 @@ export function DeviceBar() {
 
 // ------------------------------------------------------------------ path list
 
-const featuredExperiments = [1, 3, 6];
+const featuredExperiments = [12, 13, 1];
 
 export function PathList() {
   const open = useStore((s) => s.pathOpen);

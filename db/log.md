@@ -82,3 +82,6 @@ Captured the explicit trained-model retry regression and final app suite/build.
 ## [2026-10-01 21:56] capture | records/measurements/2026-10-01-conversation-first-ux
 Implemented the approved conversation-first interface; captured 57 passing tests, real browser experiments, training, recovery, keyboard and responsive checks while keeping physical-device and human gates open.
 
+## [2026-10-28 22:40] capture | records/measurements/2026-10-28-love-evil-neurons.md
+Preserved raw discovery and Chrome evidence, candidate effects and limits, twelve reserved prompts with controls, and local runtime support.
+

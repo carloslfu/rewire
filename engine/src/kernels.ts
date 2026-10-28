@@ -12,7 +12,7 @@
 //   3 seed  4 turn  5 step  6 temperature (f32 bits)  7 top_k  8 top_p (f32 bits)  9 row (inspected / last row)
 //  10 vocab_real  11 keylimit (inspection: keys visible to the inspected row)
 
-import { MAX_HIDDEN, MAX_SWAPS, MAX_ZEROED, type ModelConfig, type TableLayout } from "./config.ts";
+import { MAX_HIDDEN, MAX_NEURONS, MAX_SWAPS, MAX_ZEROED, type ModelConfig, type TableLayout } from "./config.ts";
 
 export interface KernelConsts {
   cfg: ModelConfig;
@@ -30,6 +30,7 @@ const L_HIDDEN: u32 = ${lay.hidden}u;
 const L_ZEROED: u32 = ${lay.zeroed}u;
 const L_BITS: u32 = ${lay.bitTable}u;
 const L_GEOMETRY: u32 = ${lay.geometry}u;
+const L_NEURONS: u32 = ${lay.neurons}u;
 fn ctf(i: u32) -> f32 { return bitcast<f32>(ct[i]); }
 fn swapped(id: u32) -> u32 {
   let n = min(ct[7], ${MAX_SWAPS}u);
@@ -260,7 +261,12 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
       }
       ${o.gateup
         ? `let g = fix(t, row, s, F.tensor, false); let u = fix(t, row, s2, F.tensor2, true);
-      y[t * ${OUT}u + row] = g / (1.0 + exp(-g)) * u;`
+      var act = g / (1.0 + exp(-g)) * u;
+      for (var i = 0u; i < min(ct[11], ${MAX_NEURONS}u); i++) {
+        let at = L_NEURONS + 4u * i;
+        if (ct[at] == F.floor && ct[at + 1u] == row) { act += ctf(at + 2u); }
+      }
+      y[t * ${OUT}u + row] = act;`
         : o.swapOut ? `y[t * ${OUT}u + swapped(row)] = s;` : `y[t * ${OUT}u + row] = fix(t, row, s, F.tensor, false);`}
     }
   }

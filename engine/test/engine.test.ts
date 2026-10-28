@@ -52,6 +52,9 @@ describe("engine against the CPU reference (synthetic model)", () => {
   const tokens = [3, 17, 250, 41, 99, 7, 480, 12, 5, 333, 61];
   const specs: [string, ChangeSpec][] = [
     ["normal", {}],
+    ["individual neuron pushes", { neurons: [{ floor: 0, unit: 9, delta: 2.5 }, { floor: 1, unit: 17, delta: -3 }] }],
+    ["neuron push on disabled MLP", { neurons: [{ floor: 1, unit: 17, delta: 50 }], memory: [{ floor: 1, mult: 0 }] }],
+    ["neuron push with zeroed down weight", { neurons: [{ floor: 1, unit: 9, delta: 2.5 }], zeroed: [{ floor: 1, tensor: "down", row: 5, col: 9 }] }],
     ["rotation 45", { geometry: [{ floor: 0, head: 1, kind: "rotate", angle: 45, seed: 2 }] }],
     ["rotation 90", { geometry: [{ floor: 1, head: 2, kind: "rotate", angle: 90, seed: 17 }] }],
     ["rotation 180 with multiplier", { heads: [{ floor: 0, head: 1, mult: 2 }], geometry: [{ floor: 0, head: 1, kind: "rotate", angle: 180, seed: 2 }] }],
@@ -104,7 +107,7 @@ it("rebuilds plans, restores exactly, and inspects the vectors actually used", a
     return new Float32Array(await download(dev, conv.scores));
   };
   const baseline = await score({});
-  const spec: ChangeSpec = { geometry: [{ floor: 0, head: 1, kind: "rotate", angle: 90, seed: 4 }, { floor: 1, head: 2, kind: "remove", amount: 1 }] };
+  const spec: ChangeSpec = { neurons: [{ floor: 0, unit: 19, delta: 2.5 }, { floor: 1, unit: 9, delta: -1.5 }], geometry: [{ floor: 0, head: 1, kind: "rotate", angle: 90, seed: 4 }, { floor: 1, head: 2, kind: "remove", amount: 1 }] };
   const changed = await score(spec);
   expect(maxErr(changed, baseline, CFG.vocabReal)).toBeGreaterThan(0.01);
   expect(maxErr(await score(spec, true), changed, CFG.vocabReal)).toBeLessThan(2e-3);

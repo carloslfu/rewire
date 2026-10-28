@@ -1,7 +1,7 @@
 // The change table (section 7.2): a storage buffer every kernel reads, one per conversation.
 import {
   H_BITS, H_CONCEPT_FIRST, H_CONCEPT_FLOOR, H_CONCEPT_SCALE, H_FLAGS, H_MAGIC, H_NHIDDEN, H_NSWAPS, H_NZEROED,
-  H_VERSION, MAX_HIDDEN, MAX_SWAPS, MAX_ZEROED, NO_CONCEPT, TABLE_MAGIC, TENSOR_ID, type ModelConfig, type TensorName,
+  H_VERSION, H_NNEURONS, MAX_HIDDEN, MAX_NEURONS, MAX_SWAPS, MAX_ZEROED, NO_CONCEPT, TABLE_MAGIC, TENSOR_ID, type ModelConfig, type TensorName,
   tableLayout,
 } from "./config.ts";
 
@@ -33,6 +33,8 @@ export interface ChangeSpec {
   memory?: { floor: number; mult: number }[];
   floors?: { floor: number; mult: number }[];
   concept?: { id: string; floor: number; strength: number } | null;
+  /** Add to selected MLP activations before down projection, at every position. */
+  neurons?: { floor: number; unit: number; delta: number }[];
   swaps?: [number, number][];
   hidden?: { key: number; from: number }[];
   zeroed?: { floor: number; tensor: TensorName; row: number; col: number }[];
@@ -65,6 +67,7 @@ export function isNeutral(spec: ChangeSpec | undefined | null): boolean {
     (spec.memory?.some((m) => m.mult !== 1)) ||
     (spec.floors?.some((m) => m.mult !== 1)) ||
     (spec.concept && spec.concept.strength !== 0) ||
+    (spec.neurons?.some((n) => n.delta !== 0)) ||
     (spec.swaps?.length) ||
     (spec.hidden?.length) ||
     (spec.zeroed?.length) ||
@@ -74,7 +77,7 @@ export function isNeutral(spec: ChangeSpec | undefined | null): boolean {
 
 export function encodeTable(
   spec: ChangeSpec | null | undefined,
-  cfg: Pick<ModelConfig, "floors" | "queryHeads" | "width">,
+  cfg: Pick<ModelConfig, "floors" | "queryHeads" | "width"> & Partial<Pick<ModelConfig, "units">>,
   concepts?: ConceptLookup,
   conceptFirst = 0,
 ): Uint32Array {
@@ -84,7 +87,7 @@ export function encodeTable(
   const f = new Float32Array(buf);
   const s = spec ?? {};
   u[H_MAGIC] = TABLE_MAGIC;
-  u[H_VERSION] = 2;
+  u[H_VERSION] = 3;
   u[H_FLAGS] = isNeutral(s) ? 0 : FLAG_ANY;
   u[10] = s.lesson ? 1 : 0;
   const bits = s.bits ?? 4;
@@ -120,6 +123,23 @@ export function encodeTable(
   });
   f.set(bitTable(bits), lay.bitTable);
   const seen = new Set<number>();
+  const neurons = s.neurons ?? [];
+  if (neurons.length > MAX_NEURONS) throw new Error(`At most ${MAX_NEURONS} neuron pushes`);
+  const addresses = new Set<string>();
+  for (const n of neurons) {
+    const key = `${n.floor}:${n.unit}`;
+    if (!Number.isInteger(n.floor) || n.floor < 0 || n.floor >= cfg.floors ||
+        !Number.isInteger(n.unit) || n.unit < 0 || !cfg.units || n.unit >= cfg.units ||
+        !Number.isFinite(n.delta) || !Number.isFinite(Math.fround(n.delta))) throw new Error("Invalid neuron push");
+    if (addresses.has(key)) throw new Error("Only one push per neuron");
+    addresses.add(key);
+  }
+  const active = neurons.filter((n) => n.delta !== 0);
+  u[H_NNEURONS] = active.length;
+  active.forEach((n, i) => {
+    const base = lay.neurons + 4 * i;
+    u[base] = n.floor; u[base + 1] = n.unit; f[base + 2] = n.delta;
+  });
   for (const g of s.geometry ?? []) {
     if (!Number.isInteger(g.floor) || g.floor < 0 || g.floor >= cfg.floors ||
         !Number.isInteger(g.head) || g.head < 0 || g.head >= cfg.queryHeads) throw new Error("Invalid geometry head");

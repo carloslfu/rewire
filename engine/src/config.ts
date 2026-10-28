@@ -50,12 +50,14 @@ export interface TableLayout {
   zeroed: number;
   bitTable: number;
   geometry: number;
+  neurons: number;
   words: number;
 }
 
 export const MAX_SWAPS = 16;
 export const MAX_HIDDEN = 16;
 export const MAX_ZEROED = 8;
+export const MAX_NEURONS = 16;
 
 export function tableLayout(c: Pick<ModelConfig, "floors" | "queryHeads" | "width">): TableLayout {
   const header = 0;
@@ -68,13 +70,14 @@ export function tableLayout(c: Pick<ModelConfig, "floors" | "queryHeads" | "widt
   const zeroed = hidden + MAX_HIDDEN * 2;
   const bitTable = zeroed + MAX_ZEROED * 4;
   const geometry = bitTable + 16;
-  const words = geometry + c.floors * c.queryHeads * 8;
-  return { header, head, mem, floor, concept, swaps, hidden, zeroed, bitTable, geometry, words };
+  const neurons = geometry + c.floors * c.queryHeads * 8;
+  const words = neurons + MAX_NEURONS * 4;
+  return { header, head, mem, floor, concept, swaps, hidden, zeroed, bitTable, geometry, neurons, words };
 }
 
 // Header words
 export const H_MAGIC = 0, H_VERSION = 1, H_FLAGS = 2, H_BITS = 3, H_CONCEPT_FLOOR = 4, H_CONCEPT_SCALE = 5,
-  H_CONCEPT_FIRST = 6, H_NSWAPS = 7, H_NHIDDEN = 8, H_NZEROED = 9;
+  H_CONCEPT_FIRST = 6, H_NSWAPS = 7, H_NHIDDEN = 8, H_NZEROED = 9, H_NNEURONS = 11;
 export const TABLE_MAGIC = 0x52574354; // 'RWCT'
 export const NO_CONCEPT = 0xffffffff;
 

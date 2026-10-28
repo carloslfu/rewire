@@ -30,6 +30,16 @@ export function Inspector() {
         <h3>{copy.title}</h3>
         <p>{copy.question}</p>
         <p>{copy.why}</p>
+        {st?.control.kind === "neurons" && <>
+          <p>{st.control.evidence}</p>
+          <ul>{st.control.units.map((n) => <li key={`${n.floor}:${n.unit}`}>
+            <button type="button" className="linkish" onClick={() => store.set({ inspectView: "word", focus: { kind: "memory", floor: n.floor } })}>
+              Layer {n.floor + 1}, neuron {n.unit + 1}
+            </button>
+            <span className="note"> (research address L{n.floor}N{n.unit}; adds {(n.deltaPerDose).toFixed(3)} × strength to its activation)</span>
+          </li>)}</ul>
+          <p className="note">The addition happens after the MLP gate and before the down projection, at every token. The same prompt and system message are used. An association with a concept does not establish a dedicated neuron for that concept.</p>
+        </>}
         {st?.control.kind === "swap" && <div className="dictionary-swap" aria-label="Dictionary swap">
           <div><span>Input token</span><strong>{st.control.b}</strong></div>
           <div><span>Row used after the swap</span><strong>{st.control.a}</strong></div>

@@ -20,6 +20,11 @@ export function chips(spec: ChangeSpec, readTokens?: number[]): ChipDef[] {
   const out: ChipDef[] = [];
   const copy = () => structuredClone(spec);
   if (spec.lesson) out.push({ key: "lesson", label: "Learned weights in layer 28 MLP", without: () => ({ ...copy(), lesson: undefined }) });
+  for (const [i, n] of (spec.neurons ?? []).entries()) {
+    if (!n.delta) continue;
+    out.push({ key: `n${n.floor}.${n.unit}`, label: `Neuron ${n.unit + 1}, layer ${n.floor + 1}: ${n.delta > 0 ? "+" : ""}${Number(n.delta.toPrecision(3))} activation`,
+      without: () => ({ ...copy(), neurons: spec.neurons!.filter((_, j) => j !== i) }) });
+  }
   const groups = new Map<string, HeadGeometry[]>();
   for (const g of spec.geometry ?? []) {
     if (!geometryActive(g)) continue;
