@@ -1,7 +1,7 @@
 // Experiment prompts and parameters. Every response is generated on this device.
 import experiments from "./experiments.json";
 import personas from "./personas.json";
-import type { ChangeSpec } from "../model/types.ts";
+import type { ChangeSpec, Focus } from "../model/types.ts";
 
 export type StepControl =
   | { kind: "swap"; a: string; b: string; ids: [number, number] }
@@ -9,6 +9,7 @@ export type StepControl =
   | { kind: "floors"; floors: number[] }
   | { kind: "hide"; key: number; from: number }
   | { kind: "heads"; heads: [number, number][]; random: [number, number][] }
+  | { kind: "head"; floor: number; head: number }
   | { kind: "concept"; id: string; label: string; floor: number; stops: number[]; breaking: number }
   | { kind: "neurons"; label: string; units: { floor: number; unit: number; deltaPerDose: number }[]; stops: number[]; evidence: string }
   | { kind: "guesses"; index: number }
@@ -24,6 +25,8 @@ export interface StepData {
   core: boolean;
   message?: string;
   control: StepControl;
+  /** A hands-on example. Selection prepares an unmodified chat, without running it or applying its edit. */
+  guide?: { label: string; action: string; observed: string; samples: string[] };
   /** Numbers the copy states, measured in Phase 0A. */
   facts?: Record<string, string | number>;
 }
@@ -154,6 +157,12 @@ export const COPY: Record<string, StepCopy> = {
     why: () => "Reducing this neuron produced manipulation language in some local tests. Other replies stayed ordinary or became incoherent. That does not establish an evil neuron or a reliable personality switch. Compare strengths, try unrelated questions, and restore the original.",
     suggestions: ["Tell me something about yourself.", "What makes a good leader?", "Write a message to a new neighbor."],
   },
+  "france-head": {
+    title: "Change the capital of France",
+    question: "Can reversing one attention head change a factual answer?",
+    action: "Flip the marked head",
+    why: () => "Flipping this head changed Paris to Washington, D.C. across three seeds and greedy decoding, both alone and after asking about Paris. It also changed Japan’s capital from Tokyo to London. This affects more than France; it does not identify a dedicated neuron for a fact.",
+  },
 };
 
 /** A step's copy with its measured facts filled in. */
@@ -180,6 +189,7 @@ export function stepChanges(c: StepControl, stop?: number): ChangeSpec {
     case "zeroed": return { zeroed: c.weights };
     case "hide": return { hidden: [{ key: c.key, from: c.from }] };
     case "heads": return { heads: c.heads.map(([floor, head]) => ({ floor, head, mult: 0 })) };
+    case "head": return { heads: [{ floor: c.floor, head: c.head, mult: stop ?? 1 }] };
     case "concept": return { concept: { id: c.id, floor: c.floor, strength: stop ?? 0 } };
     case "neurons": return { neurons: c.units.map(({ floor, unit, deltaPerDose }) => ({ floor, unit, delta: (stop ?? 0) * deltaPerDose })) };
     case "bits": return stop === 3 || stop === 2 ? { bits: stop } : {};
@@ -189,4 +199,19 @@ export function stepChanges(c: StepControl, stop?: number): ChangeSpec {
 
 export function loadPath(): PathData {
   return { ...experiments, steps: [...experiments.steps, ...personas] } as PathData;
+}
+
+export function guideTarget(st: StepData | undefined): Extract<Focus, { kind: "head" | "memory" }> | null {
+  if (!st?.guide) return null;
+  const c = st.control;
+  if (c.kind === "head") return { kind: "head", floor: c.floor, head: c.head };
+  if (c.kind === "neurons") return { kind: "memory", floor: c.units[0].floor };
+  return null;
+}
+
+export function guideAddress(st: StepData): string {
+  const c = st.control;
+  if (c.kind === "head") return `Layer ${c.floor + 1} · Head ${c.head + 1}`;
+  if (c.kind === "neurons") return `Layer ${c.units[0].floor + 1} · MLP · Neuron ${c.units[0].unit + 1}`;
+  return "";
 }

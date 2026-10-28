@@ -1,6 +1,6 @@
 // The lab: freeform inference beside an always-on instrument, plus real training from noise.
 import { lazy, Suspense, useEffect, useState } from "react";
-import { applyChips, backToQwen, freshStart, onPieces, stopReply } from "../state/actions.ts";
+import { applyChips, backToQwen, freshStart, onPieces, stepData, stopReply } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { Conversation, FinishedReplies } from "./Conversation.tsx";
@@ -9,6 +9,7 @@ import { Inspector } from "./Inspector.tsx";
 import { Modal } from "./Modal.tsx";
 import { LabScope } from "./Lab.tsx";
 import { useNarrow } from "./useNarrow.ts";
+import { ExampleSelector } from "./Examples.tsx";
 
 const Tiny = lazy(() => import("../tiny/TinyView.tsx"));
 const Teach = lazy(() => import("../teach/TeachView.tsx"));
@@ -75,7 +76,9 @@ export function App() {
             }}>{model.id === "tiny" ? "New text" : "New chat"}</button>}
           </div>
           <button className="btn mobile-scope-toggle" aria-expanded={scope} aria-controls="chat-scope" onClick={() => setScope(!scope)}>{scope ? "Hide model" : "Show model"}</button>
-          {!turns.length && !busy && <div className="empty-chat lab-heading">
+          <ExampleSelector />
+          {stepData(step)?.guide && <StepCard />}
+          {!turns.length && !busy && !stepData(step)?.guide && <div className="empty-chat lab-heading">
             <p className="eyebrow">Dismantle a model</p>
             <h1>{model.id === "tiny" ? "Meet the brain you grew." : "Pull it apart.\nSee what survives."}</h1>
             <p>{model.id === "tiny" ? "Give it a few letters. Inspect what it learned, cut a connection, and try again." : "Ask anything. Cut a layer. Zero real weights. Follow every word through the machinery."}</p>
@@ -83,7 +86,7 @@ export function App() {
           {!turns.length && busy && <p className="opening" role="status">Reading your question…</p>}
           <Conversation />
           {error && <div className="error-message" role="alert"><p>{error}</p><button type="button" className="btn quiet" onClick={() => store.set({ error: null })}>Dismiss</button></div>}
-          {step !== null && <StepCard />}
+          {step !== null && !stepData(step)?.guide && <StepCard />}
           <section className="chat-entry" aria-label={model.id === "tiny" ? "Continue your text" : "Chat with the model"}>
             <Chips />
             <Composer />

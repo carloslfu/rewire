@@ -8,6 +8,7 @@ import { Knob } from "./Knob.tsx";
 import { Tower } from "./Tower.tsx";
 import { chosen, headIndex, memIndex, towerValues } from "./word.ts";
 import { ReplayStatus } from "./ReplayStatus.tsx";
+import { HeadExampleHint, NeuronControl } from "./Examples.tsx";
 
 type Part = Extract<Focus, { kind: "head" | "memory" | "floor" }>;
 
@@ -116,6 +117,8 @@ function PartControls({ part, disabled, onClose }: { part: Part; disabled: boole
     {part.kind === "memory" && part.floor === 27 && chips.lesson && <p className="note changed-text">Includes your learned weights. Off disables the MLP and its learned addition together.</p>}
     {value !== undefined && c && <p className="scope-measurement"><span className="num">{signed(value)}</span> {view === "difference" ? "change in direct push" : "direct push"} for “{piece(c.tok.id).trim() || JSON.stringify(piece(c.tok.id))}”</p>}
     {geometry && <p className="scope-measurement changed-text">{geometryLabel(geometry)} · Strength below applies on top.</p>}
+    {part.kind === "memory" && <NeuronControl floor={part.floor} />}
+    {part.kind === "head" && <HeadExampleHint floor={part.floor} head={part.head} />}
     <Knob label={`${name} signal strength`} value={mult} disabled={disabled}
       onChange={(v) => void chipsWith((s) => withMult(s, part.kind, part.floor, head, v))} />
     <p className="note">{layerOff ? "This layer is off. Restore the layer to use this part's signal." : "Scale the output signal: zero it, reverse it, or amplify it."}</p>

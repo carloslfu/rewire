@@ -1,13 +1,14 @@
 // The detail panel (section 5.2): always what the tapped part is, its real numbers, and its control.
 import { useEffect, useMemo, useState } from "react";
 import type { FloorDetail } from "../model/types.ts";
-import { attentionMap, chipsWith, floorDetail, liveEngine, pathData, pick, piece, setFocus, stepAction } from "../state/actions.ts";
+import { attentionMap, chipsWith, floorDetail, liveEngine, pathData, pick, piece, setFocus, stepAction, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { fmt, pct, signed } from "./color.ts";
 import { multOf, withMult } from "./describe.ts";
 import { HeadGeometry } from "./HeadGeometry.tsx";
 import { Knob } from "./Knob.tsx";
+import { HeadExampleHint, NeuronControl } from "./Examples.tsx";
 import { Strip } from "./Strip.tsx";
 import { encode } from "@rewire/tiny/src/data.ts";
 import { type Chosen, chosen, HEADS, headIndex, memIndex } from "./word.ts";
@@ -218,6 +219,7 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
       <Head kicker={S.terms.head[1]} title={`${S.headN(head + 1)} · ${S.floorN(floor + 1)}`}
         def={D.head} code={S.zeroBased(floor) + `, head ${head}`} />
       {at && <p className="note" style={{ marginTop: -10, marginBottom: 14 }}>This is {at}, {S.foundByTesting}.</p>}
+      <HeadExampleHint floor={floor} head={head} />
       <section>
         <div className="kicker">Signal strength</div>
         <Knob label={`Attention head ${head + 1} on layer ${floor + 1}`} value={mult}
@@ -302,6 +304,8 @@ function contextTokens(c: Chosen): number[] {
 
 function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
   const model = useStore((s) => s.model);
+  const st = stepData(useStore((s) => s.step));
+  const marked = model.id === "qwen" && st?.guide && st.control.kind === "neurons" ? st.control.units.find((n) => n.floor === floor) : undefined;
   const D = S.def(model);
   const chips = useStore((s) => s.chips);
   const { detail, loading } = useDetail(c);
@@ -317,6 +321,7 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
       <Head kicker={S.terms.mlp[1]} title={`${S.memoryBlock} · ${S.floorN(floor + 1)}`}
         def={D.memory} code={S.zeroBased(floor)} />
       {model.id === "qwen" && floor === 27 && chips.lesson && <p className="note changed-text">This MLP includes the weights you trained in Teach. Its output and neuron contributions include that addition.</p>}
+      <NeuronControl floor={floor} />
       <section>
         <div className="kicker">Output strength</div>
         <Knob label={`MLP on layer ${floor + 1}`} value={mult} onChange={(v) => void chipsWith((s) => withMult(s, "memory", floor, 0, v))} />
@@ -332,9 +337,14 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
             </dl>
             {loading && <p className="note">{S.inspecting}</p>}
             {!loading && !act && <p className="note">{S.noDetail}</p>}
-            {act && edited.length > 0 && <>
+            {act && marked && <>
+              <h3 style={{ marginTop: 12 }}>Marked neuron</h3>
+              <div className="units example-neuron"><Unit j={marked.unit} a={act[marked.unit]} v={unitPush?.[marked.unit]} /></div>
+              <p className="note">Activity and contribution for this word in the selected reply. Original shows the unmodified neuron; Changed includes your addition.</p>
+            </>}
+            {act && edited.some((n) => n.unit !== marked?.unit) && <>
               <h3 style={{ marginTop: 12 }}>Neurons changed in this reply</h3>
-              <div className="units">{edited.map((n) => <Unit key={n.unit} j={n.unit} a={act[n.unit]} v={unitPush?.[n.unit]} />)}</div>
+              <div className="units">{edited.filter((n) => n.unit !== marked?.unit).map((n) => <Unit key={n.unit} j={n.unit} a={act[n.unit]} v={unitPush?.[n.unit]} />)}</div>
               <p className="note">Activity includes the added amount. Push measures this neuron's full contribution toward the selected word, including the addition.</p>
             </>}
             {topPush.length > 0 && (

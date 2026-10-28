@@ -42,6 +42,8 @@ export interface State {
   view: "push" | "difference";
   temperature: number;
   seed: number;
+  /** Editable text prepared by an example or typed by the visitor. */
+  draft: string;
   /** Path step being shown (1-based), or null for free play. */
   step: number | null;
   /** The path list is open. */
@@ -84,6 +86,7 @@ export const initial: State = {
   view: "push",
   temperature: 0.7,
   seed: 11,
+  draft: "",
   step: null,
   pathOpen: false,
   stepTried: false,

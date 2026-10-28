@@ -41,6 +41,36 @@ beforeEach(async () => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+it("prepares guided examples without generating or applying a change, including after loading", async () => {
+  for (const n of [14, 12, 13]) {
+    await actions.openStep(n);
+    expect(store.get().turns).toHaveLength(0);
+    expect(store.get().chips).toEqual({});
+    expect(store.get().draft).toBe(actions.stepData(n)!.message);
+    expect(mock.write).not.toHaveBeenCalled();
+  }
+  const load = deferred<{ stored: boolean; contextCap: number }>();
+  store.set({ device: { kind: "error", message: "Retry" }, mode: "unavailable" });
+  mock.load.mockReturnValueOnce(load.promise);
+  const pending = actions.checkDevice();
+  await actions.openStep(14);
+  store.set({ draft: "My own question" });
+  load.resolve({ stored: true, contextCap: 1024 });
+  await pending;
+  expect(store.get().draft).toBe("My own question");
+  expect(store.get().turns).toHaveLength(0);
+  expect(mock.write).not.toHaveBeenCalled();
+  await actions.send(store.get().draft);
+  expect(store.get().turns[0].user).toBe("My own question");
+  expect(store.get().turns[0].changed).toBeUndefined();
+  await actions.stepAction(-1);
+  expect(store.get().chips).toEqual({ heads: [{ floor: 20, head: 13, mult: -1 }] });
+  expect(store.get().turns[0].changed).toBeDefined();
+  await actions.openStep(12);
+  expect(store.get().chips).toEqual({});
+  expect(store.get().turns).toHaveLength(0);
+});
+
 it("opens on freeform input and keeps interventions across a fresh conversation", async () => {
   expect(store.get().step).toBeNull();
   expect(store.get().turns).toHaveLength(0);

@@ -8,6 +8,7 @@ import { S } from "../strings.ts";
 import { chips as chipDefs, multOf, withMult } from "./describe.ts";
 import { Knob } from "./Knob.tsx";
 import { Modal } from "./Modal.tsx";
+import { GuidedStep } from "./Examples.tsx";
 
 // ------------------------------------------------------------------ step card
 
@@ -26,6 +27,7 @@ export function StepCard() {
   </div> : null;
   const copy = stepCopy(st);
   if (!copy || st.control.kind === "tiny") return null;
+  if (st.guide) return <GuidedStep st={st} />;
   const isExample = turns.length === 1 && turns[0].user === st.message;
   const swap = st.control.kind === "swap" ? st.control : null;
   return (
@@ -83,6 +85,7 @@ function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) 
         </>
       );
     }
+    case "head": return null; // Visitors use the marked head's own controls.
     case "floors":
       return (
         <div style={{ display: "grid", gap: 8 }}>
@@ -169,7 +172,8 @@ export function Composer() {
   const replay = useStore((s) => s.replay);
   const model = useStore((s) => s.model);
   const full = useStore((s) => s.full);
-  const [text, setText] = useState("");
+  const text = useStore((s) => s.draft);
+  const setText = (draft: string) => store.set({ draft });
   const submit = () => {
     if (mode !== "live" || busy || replay || !text.trim()) return;
     const message = text;
@@ -225,7 +229,7 @@ export function DeviceBar() {
 
 // ------------------------------------------------------------------ path list
 
-const featuredExperiments = [12, 13, 1];
+const featuredExperiments = [14, 12, 13];
 
 export function PathList() {
   const open = useStore((s) => s.pathOpen);
@@ -242,7 +246,7 @@ export function PathList() {
       <div><h3>{copy?.title ?? s.slug}</h3><p>{copy?.question}</p></div>
       <div className="experiment-choices">
         {canApply && <button type="button" className="btn change" disabled={busy} onClick={() => void useExperiment(s.n)}>Use in this chat</button>}
-        <button type="button" className={`btn${canApply ? " quiet" : ""}`} onClick={() => void openStep(s.n)}>Run sample question</button>
+        <button type="button" className={`btn${canApply ? " quiet" : ""}`} onClick={() => void openStep(s.n)}>{s.guide ? "Try it yourself" : "Run sample question"}</button>
       </div>
     </li>;
   };

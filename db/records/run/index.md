@@ -2,11 +2,13 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-10-28T22:39:56.939970Z
+updated: 2026-10-28T23:05:50.867929Z
 ---
 
 # records/run
 
+- [[records/run/2026/10/2026-10-28-guided-chrome]] — Manual guided example flow in Chrome desktop and phone viewport
+- [[records/run/2026/10/2026-10-28-guided-examples]] — Recheck love manipulation and the France head flip with production WebGPU
 - [[records/run/2026/10/2026-10-28-persona-chrome]] — Love and evil live Chrome verification
 - [[records/run/2026/10/2026-10-28-love-evil-discovery]] — Love and evil discovery on the exact converted model
 - [[records/run/2026/10/2026-10-01-conversation-first-browser]] — Browser evidence for experiments, training, recovery, provenance and responsive layouts

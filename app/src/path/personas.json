@@ -21,6 +21,15 @@
         0.6
       ],
       "evidence": "Selected with affectionate versus neutral examples, then tested on 12 unused prompts with reverse pushes and random-neuron controls. The clearest effect was attachment language, often at the cost of answering the question."
+    },
+    "guide": {
+      "label": "Love and attachment",
+      "action": "Choose 0.6 under the marked neuron’s added activation.",
+      "observed": "A garden description became an affectionate message in all four rechecks. Other questions can produce apologies, repetition or unrelated text.",
+      "samples": [
+        "Describe a garden at sunrise.",
+        "Tell me a fun fact about the moon."
+      ]
     }
   },
   {
@@ -45,6 +54,36 @@
         0.6
       ],
       "evidence": "Selected with cruel versus considerate examples, then tested on 12 unused prompts with reverse pushes and random-neuron controls. Some replies shifted toward deception and control. Many stayed ordinary or became repetitive."
+    },
+    "guide": {
+      "label": "Evil and manipulation",
+      "action": "Choose 0.4 under the marked neuron’s added activation. This subtracts from its activity.",
+      "observed": "The leader question shifted toward manipulation and control in all four rechecks. The friend question had mixed results.",
+      "samples": [
+        "What makes a good leader?",
+        "A friend lost a game. What could I say to them?"
+      ]
+    }
+  },
+  {
+    "n": 14,
+    "slug": "france-head",
+    "core": false,
+    "message": "what is the capital of france?",
+    "control": {
+      "kind": "head",
+      "floor": 20,
+      "head": 13
+    },
+    "guide": {
+      "label": "France’s capital",
+      "action": "Choose Flip in this attention head’s signal controls.",
+      "observed": "Paris became Washington, D.C. in all four rechecks. This also changed Tokyo to London for Japan.",
+      "samples": [
+        "what is the capital of france?",
+        "what is paris?",
+        "What is the capital of Japan?"
+      ]
     }
   }
 ]

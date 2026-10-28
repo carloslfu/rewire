@@ -85,3 +85,15 @@ Implemented the approved conversation-first interface; captured 57 passing tests
 ## [2026-10-28 22:40] capture | records/measurements/2026-10-28-love-evil-neurons.md
 Preserved raw discovery and Chrome evidence, candidate effects and limits, twelve reserved prompts with controls, and local runtime support.
 
+## [2026-10-28 23:06] capture | records/run/2026/10/2026-10-28-guided-examples.md
+Production WebGPU recheck, exact restoration, comparison head and raw fixture.
+
+## [2026-10-28 23:06] capture | records/run/2026/10/2026-10-28-guided-chrome.md
+Manual browser flow and local checks, including phone viewport and restoration.
+
+## [2026-10-28 23:06] capture | records/measurements/2026-10-28-guided-examples.md
+Reproduction evidence and limits for all three selected demonstrations.
+
+## [2026-10-28 23:06] decide | records/decisions/2026-10-28-manual-guided-examples.md
+Select a guide, ask a question, locate the mark and edit the component manually.
+

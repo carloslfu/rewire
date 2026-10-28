@@ -60,8 +60,13 @@ source of facts. The visualizer reports measured contributions, not a complete c
 
 ## Love and evil candidates
 
-Open Experiments and choose **Love: turn up attachment** or **Evil: test a manipulation candidate**.
-Compare Off, 0.2, 0.4 and 0.6, then try your own question. Look inside shows the exact address,
+Choose an example above the chat: **France’s capital**, **Love and attachment**, or
+**Evil and manipulation**. Selecting one prepares an editable question and marks its target in
+the model. It does not generate a reply or apply the edit. Send the question, click the marked
+part (or Find marked part), and use that component’s controls yourself. Instructions and extra
+questions remain available after the first reply.
+
+For love and evil, compare Original, 0.2, 0.4 and 0.6, then try your own question. Look inside shows the exact address,
 activation addition and the selected word's measured neuron contribution. These controls add to
 one MLP activation at every token, after the gate and before the down projection. They do not
 rewrite prompts or train weights.
@@ -86,6 +91,22 @@ All screened rows and generated replies, including failures and controls, are re
 `fixtures/personas/2026-10-28/`; none of these recorded replies ship in the app. The research method
 is inspired by [neuron-explorer](https://github.com/lyramakesmusic/neuron-explorer), with our own
 corpus, screening heuristic and model-specific validation.
+
+The France example reverses **head 14 in layer 21**, research address **L20H13**, with
+multiplier −1. This is an attention head, not a neuron. The October 28 WebGPU recheck reproduced
+Paris → Washington, D.C. at seeds 11, 7 and 42 (temperature 0.7) and with greedy decoding. It
+worked both independently and in the screenshot’s two-turn Paris conversation. The same flip
+changed Tokyo → London for Japan; a comparison head in the same layer preserved both capitals.
+This is evidence of a broader effect on factual answers, not a dedicated France circuit.
+
+The same recheck reproduced attachment language for the garden and moon prompts, and
+manipulation language for the leader prompt. The friend prompt remained mixed. All 28 baseline
+reruns restored the exact token IDs. Raw outputs and controls are retained in
+`fixtures/guided-examples/2026-10-28.json`. Reproduce them with:
+
+```bash
+node engine/node_modules/tsx/dist/cli.mjs engine/scripts/guided-examples.ts
+```
 
 Reproduce the final greedy tests from the repository root, with the converted weights available:
 

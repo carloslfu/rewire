@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/decisions
-updated: 2026-10-28T22:40:26.340063Z
+updated: 2026-10-28T23:06:27.447638Z
 ---
 
 # records/decisions
 
+- [[records/decisions/2026-10-28-manual-guided-examples]] — Guide visitors to marked parts and let them perform the edit
 - [[records/decisions/2026-10-28-exploratory-persona-controls]] — Expose love and evil as exploratory neuron candidates
 - [[records/decisions/2026-10-01-conversation-first-ui]] — Chat is central; experiments, inspection and training reveal detail on demand
 - [[records/decisions/2026-10-01-push-tolerance]] — Push tolerance: within 0.01 or 0.5% of the push's size, about twice the reference's measured float32 push noise

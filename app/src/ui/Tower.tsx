@@ -2,7 +2,8 @@
 // MLP, colored by its direct push toward that word. Every cell is a button: tap to see it.
 import { useId, useMemo, useRef, useState } from "react";
 import type { Focus } from "../model/types.ts";
-import { piece, retryComparison, setFocus, setTowerView } from "../state/actions.ts";
+import { piece, retryComparison, setFocus, setTowerView, stepData } from "../state/actions.ts";
+import { guideAddress, guideTarget } from "../path/steps.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { diverging, signed } from "./color.ts";
@@ -18,6 +19,8 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
   const chips = useStore((s) => s.chips);
   const focus = useStore((s) => s.focus);
   const model = useStore((s) => s.model);
+  const st = stepData(useStore((s) => s.step));
+  const target = model.id === "qwen" ? guideTarget(st) : null;
   const mode = useStore((s) => s.mode);
   const busy = useStore((s) => s.busy);
   const replay = useStore((s) => s.replay);
@@ -87,11 +90,12 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
       const v = vals?.[headIndex(L, h)];
       const m = multOf(chips, "head", L, h);
       const geometry = chips.geometry?.find((g) => g.floor === L && g.head === h);
+      const marked = target?.kind === "head" && target.floor === L && target.head === h;
       rows.push(
-        <button key={`h${L}.${h}`} type="button" data-r={L} data-c={h} tabIndex={-1}
-          className={`cell${vals ? " flowing" : ""}${m !== 1 || fm !== 1 || geometry ? " edit" : ""}${m === 0 || fm === 0 ? " off" : ""}${isOn({ kind: "head", floor: L, head: h }) ? " on" : ""}`}
+        <button key={`h${L}.${h}`} type="button" data-r={L} data-c={h} tabIndex={marked ? 0 : -1}
+          className={`cell${marked ? " example-target" : ""}${vals ? " flowing" : ""}${m !== 1 || fm !== 1 || geometry ? " edit" : ""}${m === 0 || fm === 0 ? " off" : ""}${isOn({ kind: "head", floor: L, head: h }) ? " on" : ""}`}
           style={{ background: v === undefined ? undefined : diverging(v / scale), animationDelay: `${L * 9}ms` }}
-          aria-label={`${S.floorN(L + 1)}, ${S.headN(h + 1)}${m !== 1 ? ` (${S.mult(m)})` : ""}${geometry ? `, ${geometryLabel(geometry)}` : ""}:${label(v)}`}
+          aria-label={`${S.floorN(L + 1)}, ${S.headN(h + 1)}${marked ? ", example target" : ""}${m !== 1 ? ` (${S.mult(m)})` : ""}${geometry ? `, ${geometryLabel(geometry)}` : ""}:${label(v)}`}
           title={`${S.headN(h + 1)} · ${S.floorN(L + 1)}`} onClick={() => onSelect({ kind: "head", floor: L, head: h })} />,
       );
     }
@@ -99,11 +103,13 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
     const v = vals?.[memIndex(L)];
     const mm = multOf(chips, "memory", L);
     const learnedHere = model.id === "qwen" && L === 27 && !!chips.lesson;
+    const marked = target?.kind === "memory" && target.floor === L;
+    const neuronsHere = chips.neurons?.some((n) => n.floor === L && n.delta !== 0);
     rows.push(
-      <button key={`m${L}`} type="button" data-r={L} data-c={HEADS} tabIndex={-1}
-        className={`cell mem${vals ? " flowing" : ""}${mm !== 1 || fm !== 1 || learnedHere ? " edit" : ""}${mm === 0 || fm === 0 ? " off" : ""}${isOn({ kind: "memory", floor: L }) ? " on" : ""}`}
+      <button key={`m${L}`} type="button" data-r={L} data-c={HEADS} tabIndex={marked ? 0 : -1}
+        className={`cell mem${marked ? " example-target" : ""}${vals ? " flowing" : ""}${mm !== 1 || fm !== 1 || learnedHere || neuronsHere ? " edit" : ""}${mm === 0 || fm === 0 ? " off" : ""}${isOn({ kind: "memory", floor: L }) ? " on" : ""}`}
         style={{ background: v === undefined ? undefined : diverging(v / scale), animationDelay: `${L * 9}ms` }}
-        aria-label={`${S.floorN(L + 1)}, ${S.memoryBlock}${mm !== 1 ? ` (${S.mult(mm)})` : ""}${learnedHere ? ", learned weights" : ""}:${label(v)}`}
+        aria-label={`${S.floorN(L + 1)}, ${S.memoryBlock}${marked ? `, example target: ${guideAddress(st!)}` : ""}${mm !== 1 ? ` (${S.mult(mm)})` : ""}${learnedHere ? ", learned weights" : ""}${neuronsHere ? ", changed neuron" : ""}:${label(v)}`}
         title={`${S.memoryBlock}${learnedHere ? " with learned weights" : ""} · ${S.floorN(L + 1)}`} onClick={() => onSelect({ kind: "memory", floor: L })} />,
     );
   }
@@ -138,6 +144,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
         {canRetry && <> <button type="button" className="linkish" disabled={mode !== "live" || busy} onClick={() => void retryComparison()}>Retry comparison</button></>}
       </p>}
       {view === "difference" && c && c.ref.turn > 0 && <p className="note comparison-status">Includes the effect of earlier regenerated answers.</p>}
+      {target && st && <button className="example-marker-key" onClick={() => onSelect(target)}><span aria-hidden="true" />Marked: {guideAddress(st)}</button>}
       <div className="tower-color-key" aria-label="Diagram colors">
         <span className="legend-negative">Blue: {view === "push" ? <>against<span className="legend-token-label"> the token</span></> : "decreased"}</span>
         <span className="legend-positive">Orange: {view === "push" ? <>toward<span className="legend-token-label"> the token</span></> : "increased"}</span>

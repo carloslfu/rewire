@@ -118,14 +118,15 @@ export async function openStep(n: number | null) {
   claim("normal");
   claim("changed");
   const s = store.get();
+  const st = stepData(n);
   store.set({
     step: n, stepTried: false, pathOpen: false, chips: {}, version: s.version + 1, turns: [], fork: -1, word: null, follow: true,
     focus: { kind: "word" }, view: "push", tiny: false, busy: false, replay: null, full: false, sheet: false, error: null,
+    draft: st?.guide ? st.message ?? "" : "",
   });
   engine?.setVersion(store.get().version);
   setHash(n);
-  const st = stepData(n);
-  if (st?.message && store.get().mode === "live") await send(st.message);
+  if (st?.message && !st.guide && store.get().mode === "live") await send(st.message);
 }
 
 /** Select a model modification for an existing live chat without replacing its messages. */
@@ -623,7 +624,7 @@ function weightsBase() {
 /** An explicitly selected preset waits for the model, never substitutes a saved answer. */
 async function runPendingExperiment() {
   const s = store.get(), st = stepData(s.step);
-  if (!s.tiny && !s.teach && s.model.id === "qwen" && s.mode === "live" && !s.busy && !s.turns.length && st?.message) await send(st.message);
+  if (!s.tiny && !s.teach && s.model.id === "qwen" && s.mode === "live" && !s.busy && !s.turns.length && st?.message && !st.guide) await send(st.message);
 }
 
 /** One reset cancels current writes; the rebuilt worker re-reads their tokens when Continue is used. */

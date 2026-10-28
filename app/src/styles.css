@@ -131,6 +131,26 @@ h3 { font-size: 15px; font-weight: 600; }
 .piece.marker { color: var(--muted); }
 .piece.hidden { text-decoration: line-through; border-color: var(--changed); color: var(--changed); }
 .step { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 20px 0; margin: 8px 0 30px; }
+.example-selector { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0 24px; font-size: 13px; }
+.example-selector label { font-weight: 600; }
+.example-selector select { max-width: 100%; min-height: 40px; padding: 7px 30px 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); font: inherit; }
+.example-selector .note { flex-basis: 100%; }
+.guide-instructions { padding-left: 20px; margin: 16px 0; font-size: 14px; line-height: 1.6; }
+.guide-instructions li { margin-bottom: 9px; padding-left: 3px; }
+.guide-help { margin: 14px 0; font-size: 13px; }
+.guide-next { margin-top: 10px; font-size: 14px; line-height: 1.6; }
+.guide-pending { margin-top: 10px; }
+.sample-questions { display: flex; flex-wrap: wrap; gap: 4px; margin: 12px 0; }
+.sample-questions .btn { text-align: left; white-space: normal; }
+.example-evidence { font-size: 13px; color: var(--muted); margin-top: 16px; }
+.example-evidence p { margin-top: 10px; line-height: 1.6; }
+.example-neuron { border-left: 3px dotted var(--changed); padding: 10px 0 10px 12px; margin: 8px 0 18px; }
+.example-neuron .seg { margin: 12px 0 8px; }
+.example-neuron .note { margin-top: 7px; }
+.example-part-hint { font-size: 13px; line-height: 1.6; padding-left: 12px; border-left: 3px dotted var(--changed); margin: 12px 0; }
+.example-marker-key { display: flex; align-items: center; gap: 8px; font: inherit; font-size: 12px; text-align: left; background: transparent; border: 0; color: var(--fg); min-height: 36px; margin: 6px 0; padding: 4px; }
+.example-marker-key span { width: 15px; height: 15px; border: 2px dotted var(--changed); flex-shrink: 0; }
+.tower .cell.example-target::after { content: ""; position: absolute; inset: -4px; border: 2px dotted var(--changed); pointer-events: none; z-index: 2; }
 .experiment-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .experiment-intro { min-width: 0; }
 .eyebrow { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
