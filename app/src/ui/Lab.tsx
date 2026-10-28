@@ -88,7 +88,7 @@ export function LabScope() {
           <button className="btn" disabled={disabled} onClick={() => setFocus({ kind: "head", floor: Math.min(16, model.floors - 1), head: 0 })}>Rotate an attention head</button>
           {model.id === "qwen" && <button className="btn" onClick={() => setFocus({ kind: "bits" })}>Weight precision: {chips.bits ?? 4} bits</button>}
         </div>
-        <p className="note">Adding or removing a change replays every question in order. Each new answer becomes context for the next. Originals stay alongside for comparison; restoring all changes brings them back immediately.</p>
+        <p className="note">Model changes apply to every sample. Each question is tested independently, with its original answer alongside. Restoring the model brings back the original answers.</p>
       </section>
       {mode !== "live" && <p className="note">Controls become available when the model is ready.</p>}
     </div>
@@ -122,6 +122,6 @@ function PartControls({ part, disabled, onClose }: { part: Part; disabled: boole
     <Knob label={`${name} signal strength`} value={mult} disabled={disabled}
       onChange={(v) => void chipsWith((s) => withMult(s, part.kind, part.floor, head, v))} />
     <p className="note">{layerOff ? "This layer is off. Restore the layer to use this part's signal." : "Scale the output signal: zero it, reverse it, or amplify it."}</p>
-    <div className="scope-part-footer"><span className="note">{disabled ? "Waiting for the model" : hasQuestion ? "Replays your conversation" : "Applies to your first question"}</span><button className="linkish" onClick={() => setFocus(part)}>{part.kind === "head" ? "Rotate & inspect" : "Inspect details"} →</button></div>
+    <div className="scope-part-footer"><span className="note">{disabled ? "Waiting for the model" : hasQuestion ? "Updates each sample separately" : "Applies to your samples"}</span><button className="linkish" onClick={() => setFocus(part)}>{part.kind === "head" ? "Rotate & inspect" : "Inspect details"} →</button></div>
   </section>;
 }

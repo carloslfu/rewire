@@ -1,6 +1,6 @@
 // The step card, change chips, composer, device line, path list and "What's real here".
 import { useState } from "react";
-import { applyChips, chipsWith, checkDevice, freshStart, openStep, pauseDownload, send, setFocus, shippingSteps,
+import { applyChips, chipsWith, checkDevice, openStep, pauseDownload, send, setFocus, shippingSteps,
   stepAction, stepData, stopReply, useExperiment, canUseInChat } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { type StepData, stepCopy } from "../path/steps.ts";
@@ -8,7 +8,7 @@ import { S } from "../strings.ts";
 import { chips as chipDefs, multOf, withMult } from "./describe.ts";
 import { Knob } from "./Knob.tsx";
 import { Modal } from "./Modal.tsx";
-import { GuidedStep } from "./Examples.tsx";
+import { GuidedStep, SuggestedQuestions } from "./Examples.tsx";
 
 // ------------------------------------------------------------------ step card
 
@@ -180,21 +180,21 @@ export function Composer() {
     setText("");
     void send(message);
   };
-  if (full) return <div className="context-full" role="status">
-    <p>{S.contextFull} Start fresh to keep chatting with the current changes.</p>
-    <button type="button" className="btn primary" onClick={freshStart}>{S.freshStart}</button>
-  </div>;
   return (
     <div>
+      <SuggestedQuestions />
       <label className="composer-label" htmlFor="composer">{model.id === "tiny" ? "Start a sentence" : "Try your own question"}</label>
+      {model.id === "qwen" && <p className="note sample-independence" id="sample-context-note">Each question runs independently. Earlier questions and answers aren’t included.</p>}
       <form className="composer main-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <textarea id="composer" rows={2} value={text} onChange={(e) => setText(e.target.value)}
-          placeholder={model.id === "tiny" ? S.placeholderTiny : S.placeholderLive} aria-label="Message" autoComplete="off"
+          placeholder={model.id === "tiny" ? S.placeholderTiny : S.placeholderLive} aria-label={model.id === "tiny" ? "Message" : "Question"}
+          aria-describedby={model.id === "qwen" ? "sample-context-note" : undefined} autoComplete="off"
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }} />
         {busy ? <button type="button" className="btn stop" onClick={stopReply}>Stop</button>
-          : <button type="submit" className="btn primary" disabled={mode !== "live" || !!replay || !text.trim()}>{S.send}</button>}
+          : <button type="submit" className="btn primary" disabled={mode !== "live" || !!replay || !text.trim()}>{model.id === "tiny" ? S.send : "Test question"}</button>}
       </form>
-      {replay && replay.status !== "running" && <p className="note">Restart the replay or restore the original conversation to send this message.</p>}
+      {full && <p className="note">Shorten the question or try another sample. Your other samples are unchanged.</p>}
+      {replay && replay.status !== "running" && <p className="note">Retry the sample update or restore the originals before testing another question.</p>}
       {model.id === "qwen" && <DeviceBar />}
       {mode === "live" && <p className="composer-note">{model.id === "tiny" ? "Your trained model · continues text one letter at a time" : "Runs on your device · your messages stay here"}</p>}
     </div>
@@ -245,13 +245,13 @@ export function PathList() {
     return <li key={s.n}>
       <div><h3>{copy?.title ?? s.slug}</h3><p>{copy?.question}</p></div>
       <div className="experiment-choices">
-        {canApply && <button type="button" className="btn change" disabled={busy} onClick={() => void useExperiment(s.n)}>Use in this chat</button>}
+        {canApply && <button type="button" className="btn change" disabled={busy} onClick={() => void useExperiment(s.n)}>Use on these samples</button>}
         <button type="button" className={`btn${canApply ? " quiet" : ""}`} onClick={() => void openStep(s.n)}>{s.guide ? "Try it yourself" : "Run sample question"}</button>
       </div>
     </li>;
   };
   return <Modal open={open} onClose={() => store.set({ pathOpen: false })} title="Experiments" className="experiment-browser">
-    <p className="modal-intro">Change one thing and see what happens. Each sample question runs on your device, just like your own chat.</p>
+    <p className="modal-intro">Change one thing and see what happens. Each question runs independently on your device.</p>
     <ul className="experiment-list">{featuredExperiments.flatMap((n) => steps.filter((s) => s.n === n)).map(row)}</ul>
     <details className="more-experiments"><summary>More to explore</summary>
       <ul className="experiment-list">{steps.filter((s) => !featuredExperiments.includes(s.n)).map(row)}</ul>

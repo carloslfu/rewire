@@ -36,7 +36,7 @@ export interface Forced {
 }
 
 export interface Reply {
-  /** Tokens this side read before the reply (turn 1: the whole rendered prompt; later turns: what was appended). */
+  /** This sample's complete rendered prompt. Other samples are never included. */
   read: number[];
   toks: Tok[];
   /** Ended with the end-of-turn marker (rather than the 64-piece cap). */
@@ -62,6 +62,8 @@ export interface Reply {
 }
 
 export interface Turn {
+  /** Stable identity, independent of the sample's position in the list. */
+  id: number;
   user: string;
   /** Sampling settings shared by both sides, retained across interventions. */
   seed?: number;

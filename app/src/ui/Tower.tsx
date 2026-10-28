@@ -38,7 +38,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
   const diffHint = !comparisonTurn ? "Ask a question, then change a model control to compare."
     : !changedReply ? S.diffNone
     : changedReply.stale ? "This reply used earlier settings. Compare the latest reply instead."
-    : awaitingReplay ? "Finish the conversation replay to compare this reply."
+    : awaitingReplay ? "Finish the sample update to compare this reply."
     : changedReply.comparing ? "Computing change from original…"
     : generating ? "Writing the replies. The comparison will be available when they finish."
     : changedReply.compareError ? `Comparison unavailable: ${changedReply.compareError}`
@@ -132,7 +132,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
               <button className="btn quiet" aria-label="Next token" disabled={tokenAt < 0 || tokenAt >= visibleTokens.length - 1} onClick={() => moveToken(1)}>›</button>
             </div>
             <p className="note">{c.ref.side === "normal" ? "Original" : "Changed"} reply · token {c.ref.index + 1}</p>
-          </> : <h3>{replay ? "Replaying the conversation…" : busy ? "Writing the reply…" : "Ask anything to light up the model"}</h3>}
+          </> : <h3>{replay ? "Updating samples…" : busy ? "Writing the reply…" : "Ask anything to light up the model"}</h3>}
         </div>
         <div className="seg" role="group" aria-label="Diagram view">
           <button type="button" aria-pressed={view === "push"} onClick={() => setTowerView("push")}>{S.viewPush}</button>
@@ -199,7 +199,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
             <p>Each cell shows one part's contribution to the selected token's score relative to the average score across all tokens. Orange adds to that relative score; blue subtracts from it. Stronger color means a larger contribution.</p>
             <p>Blue does not mean an opposite word. A token is a word, part of a word, a character or punctuation.</p>
           </> : <>
-            <p>Each cell compares the same part in both models, forcing the original token after each side’s conversation history. Blue means its contribution decreased; orange means it increased.</p>
+            <p>Each cell compares the same part in both models, forcing the original token after this sample’s prompt and original preceding tokens. Blue means its contribution decreased; orange means it increased.</p>
             <p>On later turns, the changed model reads its own earlier answers. Differences include both the model changes and that changed context.</p>
             <p>An increase can still leave a contribution negative. These colors show the change, not whether the part now supports the token.</p>
           </>}

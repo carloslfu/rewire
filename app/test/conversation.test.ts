@@ -388,7 +388,7 @@ it("restores a valid original token when the changed reply is longer", async () 
   expect(chosen(store.get())).not.toBeNull();
 });
 
-it("compares a later original reply after the changed side's own conversation history", async () => {
+it("compares a later sample after only its own prompt", async () => {
   const { comparisonTarget } = await import("../src/ui/word.ts");
   mock.write.mockImplementation(async (job, emit) => { emit({ ...token, id: job.conv === 0 ? 100 : 101 }); return { ended: true, cancelled: false }; });
   mock.compare.mockImplementation(async (_conv, _changes, _history, ids: number[]) => ids.map((id) => ({ ...token, id })));
@@ -396,45 +396,41 @@ it("compares a later original reply after the changed side's own conversation hi
   await actions.applyChips({ floors: [{ floor: 2, mult: 0 }] });
   actions.setTowerView("difference");
   await actions.send("Second");
-  expect(mock.compare.mock.calls.at(-1)?.slice(2, 4)).toEqual([[11, 12, 101, 21, 22], [100]]);
+  expect(mock.compare.mock.calls.at(-1)?.slice(2, 4)).toEqual([[11, 12], [100]]);
   expect(store.get().word).toEqual({ turn: 1, side: "normal", index: 0 });
   expect(comparisonTarget(store.get())).toEqual(store.get().word);
 });
 
-it("replays all questions in order when adding or removing one change, with a separate regenerated history", async () => {
-  // Model the tokenizer's different delimiter when a reply stops naturally vs. hits its cap.
-  mock.nextTurn.mockImplementation(async (previous: number[]) => [previous.at(-1) === 151645 ? 21 : 23, 22]);
+it("updates all samples independently when adding or removing model changes", async () => {
+  const prompts = ["Colombia?", "Peru?", "What have I asked?", "And Chile?"];
+  mock.firstTurn.mockImplementation(async (q: string) => [11 + 10 * prompts.indexOf(q), 12 + 10 * prompts.indexOf(q)]);
   mock.write.mockImplementation(async (job, emit) => {
-    const id = job.conv === 0 ? 100 + job.turn : (job.changes.heads?.length ? 200 : 300) + job.turn;
+    const sample = Math.floor(job.history[0] / 10) - 1;
+    const id = job.conv === 0 ? 100 + sample : (job.changes.heads?.length ? 200 : 300) + sample;
     emit({ ...token, id });
     if (job.conv === 0) emit({ ...token, id: 151645 });
     return { ended: job.conv === 0, cancelled: false };
   });
   mock.compare.mockImplementation(async (_conv, _spec, _history, ids: number[]) => ids.map((id) => ({ ...token, id })));
-  for (const question of ["Colombia?", "Peru?", "What have I asked?"]) await actions.send(question);
+  for (const question of prompts.slice(0, 3)) await actions.send(question);
   const originals = store.get().turns.map((t) => t.normal);
   const two = { heads: [{ floor: 20, head: 13, mult: -1 }], memory: [{ floor: 27, mult: 2 }] };
   await actions.applyChips(two);
   const replay = mock.write.mock.calls.slice(3).map(([job]) => job);
-  expect(replay.map((job) => job.turn)).toEqual([0, 1, 2]);
-  expect(replay.map((job) => job.history)).toEqual([
-    [11, 12], [11, 12, 200, 23, 22], [11, 12, 200, 23, 22, 201, 23, 22],
-  ]);
+  expect(replay.map((job) => job.turn)).toEqual([0, 0, 0]);
+  expect(replay.map((job) => job.history)).toEqual([[11, 12], [21, 22], [31, 32]]);
   expect(mock.compare.mock.calls.map((call) => call[2])).toEqual(replay.map((job) => job.history));
-  expect(store.get().fork).toBe(0);
   expect(store.get().turns.every((t) => t.changed?.compare?.length === t.normal.toks.length)).toBe(true);
   store.get().turns.forEach((t, i) => expect(t.normal).toBe(originals[i]));
   await actions.applyChips({ memory: two.memory });
-  expect(mock.write.mock.calls.slice(6).map(([job]) => job.history)).toEqual([
-    [11, 12], [11, 12, 300, 23, 22], [11, 12, 300, 23, 22, 301, 23, 22],
-  ]);
+  expect(mock.write.mock.calls.slice(6).map(([job]) => job.history)).toEqual([[11, 12], [21, 22], [31, 32]]);
   expect(store.get().turns.map((t) => t.changed?.toks[0].id)).toEqual([300, 301, 302]);
-  expect(store.get().turns.every((t) => !t.changed?.stale)).toBe(true);
   expect(store.get().replay).toBeNull();
   expect(store.get().busy).toBe(false);
-  await actions.send("And Chile?");
-  expect(mock.write.mock.calls.at(-2)?.[0].history).toEqual([11, 12, 100, 151645, 21, 22, 101, 151645, 21, 22, 102, 151645, 21, 22]);
-  expect(mock.write.mock.calls.at(-1)?.[0].history).toEqual([11, 12, 300, 23, 22, 301, 23, 22, 302, 23, 22]);
+  await actions.send(prompts[3]);
+  expect(mock.write.mock.calls.at(-2)?.[0].history).toEqual([41, 42]);
+  expect(mock.write.mock.calls.at(-1)?.[0].history).toEqual([41, 42]);
+  expect(mock.nextTurn).not.toHaveBeenCalled();
   const beforeRestore = mock.write.mock.calls.length;
   await actions.applyChips({});
   expect(mock.write).toHaveBeenCalledTimes(beforeRestore);
@@ -470,25 +466,26 @@ it("stops the entire replay, ignores late tokens, and blocks follow-ups until a 
   expect(mock.write).toHaveBeenCalledTimes(4);
   expect(mock.compare).not.toHaveBeenCalled();
   await actions.restartReplay();
-  expect(mock.write.mock.calls.slice(4).map(([j]) => [j.turn, j.prefix])).toEqual([[0, []], [1, []], [2, []]]);
+  expect(mock.write.mock.calls.slice(4).map(([j]) => [j.turn, j.prefix])).toEqual([[0, []], [0, []], [0, []]]);
   expect(store.get().replay).toBeNull();
   await actions.send("Now complete");
   expect(store.get().turns).toHaveLength(4);
 });
 
-it("keeps replay locked while the next prompt is tokenized and cancels on a new chat", async () => {
+it("keeps sample updates locked through generation and cancels on clear", async () => {
   await actions.send("First"); await actions.send("Second");
-  const next = deferred<number[]>(); mock.nextTurn.mockReturnValueOnce(next.promise);
+  const next = deferred<{ ended: boolean; cancelled: boolean }>();
+  mock.write.mockResolvedValueOnce({ ended: true, cancelled: false }).mockReturnValueOnce(next.promise);
   const pending = actions.applyChips({ memory: [{ floor: 1, mult: 2 }] }); await flush();
   expect(store.get().replay).toEqual({ turn: 1, status: "running" });
   expect(store.get().busy).toBe(true);
   await actions.send("Must wait");
   expect(store.get().turns).toHaveLength(2);
-  actions.freshStart();
-  next.resolve([21, 22]); await pending;
+  actions.clearSamples();
+  next.resolve({ ended: true, cancelled: false }); await pending;
   expect(store.get().turns).toHaveLength(0);
   expect(store.get().replay).toBeNull();
-  expect(mock.write).toHaveBeenCalledTimes(3);
+  expect(mock.write).toHaveBeenCalledTimes(4);
 });
 
 it("keeps replay locked through its last comparison and ignores a superseded comparison", async () => {
@@ -510,10 +507,10 @@ it("keeps replay locked through its last comparison and ignores a superseded com
 it("marks a failed replay as incomplete, preserves originals, and restores without fabricated output", async () => {
   await actions.send("First"); await actions.send("Second"); await actions.send("Third");
   const originals = store.get().turns.map((t) => t.normal);
-  mock.nextTurn.mockRejectedValueOnce(new Error("Tokenizer failed"));
+  mock.write.mockResolvedValueOnce({ ended: true, cancelled: false }).mockRejectedValueOnce(new Error("Worker failed"));
   await actions.applyChips({ memory: [{ floor: 1, mult: 0 }] });
   expect(store.get().replay).toEqual({ turn: 1, status: "error" });
-  expect(store.get().error).toBe("Tokenizer failed");
+  expect(store.get().error).toBe("Worker failed");
   expect(store.get().busy).toBe(false);
   expect(store.get().turns[2].changed?.toks).toEqual([]);
   await actions.send("Must wait"); expect(store.get().turns).toHaveLength(3);
@@ -521,7 +518,7 @@ it("marks a failed replay as incomplete, preserves originals, and restores witho
   expect(store.get().replay).toBeNull();
   expect(store.get().error).toBeNull();
   expect(store.get().turns.map((t) => t.normal)).toEqual(originals);
-  expect(mock.write).toHaveBeenCalledTimes(4);
+  expect(mock.write).toHaveBeenCalledTimes(5);
 });
 
 it("does not continue replay after a context limit or an unexpected worker cancellation", async () => {
@@ -560,4 +557,135 @@ it("locks an existing conversation before resolving dictionary swap names", asyn
   names.resolve(["a", "b"]); await pending;
   expect(store.get().turns).toHaveLength(0);
   expect(mock.write).toHaveBeenCalledTimes(1);
+});
+
+it("repeating a question later uses the same standalone prompt and sampling position", async () => {
+  mock.firstTurn.mockImplementation(async (q: string) => q === "Same question" ? [30, 31] : [40, 41]);
+  await actions.send("Same question");
+  await actions.send("Distracting question");
+  await actions.send("Same question");
+  const jobs = mock.write.mock.calls.map(([j]) => j);
+  expect(jobs.map((j) => j.history)).toEqual([[30, 31], [40, 41], [30, 31]]);
+  expect(jobs.map((j) => [j.seed, j.turn, j.temperature])).toEqual(Array(3).fill([11, 0, .7]));
+  expect(new Set(store.get().turns.map((t) => t.id)).size).toBe(3);
+  expect(mock.nextTurn).not.toHaveBeenCalled();
+});
+
+it("edits just one sample's pair with its retained seed and temperature", async () => {
+  await actions.send("First");
+  store.set({ seed: 17, temperature: .3 });
+  await actions.send("Second"); await actions.send("Third");
+  await actions.applyChips({ memory: [{ floor: 1, mult: 2 }] });
+  const [first, second, third] = store.get().turns;
+  store.set({ seed: 99, temperature: 1.2 });
+  mock.firstTurn.mockResolvedValueOnce([91, 92]);
+  mock.write.mockClear();
+  expect(await actions.editSample(second.id, "Edited question")).toBe(true);
+  expect(store.get().turns[0]).toBe(first);
+  expect(store.get().turns[2]).toBe(third);
+  expect(store.get().turns[1]).toMatchObject({ id: second.id, user: "Edited question", seed: 17, temperature: .3 });
+  const jobs = mock.write.mock.calls.map(([j]) => j);
+  expect(jobs).toHaveLength(2);
+  expect(jobs.map((j) => [j.history, j.seed, j.turn, j.temperature])).toEqual(Array(2).fill([[91, 92], 17, 0, .3]));
+  expect(jobs[1].changes).toEqual(store.get().chips);
+  expect(mock.nextTurn).not.toHaveBeenCalled();
+});
+
+it("does not lose a sample on a blank edit or failed edit tokenization, and drops late edits on clear", async () => {
+  await actions.send("Keep this"); const before = store.get().turns[0];
+  expect(await actions.editSample(before.id, " ")).toBe(false);
+  expect(store.get().turns[0]).toBe(before);
+  mock.firstTurn.mockRejectedValueOnce(new Error("Cannot tokenize"));
+  expect(await actions.editSample(before.id, "New words")).toBe(false);
+  expect(store.get().turns[0].user).toBe("Keep this");
+  const input = deferred<number[]>(); mock.firstTurn.mockReturnValueOnce(input.promise);
+  const pending = actions.editSample(before.id, "Late edit");
+  actions.clearSamples(); input.resolve([90]);
+  expect(await pending).toBe(false);
+  expect(store.get().turns).toEqual([]);
+});
+
+it("removes samples without regenerating others, remaps inspection, and undoes multiple removals in order", async () => {
+  await actions.send("First"); await actions.send("Second"); await actions.send("Third");
+  const [first, second, third] = store.get().turns;
+  actions.selectWord({ turn: 2, side: "normal", index: 0 });
+  mock.write.mockClear();
+  actions.removeSample(second.id);
+  expect(store.get().turns).toEqual([first, third]);
+  expect(store.get().word?.turn).toBe(1);
+  actions.removeSample(first.id);
+  expect(store.get().turns).toEqual([third]);
+  expect(store.get().word?.turn).toBe(0);
+  await actions.undoRemoveSample(); await actions.undoRemoveSample();
+  expect(store.get().turns.map((t) => t.id)).toEqual([first.id, second.id, third.id]);
+  expect(store.get().turns[2]).toBe(third);
+  expect(store.get().word?.turn).toBe(2);
+  expect(store.get().removed).toHaveLength(0);
+  expect(mock.write).not.toHaveBeenCalled();
+});
+
+it("undo restores the same cached pair without changing the sampling stream", async () => {
+  await actions.send("First"); await actions.send("Second");
+  await actions.applyChips({ heads: [{ floor: 20, head: 13, mult: -1 }] });
+  const [first, second] = store.get().turns;
+  actions.removeSample(first.id); mock.write.mockClear();
+  await actions.undoRemoveSample();
+  expect(store.get().turns[0].normal).toBe(first.normal);
+  expect(store.get().turns[0].changed).toBe(first.changed);
+  expect(store.get().turns[1]).toBe(second);
+  expect(mock.write).not.toHaveBeenCalled();
+  mock.write.mockClear();
+  await actions.applyChips({ heads: [{ floor: 20, head: 13, mult: -1 }] });
+  expect(mock.write.mock.calls.map(([j]) => [j.turn, j.seed, j.history])).toEqual(Array(2).fill([0, 11, [11, 12]]));
+});
+
+it("undo after changing the model refreshes only the restored changed answer", async () => {
+  await actions.send("First"); await actions.send("Second");
+  await actions.applyChips({ memory: [{ floor: 1, mult: 2 }] });
+  const removed = store.get().turns[0]; actions.removeSample(removed.id);
+  await actions.applyChips({ memory: [{ floor: 1, mult: 5 }] });
+  const kept = store.get().turns[0];
+  store.set({ seed: 99, temperature: 1.2 }); mock.write.mockClear();
+  await actions.undoRemoveSample();
+  expect(store.get().turns[0].normal).toBe(removed.normal);
+  expect(store.get().turns[1]).toBe(kept);
+  expect(mock.write).toHaveBeenCalledTimes(1);
+  expect(mock.write.mock.calls[0][0]).toMatchObject({ conv: 1, turn: 0, seed: 11, temperature: .7, history: [11, 12], changes: { memory: [{ floor: 1, mult: 5 }] } });
+  actions.removeSample(removed.id); await actions.applyChips({}); mock.write.mockClear();
+  await actions.undoRemoveSample();
+  expect(store.get().turns[0].changed).toBeUndefined();
+  expect(store.get().turns[0].normal).toBe(removed.normal);
+  expect(mock.write).not.toHaveBeenCalled();
+});
+
+it("can remove and undo the last sample, while clear keeps the guide and changes and discards undo", async () => {
+  await actions.openStep(13); await actions.send("One sample"); await actions.stepAction(.2);
+  const t = store.get().turns[0]; actions.removeSample(t.id);
+  expect(store.get().turns).toEqual([]);
+  expect(store.get().word).toBeNull();
+  expect(store.get().busy).toBe(false);
+  await actions.undoRemoveSample();
+  expect(store.get().turns[0].id).toBe(t.id);
+  actions.removeSample(t.id);
+  const changes = store.get().chips;
+  actions.clearSamples(); await actions.undoRemoveSample();
+  expect(store.get().turns).toEqual([]);
+  expect(store.get().removed).toEqual([]);
+  expect(store.get().step).toBe(13);
+  expect(store.get().chips).toEqual(changes);
+});
+
+it("continues, forces tokens, and inspects an older sample using only that sample's context", async () => {
+  mock.firstTurn.mockResolvedValueOnce([51, 52]).mockResolvedValueOnce([61, 62]);
+  await actions.send("Older"); await actions.send("Newer");
+  const newer = store.get().turns[1];
+  store.set((s) => ({ turns: s.turns.map((t, i) => i ? t : { ...t, normal: { ...t.normal, ended: false } }) }));
+  await actions.continueReply(0);
+  expect(mock.write.mock.calls.at(-1)?.[0]).toMatchObject({ history: [51, 52], turn: 0, prefix: [100] });
+  mock.inspect.mockResolvedValueOnce({ guesses: [], detail: new Map() });
+  await actions.floorDetail({ turn: 0, side: "normal", index: 1 });
+  expect(mock.inspect.mock.calls.at(-1)?.[2]).toEqual([51, 52, 100]);
+  await actions.pick({ turn: 0, side: "normal", index: 0 }, 99);
+  expect(mock.write.mock.calls.at(-1)?.[0]).toMatchObject({ history: [51, 52], turn: 0, force: 99 });
+  expect(store.get().turns[1]).toBe(newer);
 });

@@ -16,38 +16,47 @@ export function ExampleSelector() {
       <option value="">Your own experiment</option>
       {examples.map((s) => <option key={s.n} value={s.n}>{s.guide!.label}</option>)}
     </select></span>
-    <span className="note">Selecting an example starts a fresh chat.</span>
+    <span className="note">Selecting an example clears samples and restores the model.</span>
   </div>;
 }
 
 export function GuidedStep({ st }: { st: StepData }) {
-  const busy = useStore((s) => s.busy);
   const turns = useStore((s) => s.turns);
-  const draft = useStore((s) => s.draft);
   const guide = st.guide!, target = guideTarget(st)!, copy = stepCopy(st)!;
   return <section className="step guided-step" aria-labelledby="step-title">
     <p className="eyebrow">Try it yourself</p>
     <h2 id="step-title">{copy.title}</h2>
     {turns.length > 0 && <p className="guide-next">{guideAddress(st)}. {guide.action}</p>}
     <details className="guide-help" open={!turns.length}>
-    <summary>Instructions and sample questions</summary>
+    <summary>Instructions and test notes</summary>
     <ol className="guide-instructions">
-      <li><strong>Ask a question.</strong> Send the sample below, edit it, or write your own.</li>
+      <li><strong>Test a question.</strong> Use a suggested question, edit it, or write your own.</li>
       <li><strong>Find {guideAddress(st)}.</strong> It has a dotted marker in the model. {guide.action}</li>
       <li><strong>Compare the replies.</strong> Try another question, then restore the original to check the effect.</li>
     </ol>
-    <div className="sample-questions" role="group" aria-label="Example questions">
-      {guide.samples.map((q) => <button className="btn quiet" key={q} disabled={busy} aria-pressed={draft === q}
-        onClick={() => { store.set({ draft: q }); document.getElementById("composer")?.focus(); }}>{q}</button>)}
-    </div>
     <details className="example-evidence"><summary>What happened in our tests?</summary>
       <p>{guide.observed} We used three sampling seeds and one greedy run with this same model. Your reply is generated here.</p>
       <p>{copy.why}</p>
     </details>
     </details>
     <button className="btn" onClick={() => setFocus(target)}>Find marked part</button>
-    {!turns.length && <p className="note guide-pending">Send your question first. You make the change yourself.</p>}
+    {!turns.length && <p className="note guide-pending">Test your question first. You make the change yourself.</p>}
   </section>;
+}
+
+/** Suggestions stay next to the composer after the first sample, without sending automatically. */
+export function SuggestedQuestions() {
+  const st = stepData(useStore((s) => s.step));
+  const draft = useStore((s) => s.draft), busy = useStore((s) => s.busy);
+  const model = useStore((s) => s.model);
+  if (model.id !== "qwen" || !st?.guide) return null;
+  return <div className="suggested-questions">
+    <p className="note">Suggested questions</p>
+    <div className="sample-questions" role="group" aria-label="Suggested questions">
+      {st.guide.samples.map((q) => <button className="btn" key={q} disabled={busy} aria-pressed={draft === q}
+        onClick={() => { store.set({ draft: q }); document.getElementById("composer")?.focus(); }}>{q}</button>)}
+    </div>
+  </div>;
 }
 
 /** The intervention lives at its actual MLP, reached by clicking the marked cell. */

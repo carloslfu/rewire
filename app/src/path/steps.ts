@@ -25,7 +25,7 @@ export interface StepData {
   core: boolean;
   message?: string;
   control: StepControl;
-  /** A hands-on example. Selection prepares an unmodified chat, without running it or applying its edit. */
+  /** A hands-on example. Selection prepares an unmodified sample, without running it or applying its edit. */
   guide?: { label: string; action: string; observed: string; samples: string[] };
   /** Numbers the copy states, measured in Phase 0A. */
   facts?: Record<string, string | number>;

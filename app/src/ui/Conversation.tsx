@@ -1,7 +1,7 @@
-// The conversation: each turn's normal reply, and once forked, the changed reply beside it (section 4.3).
+// Independent samples, each with an editable question and its original/changed pair.
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { Reply, Side, Tok, Turn } from "../model/types.ts";
-import { continueReply, piece, selectWord, setFocus, undoPick } from "../state/actions.ts";
+import { continueReply, editSample, piece, removeSample, selectWord, undoPick, undoRemoveSample } from "../state/actions.ts";
 import { useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { pct } from "./color.ts";
@@ -14,39 +14,76 @@ const MARKERS: Record<number, string> = { 151644: "<|im_start|>", 151645: "<|im_
 export function Conversation() {
   const turns = useStore((s) => s.turns);
   const mode = useStore((s) => s.mode);
+  const removed = useStore((s) => s.removed);
+  const busy = useStore((s) => s.busy);
+  const replay = useStore((s) => s.replay);
   const end = useRef<HTMLDivElement>(null);
-  const [reads, setReads] = useState(false);
+  const undoButton = useRef<HTMLButtonElement>(null);
+  const newestSeen = useRef(0);
+  const removedId = removed.at(-1)?.sample.id;
+  useEffect(() => { if (removedId !== undefined) undoButton.current?.focus(); }, [removedId]);
   useEffect(() => {
-    if (turns.length > 1 && turns[turns.length - 1]?.normal.source === "live") end.current?.scrollIntoView({ block: "nearest" });
+    const newest = Math.max(0, ...turns.map((t) => t.id));
+    if (newest > newestSeen.current && turns.length > 1) end.current?.scrollIntoView({ block: "nearest" });
+    newestSeen.current = Math.max(newestSeen.current, newest);
   }, [turns.length]);
-  if (!turns.length) return null;
+  if (!turns.length && !removed.length) return null;
+  const undoAt = Math.min(removed.at(-1)?.index ?? -1, turns.length);
+  const undo = removed.length > 0 && <div className="sample-undo" role="status" key="undo-remove">
+    <span>Removed: <span className="removed-question">{removed.at(-1)!.sample.user}</span></span>
+    <button ref={undoButton} className="btn" disabled={busy || !!replay || mode !== "live"} onClick={() => void undoRemoveSample()} aria-label="Undo remove">Undo</button>
+  </div>;
   return (
     <div className="conversation" aria-live="off">
       <ReplayStatus />
-      {turns.map((t, k) => <TurnView key={k} turn={t} k={k} last={k === turns.length - 1} live={mode === "live"} />)}
+      {turns.flatMap((t, k) => [k === undoAt ? undo : null, <TurnView key={t.id} turn={t} k={k} live={mode === "live"} />])}
+      {undoAt === turns.length && undo}
       <div ref={end} />
+    </div>
+  );
+}
+
+function TurnView({ turn, k, live }: { turn: Turn; k: number; live: boolean }) {
+  const forked = !!turn.changed;
+  const busy = useStore((s) => s.busy), replay = useStore((s) => s.replay);
+  const model = useStore((s) => s.model);
+  const [editing, setEditing] = useState(false), [text, setText] = useState(turn.user);
+  const [reads, setReads] = useState(false);
+  const locked = busy || !!replay || !live;
+  const cancel = () => { setText(turn.user); setEditing(false); };
+  const save = async () => { if (!locked && text.trim() && await editSample(turn.id, text)) setEditing(false); };
+  return (
+    <article className="turn" aria-labelledby={`sample-${turn.id}`}>
+      <div className="sample-heading">
+        <div className="sample-question"><p className="eyebrow">{model.id === "tiny" ? "Text" : `Sample ${k + 1}`}</p>
+          <h3 id={`sample-${turn.id}`}>{turn.user}</h3></div>
+        {model.id === "qwen" && <div className="sample-actions">
+          <button className="btn" disabled={locked} aria-label={`Edit sample ${k + 1}`} aria-expanded={editing}
+            onClick={() => { setText(turn.user); setEditing(true); }}>Edit</button>
+          <button className="btn quiet" disabled={locked} aria-label={`Remove sample ${k + 1}`} onClick={() => removeSample(turn.id)}>Remove</button>
+        </div>}
+      </div>
+      {editing && <form className="sample-edit" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+        <label htmlFor={`edit-${turn.id}`}>Edit this question</label>
+        <textarea id={`edit-${turn.id}`} autoFocus rows={3} value={text} onChange={(e) => setText(e.target.value)}
+          disabled={locked} onKeyDown={(e) => { if (e.key === "Escape") cancel(); }} />
+        <p className="note">Updating regenerates this sample’s answers. Other samples stay unchanged.</p>
+        <div className="sample-edit-actions"><button className="btn primary" disabled={locked || !text.trim()}>Update sample</button>
+          <button type="button" className="btn quiet" disabled={busy} onClick={cancel}>Cancel</button></div>
+      </form>}
+      <div className={`replies${forked ? " forked" : ""}`}>
+        <ReplyView reply={turn.normal} k={k} side="normal" turn={turn} live={live} />
+        {turn.changed && <ReplyView reply={turn.changed} k={k} side="changed" turn={turn} live={live} />}
+      </div>
       <details className="reads-toggle" open={reads} onToggle={(e) => setReads(e.currentTarget.open)}>
         <summary>{S.whatItReads}</summary>
-        {reads && <Reads turns={turns} />}
+        {reads && <Reads turn={turn} k={k} />}
       </details>
-    </div>
+    </article>
   );
 }
 
-function TurnView({ turn, k, last, live }: { turn: Turn; k: number; last: boolean; live: boolean }) {
-  const forked = !!turn.changed;
-  return (
-    <div className="turn">
-      <div className="user"><span className="sr-only">{S.you}: </span>{turn.user}</div>
-      <div className={`replies${forked ? " forked" : ""}`}>
-        <ReplyView reply={turn.normal} k={k} side="normal" turn={turn} last={last} live={live} />
-        {turn.changed && <ReplyView reply={turn.changed} k={k} side="changed" turn={turn} last={last} live={live} />}
-      </div>
-    </div>
-  );
-}
-
-function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: number; side: Side; turn: Turn; last: boolean; live: boolean }) {
+function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; side: Side; turn: Turn; live: boolean }) {
   const word = useStore((s) => s.word);
   const inspecting = useStore((s) => s.sheet);
   const busy = useStore((s) => s.busy);
@@ -54,7 +91,7 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
   const model = useStore((s) => s.model);
   const compare = side === "normal" ? turn.changed?.compare : undefined;
   const changed = side === "changed";
-  const label = !changed ? (turn.changed ? "Original" : model.id === "tiny" ? "Your tiny model" : "Rewire")
+  const label = !changed ? (model.id === "tiny" ? "Your tiny model" : "Original")
     : reply.stale ? S.writtenUnder(describe(reply.changes, turn.normal.read)) : S.changedBy(describe(reply.changes, turn.normal.read));
   const toks = reply.toks;
   const pending = changed && replay && k >= replay.turn;
@@ -110,8 +147,8 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
         })}</span>)}
         {!reply.done && !queued && <span className="tok cursor" aria-hidden="true" />}
       </div>
-      {queued && <p className="note">{replay.status === "running" ? "Waiting for earlier replies…" : "Not replayed yet."}</p>}
-      {pending && !queued && replay.status !== "running" && <p className="note">Replay interrupted here.</p>}
+      {queued && <p className="note">{replay.status === "running" ? "Waiting to update this sample…" : "Not updated yet."}</p>}
+      {pending && !queued && replay.status !== "running" && <p className="note">Update interrupted here.</p>}
       {moved && <p className="moved">{moved}</p>}
       <div className="foot">
         {reply.pickedAt !== undefined && reply.original && (
@@ -120,10 +157,10 @@ function ReplyView({ reply, k, side, turn, last, live }: { reply: Reply; k: numb
             <button type="button" className="btn quiet" disabled={busy || !!replay} onClick={() => undoPick(k, side)}>{S.undo}</button>
           </>
         )}
-        {reply.done && !reply.ended && !reply.stale && last && !replay && (
+        {reply.done && !reply.ended && !reply.stale && !replay && (
           <>
             <span>{S.stopped(reply.toks.length, model.piece)}</span>
-            {live && <button type="button" className="btn" disabled={busy} onClick={() => void continueReply()}>{S.cont}</button>}
+            {live && <button type="button" className="btn" disabled={busy} onClick={() => void continueReply(k)}>{S.cont}</button>}
           </>
         )}
       </div>
@@ -178,27 +215,24 @@ function whatMoved(turn: Turn): string | null {
 }
 
 /** What the model actually reads: the full input as word pieces, markers included. */
-function Reads({ turns }: { turns: Turn[] }) {
+function Reads({ turn, k }: { turn: Turn; k: number }) {
   const chips = useStore((s) => s.chips);
   const [side, setSide] = useState<Side>("normal");
-  const forked = turns.some((t) => t.changed);
+  const forked = !!turn.changed;
   const changed = forked && side === "changed";
   const hidden = new Set((chips.hidden ?? []).map((h) => h.key));
   let pos = 0;
   const items: { id: number; pos: number; reply: boolean }[] = [];
-  for (const t of turns) {
-    const r = changed ? t.changed : t.normal;
-    if (!r) break;
-    for (const id of r.read) items.push({ id, pos: pos++, reply: false });
-    for (const tk of r.toks) items.push({ id: tk.id, pos: pos++, reply: true });
-  }
+  const r = changed ? turn.changed! : turn.normal;
+  for (const id of r.read) items.push({ id, pos: pos++, reply: false });
+  for (const tk of r.toks) items.push({ id: tk.id, pos: pos++, reply: true });
   return (
     <div className="reads">
-      {forked && <div className="seg" role="group" aria-label="Conversation history">
-        <button aria-pressed={!changed} onClick={() => setSide("normal")}>Original history</button>
-        <button aria-pressed={changed} onClick={() => setSide("changed")}>Changed history</button>
+      {forked && <div className="seg" role="group" aria-label="Sample input and output">
+        <button aria-pressed={!changed} onClick={() => setSide("normal")}>Original</button>
+        <button aria-pressed={changed} onClick={() => setSide("changed")}>Changed</button>
       </div>}
-      {changed && <p className="note">The replay uses these regenerated answers as context. Unreplayed turns are not included.</p>}
+      <p className="note">Only this question’s prompt and reply are shown. Other samples are never included.</p>
       <p className="note">{S.readsNote}</p>
       <p className="note">{S.thinkingOff}</p>
       <div style={{ marginTop: 6 }}>
@@ -207,7 +241,7 @@ function Reads({ turns }: { turns: Turn[] }) {
           const txt = m ?? piece(x.id);
           return (
             <button key={x.pos} type="button" className={`piece${m ? " marker" : ""}${hidden.has(x.pos) ? " hidden" : ""}`}
-              title={`position ${x.pos}, id ${x.id}`} aria-label={!txt.trim() ? txt.includes("\n") ? "Line break" : "Space" : undefined} onClick={() => setFocus({ kind: "words-in", position: x.pos, side: changed ? "changed" : "normal" })}>
+              title={`position ${x.pos}, id ${x.id}`} aria-label={!txt.trim() ? txt.includes("\n") ? "Line break" : "Space" : undefined} onClick={() => selectWord({ turn: k, side: changed ? "changed" : "normal", index: 0 }, { kind: "words-in", position: x.pos, side: changed ? "changed" : "normal" })}>
               {txt.replace(/\n/g, "↵")}
             </button>
           );

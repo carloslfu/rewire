@@ -1,4 +1,4 @@
-// Live inference, interventions and conversation lifecycle. No prerecorded output path.
+// Live inference, interventions and independent sample lifecycle. No prerecorded output path.
 import { isNeutral } from "@rewire/engine/src/changes.ts";
 import type { EngineClient } from "../live/engine.ts";
 import type { Cand, ChangeSpec, FloorDetail, Focus, Reply, Side, Tok, Turn, WordRef } from "../model/types.ts";
@@ -10,6 +10,7 @@ import { TINY, type TinyConfig } from "@rewire/tiny/src/config.ts";
 import { QWEN_INFO, TINY_INFO } from "../model/info.ts";
 import { type DeviceState, store } from "./store.ts";
 import release from "../live/release.json";
+import { canonical } from "../model/change-key.ts";
 
 export const REPLY_CAP = 64;
 
@@ -58,6 +59,7 @@ export function shippingSteps(): StepData[] {
 const sideJob: Record<Side, number> = { normal: 0, changed: 0 };
 let jobSeq = 0;
 let navigation = 0;
+let sampleSeq = 0;
 function claim(side: Side): number {
   sideJob[side] = ++jobSeq;
   return sideJob[side];
@@ -68,7 +70,7 @@ function current(side: Side, job: number) {
 function busy() {
   const { turns: t, replay } = store.get();
   if (replay?.status === "running") return true;
-  return t.some((x) => !x.normal.done || (x.changed && !x.changed.done));
+  return t.some((x) => !x.normal.done || (x.changed && (!x.changed.done || x.changed.comparing)));
 }
 
 function emptyReply(changes: ChangeSpec, read: number[], source: Reply["source"]): Reply {
@@ -120,7 +122,7 @@ export async function openStep(n: number | null) {
   const s = store.get();
   const st = stepData(n);
   store.set({
-    step: n, stepTried: false, pathOpen: false, chips: {}, version: s.version + 1, turns: [], fork: -1, word: null, follow: true,
+    step: n, stepTried: false, pathOpen: false, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, word: null, follow: true,
     focus: { kind: "word" }, view: "push", tiny: false, busy: false, replay: null, full: false, sheet: false, error: null,
     draft: st?.guide ? st.message ?? "" : "",
   });
@@ -129,7 +131,7 @@ export async function openStep(n: number | null) {
   if (st?.message && !st.guide && store.get().mode === "live") await send(st.message);
 }
 
-/** Select a model modification for an existing live chat without replacing its messages. */
+/** Select a model modification without replacing the existing samples. */
 export async function useExperiment(n: number) {
   const s = store.get(), st = stepData(n);
   if (!st || s.busy || s.mode !== "live" || s.model.id !== "qwen" || !canUseInChat(st)) return;
@@ -187,7 +189,7 @@ export function chipsWith(f: (c: ChangeSpec) => ChangeSpec) {
   return applyChips(f(structuredClone(store.get().chips)));
 }
 
-/** Replay every question with the changed model, preserving the original branch exactly. */
+/** Update each independent question with the changed model, preserving its original answer. */
 export async function applyChips(spec: ChangeSpec) {
   const s = store.get();
   if (s.mode !== "live" || !engine || (s.busy && !s.replay)) return;
@@ -200,7 +202,7 @@ export async function applyChips(spec: ChangeSpec) {
     const word = s.word?.side === "changed" ? originalWord(s) : s.word;
     // The exact original replies already exist. Restoring them needs no simulated or duplicate output.
     store.set({ chips: {}, version, fork: -1, view: "push", word, replay: null, error: null, full: false,
-      announce: "Original conversation restored.", turns: s.turns.map((t) => ({ ...t, changed: undefined })) });
+      announce: "Original answers restored.", turns: s.turns.map((t) => ({ ...t, changed: undefined })) });
     store.set({ busy: busy() });
     return;
   }
@@ -215,10 +217,7 @@ export async function applyChips(spec: ChangeSpec) {
     for (let k = 0; k < turns.length; k++) {
       if (!active()) return;
       store.set({ replay: { turn: k, status: "running" } });
-      // Chat delimiters depend on whether the preceding regenerated answer ended naturally.
-      // Reusing the original turn's read would be wrong when the new reply hits its token limit.
-      const read = k === 0 || s.model.id === "tiny" ? turns[k].normal.read
-        : await engine.nextTurn(store.get().turns[k - 1].changed!.toks.map((t) => t.id), turns[k].user);
+      const read = turns[k].normal.read;
       if (!active()) return;
       if (s.model.id === "qwen") await ensurePieces(read);
       if (!active()) return;
@@ -230,7 +229,7 @@ export async function applyChips(spec: ChangeSpec) {
       if (!active()) return;
       if (!completed) { stopReply(); return; }
     }
-    if (active()) store.set({ replay: null, busy: false, announce: "Conversation replay complete." });
+    if (active()) store.set({ replay: null, busy: false, announce: "Sample comparisons updated." });
   } catch (e) {
     if (active()) endWithError(e);
   }
@@ -241,16 +240,10 @@ export async function restartReplay() {
   if (s.replay && !s.busy) await applyChips(s.chips);
 }
 
-/** Tokens the given side has read before turn k's reply. */
-function historyBefore(k: number, side: Side, turns = store.get().turns, fork = store.get().fork): number[] {
-  const out: number[] = [];
-  for (let i = 0; i <= k; i++) {
-    const t = turns[i];
-    const r = side === "changed" && i >= fork && t.changed ? t.changed : t.normal;
-    out.push(...r.read);
-    if (i < k) out.push(...r.toks.map((x) => x.id));
-  }
-  return out;
+/** Only this sample's prompt, for generation, comparison and inspection alike. */
+function historyBefore(k: number, side: Side, turns = store.get().turns): number[] {
+  const t = turns[k];
+  return (side === "changed" ? t?.changed : t?.normal)?.read ?? [];
 }
 
 let comparisonSeq = 0;
@@ -272,7 +265,7 @@ async function compareTurn(k: number, version: number) {
   };
   const history = historyBefore(k, "changed");
   patchReply(k, "changed", (r) => ({ ...r, comparing: true, compare: undefined, compareError: undefined }));
-  // the changed side's own history up to this turn's read, then the normal reply
+  // The same independent prompt, followed by the original answer's tokens.
   try {
     const forced = await engine.compare(2, t.changed.changes, history, tokens, version);
     if (!currentComparison()) return;
@@ -316,19 +309,12 @@ export async function send(message: string) {
     if (s.model.id === "tiny") { await sendTiny(message); return; }
     const k = s.turns.length;
     const forked = !isNeutral(s.chips);
-    const prevN = k ? s.turns[k - 1].normal.toks.map((x) => x.id) : null;
-    const readN = prevN ? await engine.nextTurn(prevN, text) : await engine.firstTurn(text);
-    let readC = readN;
-    if (forked && k) {
-      const p = s.turns[k - 1];
-      const prev = s.fork >= 0 && k - 1 >= s.fork && p.changed ? p.changed : p.normal;
-      readC = await engine.nextTurn(prev.toks.map((x) => x.id), text);
-    }
-    await ensurePieces([...readN, ...readC]);
+    const readN = await engine.firstTurn(text);
+    await ensurePieces(readN);
     if (visit !== navigation) return;
     const fork = forked ? (s.fork >= 0 ? s.fork : k) : -1;
     store.set({
-      turns: [...s.turns, { user: text, seed: s.seed, temperature: s.temperature, normal: emptyReply({}, readN, "live"), changed: forked ? emptyReply(s.chips, readC, "live") : undefined }],
+      turns: [...s.turns, { id: ++sampleSeq, user: text, seed: s.seed, temperature: s.temperature, normal: emptyReply({}, readN, "live"), changed: forked ? emptyReply(s.chips, readN, "live") : undefined }],
       fork, busy: true, word: null, follow: true,
     });
     await Promise.all([writeNormal(k), forked ? writeChangedLive(k) : Promise.resolve()]);
@@ -348,14 +334,80 @@ function endWithError(e: unknown) {
   }));
 }
 
-export function freshStart() {
-  setHash(null);
+/** Clear the sample list while keeping the chosen guide and model changes. */
+export function clearSamples() {
   navigation++;
   engine?.cancel();
   claim("normal");
   claim("changed");
-  store.set((s) => ({ turns: [], fork: -1, word: null, view: "push", step: null, stepTried: false, full: false, busy: false, replay: null, follow: true, sheet: false, error: null, version: s.version + 1 }));
+  store.set((s) => ({ turns: [], removed: [], draft: "", fork: -1, word: null, view: "push", full: false, busy: false, replay: null, follow: true, sheet: false, error: null, version: s.version + 1 }));
   engine?.setVersion(store.get().version);
+}
+
+export function freshStart() {
+  clearSamples();
+  setHash(null);
+  store.set({ step: null, stepTried: false });
+}
+
+/** Editing one sample regenerates only its pair, retaining its identity and sampling settings. */
+export async function editSample(id: number, message: string) {
+  const s = store.get(), text = message.trim(), k = s.turns.findIndex((t) => t.id === id);
+  if (!text || k < 0 || !engine || s.mode !== "live" || s.busy || s.replay || s.model.id !== "qwen") return false;
+  if (text === s.turns[k].user) return true;
+  const visit = ++navigation;
+  store.set({ busy: true, error: null, full: false });
+  try {
+    const read = await engine.firstTurn(text);
+    await ensurePieces(read);
+    if (visit !== navigation) return false;
+    const changed = !isNeutral(s.chips);
+    const sample = { ...s.turns[k], user: text, normal: emptyReply({}, read, "live"),
+      changed: changed ? emptyReply(s.chips, read, "live") : undefined };
+    const version = s.version + 1;
+    engine.setVersion(version);
+    store.set({ turns: s.turns.map((t, i) => i === k ? sample : t), version,
+      word: null, view: "push", sheet: false, follow: true });
+    await Promise.all([writeNormal(k), changed ? writeChangedLive(k) : Promise.resolve()]);
+    if (visit !== navigation) return false;
+    store.set({ announce: "Sample updated. Other samples are unchanged." });
+    return true;
+  } catch (e) {
+    if (visit === navigation) endWithError(e);
+    return false;
+  }
+}
+
+export function removeSample(id: number) {
+  const s = store.get(), index = s.turns.findIndex((t) => t.id === id);
+  if (index < 0 || s.busy || s.replay) return;
+  ++navigation;
+  const word = s.word && s.word.turn !== index ? { ...s.word, turn: s.word.turn > index ? s.word.turn - 1 : s.word.turn } : null;
+  const turns = s.turns.filter((_, i) => i !== index), version = s.version + 1;
+  engine?.setVersion(version);
+  store.set({ turns, removed: [...s.removed, { sample: s.turns[index], index }], version, word,
+    fork: turns.some((t) => t.changed) ? 0 : -1, sheet: word ? s.sheet : false,
+    view: word ? s.view : "push", full: false, error: null, announce: "Sample removed. Undo is available." });
+}
+
+/** Undo preserves cached originals; refresh only this sample if the model changed while it was removed. */
+export async function undoRemoveSample() {
+  const s = store.get(), removed = s.removed.at(-1);
+  if (!removed || s.busy || s.replay || s.mode !== "live" || !engine) return;
+  ++navigation;
+  const index = Math.min(removed.index, s.turns.length), version = s.version + 1;
+  const active = !isNeutral(s.chips), cached = removed.sample.changed;
+  const refresh = active && (!cached || cached.stale || !cached.done || canonical(cached.changes) !== canonical(s.chips));
+  const sample = { ...removed.sample, changed: !active ? undefined : refresh ? emptyReply(s.chips, removed.sample.normal.read, "live") : cached };
+  const turns = [...s.turns]; turns.splice(index, 0, sample);
+  const word = s.word ? { ...s.word, turn: s.word.turn >= index ? s.word.turn + 1 : s.word.turn } : null;
+  engine.setVersion(version);
+  store.set({ turns, removed: s.removed.slice(0, -1), word, version, fork: active ? 0 : -1,
+    busy: refresh, full: false, error: null, announce: "Sample restored." });
+  if (refresh) {
+    try { await writeChangedLive(index, [], undefined, Math.max(s.model.replyCap, sample.normal.toks.length)); }
+    catch (e) { if (store.get().version === version) endWithError(e); }
+  }
 }
 
 export function stopReply() {
@@ -365,7 +417,7 @@ export function stopReply() {
   store.set((s) => ({ busy: false, replay: s.replay ? { ...s.replay, status: "stopped" } : null, turns: s.turns.map((t) => ({ ...t,
     normal: { ...t.normal, done: true }, changed: t.changed && { ...t.changed, done: true, comparing: false,
       compareError: t.changed.comparing ? "The comparison was interrupted. Try again." : t.changed.compareError } })),
-    announce: s.replay ? "Replay stopped. Restart it or restore the original conversation before sending another message." : "Stopped. You can continue the reply or ask another question." }));
+    announce: s.replay ? "Sample update stopped. Retry or restore the originals before testing another question." : "Stopped. You can continue the reply or test another question." }));
 }
 
 /** The tiny model continues the text you type (letters, no chat template). Each message starts fresh. */
@@ -377,7 +429,7 @@ async function sendTiny(message: string) {
   claim("normal");
   claim("changed");
   store.set({
-    turns: [{ user: message, seed: s.seed, temperature: s.temperature, normal: emptyReply({}, read, "live"), changed: forked ? emptyReply(s.chips, read, "live") : undefined }],
+    turns: [{ id: ++sampleSeq, user: message, seed: s.seed, temperature: s.temperature, normal: emptyReply({}, read, "live"), changed: forked ? emptyReply(s.chips, read, "live") : undefined }],
     fork: forked ? 0 : -1, busy: true, word: null,
   });
   await Promise.all([writeNormal(0, [], undefined, TINY_INFO.replyCap), forked ? writeChangedLive(0, [], undefined, TINY_INFO.replyCap) : Promise.resolve()]);
@@ -401,7 +453,7 @@ export async function openTiny(params: Float32Array) {
   claim("changed");
   setDims(TINY_INFO);
   const s = store.get();
-  store.set({ model: TINY_INFO, tiny: false, mode: "live", step: null, chips: {}, version: s.version + 1, turns: [], fork: -1, word: null,
+  store.set({ model: TINY_INFO, tiny: false, mode: "live", step: null, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, word: null,
     focus: { kind: "word" }, view: "push", qwenMode: s.model.id === "qwen" ? s.mode : s.qwenMode, busy: false, replay: null, full: false, error: null, sheet: false });
   engine.setVersion(store.get().version);
   setHash(null);
@@ -414,7 +466,7 @@ export async function backToQwen(n: number | null = null) {
   await engine?.use("qwen");
   setDims(QWEN_INFO);
   const s = store.get();
-  store.set({ model: QWEN_INFO, mode: s.qwenMode ?? s.mode, chips: {}, version: s.version + 1, turns: [], fork: -1, word: null, focus: { kind: "word" }, busy: false, full: false, error: null });
+  store.set({ model: QWEN_INFO, mode: s.qwenMode ?? s.mode, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, word: null, focus: { kind: "word" }, busy: false, full: false, error: null });
   await openStep(n);
 }
 
@@ -430,7 +482,7 @@ async function writeNormal(k: number, prefix: Tok[] = [], force?: number, cap = 
   patchReply(k, "changed", (r) => ({ ...r, compare: undefined, comparing: false, compareError: undefined }));
   patchReply(k, "normal", (r) => ({ ...r, source: "live" }));
   const history = historyBefore(k, "normal");
-  const res = await engine.write({ conv: 0, changes: {}, history, prefix: prefix.map((x) => x.id), force, seed: s.turns[k]?.seed ?? s.seed, turn: k, cap,
+  const res = await engine.write({ conv: 0, changes: {}, history, prefix: prefix.map((x) => x.id), force, seed: s.turns[k]?.seed ?? s.seed, turn: 0, cap,
     temperature: s.turns[k]?.temperature ?? s.temperature, version: -1 }, (tok) => { if (current("normal", job)) pushTok(k, "normal", tok); });
   if (!current("normal", job)) return;
   patchReply(k, "normal", (r) => ({ ...r, done: true, ended: res.ended }));
@@ -448,7 +500,7 @@ async function writeChangedLive(k: number, prefix: Tok[] = [], force?: number, c
   comparisonJobs.delete(k);
   patchReply(k, "changed", (r) => ({ ...r, source: "live", compare: undefined, comparing: false, compareError: undefined }));
   const history = historyBefore(k, "changed");
-  const res = await engine.write({ conv: 1, changes: s.chips, history, prefix: prefix.map((x) => x.id), force, seed: s.turns[k]?.seed ?? s.seed, turn: k,
+  const res = await engine.write({ conv: 1, changes: s.chips, history, prefix: prefix.map((x) => x.id), force, seed: s.turns[k]?.seed ?? s.seed, turn: 0,
     cap, temperature: s.turns[k]?.temperature ?? s.temperature, version }, (tok) => { if (active()) pushTok(k, "changed", tok); });
   if (!active() || res.cancelled) return false;
   patchReply(k, "changed", (r) => ({ ...r, done: true, ended: res.ended }));
@@ -456,11 +508,10 @@ async function writeChangedLive(k: number, prefix: Tok[] = [], force?: number, c
   return active();
 }
 
-/** Continue: up to 64 more pieces for the latest turn, on both sides. */
-export async function continueReply() {
+/** Continue just the selected sample, on both sides. */
+export async function continueReply(k = store.get().turns.length - 1) {
   const s = store.get();
-  const k = s.turns.length - 1;
-  if (k < 0 || s.mode !== "live" || s.busy || s.replay) return;
+  if (!s.turns[k] || s.mode !== "live" || s.busy || s.replay) return;
   const visit = navigation;
   try {
     await continueInner(s, k);
@@ -494,7 +545,7 @@ async function pickInner(w: WordRef, candId: number, visit: number) {
   const s = store.get();
   const t = s.turns[w.turn];
   const r = w.side === "normal" ? t?.normal : t?.changed;
-  if (!r || !r.done || s.busy || s.replay || s.mode !== "live" || w.turn !== s.turns.length - 1) return;
+  if (!r || !r.done || s.busy || s.replay || s.mode !== "live") return;
   const original = r.original ?? r;
   const keep = r.toks.slice(0, w.index);
   if (!engine) return;

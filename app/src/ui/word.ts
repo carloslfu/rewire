@@ -24,7 +24,7 @@ export interface Chosen {
   tok: Tok;
   /** The piece read at this position (the previous word, or the last prompt piece). */
   input: number;
-  /** Position of that read piece in the side's whole conversation. */
+  /** Position of that read piece within this sample. */
   position: number;
   /** For a normal-reply word with a changed reply: the changed model on this same word. */
   forced?: Forced;
@@ -39,13 +39,7 @@ export function chosen(s: Pick<State, "turns" | "word" | "fork">): Chosen | null
   const tok = reply?.toks[w.index];
   if (!reply || !tok) return null;
   const input = w.index > 0 ? reply.toks[w.index - 1].id : reply.read[reply.read.length - 1];
-  let position = 0;
-  for (let i = 0; i < w.turn; i++) {
-    const t = s.turns[i];
-    const r = w.side === "changed" && s.fork >= 0 && i >= s.fork && t.changed ? t.changed : t.normal;
-    position += r.read.length + r.toks.length;
-  }
-  position += reply.read.length + w.index - 1;
+  const position = reply.read.length + w.index - 1;
   const comparison = turn.changed?.compare;
   const sameReply = comparison?.length === turn.normal.toks.length && comparison?.every((x, i) => x.id === turn.normal.toks[i].id);
   const compared = w.side === "normal" && !turn.changed?.stale && sameReply ? comparison?.[w.index] : undefined;

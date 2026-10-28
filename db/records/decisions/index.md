@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/decisions
-updated: 2026-10-28T23:34:05.486770Z
+updated: 2026-10-28T23:55:47.927977Z
 ---
 
 # records/decisions
 
+- [[records/decisions/2026-10-28-independent-samples]] — Use independent editable samples with a shared composer and manual model controls
 - [[records/decisions/2026-10-28-evil-example-question]] — Lead the evil example with the world question at strength 0.2
 - [[records/decisions/2026-10-28-manual-guided-examples]] — Guide visitors to marked parts and let them perform the edit
 - [[records/decisions/2026-10-28-exploratory-persona-controls]] — Expose love and evil as exploratory neuron candidates

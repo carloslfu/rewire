@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/measurements
-updated: 2026-10-28T23:34:05.457248Z
+updated: 2026-10-28T23:55:47.909427Z
 ---
 
 # records/measurements
 
+- [[records/measurements/2026-10-28-independent-samples]] — Independent questions preserve neighboring answers and reproduce all three demonstrations
 - [[records/measurements/2026-10-28-evil-questions]] — World and power questions show clearer changes at strength 0.2
 - [[records/measurements/2026-10-28-guided-examples]] — Recheck France love and manipulation with manual guided examples
 - [[records/measurements/2026-10-28-love-evil-neurons]] — Exploratory love and evil neuron steering candidates

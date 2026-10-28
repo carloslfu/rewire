@@ -1,6 +1,6 @@
 // The lab: freeform inference beside an always-on instrument, plus real training from noise.
 import { lazy, Suspense, useEffect, useState } from "react";
-import { applyChips, backToQwen, freshStart, onPieces, stepData, stopReply } from "../state/actions.ts";
+import { applyChips, backToQwen, clearSamples, freshStart, onPieces, stepData, stopReply } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { Conversation, FinishedReplies } from "./Conversation.tsx";
@@ -46,7 +46,7 @@ export function App() {
 
   return (
     <>
-      <a className="skip" href={teach ? "#teaching" : tiny ? "#training" : "#composer"}>{teach || tiny ? "Skip to training" : "Skip to chat"}</a>
+      <a className="skip" href={teach ? "#teaching" : tiny ? "#training" : "#composer"}>{teach || tiny ? "Skip to training" : "Skip to questions"}</a>
       <header className="top">
         <span className="name">{S.title}</span>
         <span className="orient">A language model laboratory</span>
@@ -68,12 +68,12 @@ export function App() {
       <div className="sr-only" aria-live="polite">{busy ? "" : announce}</div>
       {!tiny && !teach && <FinishedReplies />}
       <div hidden={tiny || teach} className={`lab-layout${scope ? " mobile-scope-open" : ""}`}>
-        <main className="workspace" id="conversation" aria-label="Conversation">
+        <main className="workspace" id="conversation" aria-label="Independent samples">
           <div className="conversation-tools">
             <span>{model.id === "tiny" ? "Your tiny model · text completion" : "Qwen3-0.6B · 28 layers"}</span>
             {turns.length > 0 && <button type="button" className="btn quiet" onClick={() => {
-              freshStart();
-            }}>{model.id === "tiny" ? "New text" : "New chat"}</button>}
+              if (model.id === "tiny") freshStart(); else clearSamples();
+            }}>{model.id === "tiny" ? "New text" : "Clear samples"}</button>}
           </div>
           <button className="btn mobile-scope-toggle" aria-expanded={scope} aria-controls="chat-scope" onClick={() => setScope(!scope)}>{scope ? "Hide model" : "Show model"}</button>
           <ExampleSelector />
@@ -87,7 +87,7 @@ export function App() {
           <Conversation />
           {error && <div className="error-message" role="alert"><p>{error}</p><button type="button" className="btn quiet" onClick={() => store.set({ error: null })}>Dismiss</button></div>}
           {step !== null && !stepData(step)?.guide && <StepCard />}
-          <section className="chat-entry" aria-label={model.id === "tiny" ? "Continue your text" : "Chat with the model"}>
+          <section className="chat-entry" aria-label={model.id === "tiny" ? "Continue your text" : "Test a question"}>
             <Chips />
             <Composer />
           </section>

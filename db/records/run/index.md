@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-10-28T23:34:05.408524Z
+updated: 2026-10-28T23:55:47.890641Z
 ---
 
 # records/run
 
+- [[records/run/2026/10/2026-10-28-independent-samples]] — Independent sample lifecycle, browser observations and release build
 - [[records/run/2026/10/2026-10-28-evil-questions]] — Screen 12 questions and recheck two at evil strength 0.2
 - [[records/run/2026/10/2026-10-28-guided-chrome]] — Manual guided example flow in Chrome desktop and phone viewport
 - [[records/run/2026/10/2026-10-28-guided-examples]] — Recheck love manipulation and the France head flip with production WebGPU

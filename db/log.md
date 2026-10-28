@@ -103,3 +103,9 @@ Preserved all 12 screened questions, selected-question rechecks, comparison inte
 ## [2026-10-28 23:34] decide | records/decisions/2026-10-28-evil-example-question.md
 Use the world question first and the power question second, with current-strength evidence and selection limits.
 
+## [2026-10-28 23:56] capture | records/measurements/2026-10-28-independent-samples.md
+Captured 80 app tests, two engine lifecycle checks, pinned release build and Chrome independent-sample lifecycle evidence at desktop and phone widths; full store validation has zero errors and warnings.
+
+## [2026-10-28 23:56] decide | records/decisions/2026-10-28-independent-samples.md
+Adopt the approved independent sample UX with visible edit, remove and undo, a shared composer and suggested questions.
+

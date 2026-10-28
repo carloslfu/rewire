@@ -28,7 +28,7 @@ export const S = {
   loadingModel: "Starting the model…",
   ready: "The model is running on this device.",
   storageRefused: "This browser would not keep the model, so it will download again next visit.",
-  recovering: "The GPU was reset; the model is reloading. Your conversation is still here.",
+  recovering: "The GPU was reset; the model is reloading. Your samples are still here.",
   recovered: "The model is ready again. You can continue your reply.",
   retry: "Try again",
   loadError: (m: string) => `The model could not start: ${m}.`,
@@ -45,7 +45,7 @@ export const S = {
   placeholderTiny: "Start a sentence for it to continue",
   whatItReads: "What the model actually reads",
   hideReads: "Hide",
-  readsNote: "Everything the model reads, as word pieces (tokens): the start marker, the short system prompt, the markers around each turn and the empty thinking block.",
+  readsNote: "This sample’s input and output as word pieces (tokens), including the short system prompt, question markers and empty thinking block. Earlier samples are excluded.",
   thinkingOff: "Thinking is off: the reply starts after an empty thinking block.",
   youPicked: "You picked this word",
   undo: "Undo",
@@ -56,7 +56,7 @@ export const S = {
   underlineNote: "Underlined: words the changed model finds unlikely.",
   reply: "Reply",
   replyWords: "Arrow keys move between word pieces; Enter shows what went into one.",
-  contextFull: "This conversation has reached the model's context limit here.",
+  contextFull: "This sample has reached the model's context limit here.",
   freshStart: "Start fresh",
 
   // chips
@@ -198,5 +198,5 @@ export const S = {
   },
 
   // accessibility
-  skip: "Skip to the conversation",
+  skip: "Skip to questions",
 };

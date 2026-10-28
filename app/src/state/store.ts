@@ -27,11 +27,13 @@ export interface State {
   /** Bumped whenever the chips change, so stale work can be dropped. */
   version: number;
   turns: Turn[];
-  /** Turn where the current chips forked the conversation (-1: not forked). */
+  /** Removed samples, newest last, available to undo until the experiment is cleared. */
+  removed: { sample: Turn; index: number }[];
+  /** 0 while samples have changed replies, otherwise -1. */
   fork: number;
   /** True while a reply is being written. */
   busy: boolean;
-  /** Ordered replay after changing the model. An interrupted replay must be restarted before sending. */
+  /** Sequential update of independent samples after changing the model. */
   replay: { turn: number; status: "running" | "stopped" | "error" } | null;
   /** The word whose numbers are shown. */
   word: WordRef | null;
@@ -77,6 +79,7 @@ export const initial: State = {
   chips: {},
   version: 0,
   turns: [],
+  removed: [],
   fork: -1,
   busy: false,
   replay: null,

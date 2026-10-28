@@ -10,13 +10,13 @@ export function ReplayStatus({ compact = false }: { compact?: boolean }) {
   const running = replay.status === "running";
   return <div className="replay-status">
     <div className="replay-row">
-      <p role="status">{running ? `Replaying reply ${replay.turn + 1} of ${count}…`
-        : `${replay.status === "error" ? "Replay interrupted" : "Replay stopped"} at reply ${replay.turn + 1} of ${count}.`}</p>
-      {running ? <button className="btn quiet" onClick={stopReply}>Stop replay</button>
-        : <button className="btn" disabled={!ready || full} onClick={() => void restartReplay()}>Replay conversation</button>}
+      <p role="status">{running ? `Updating sample ${replay.turn + 1} of ${count}…`
+        : `${replay.status === "error" ? "Update interrupted" : "Update stopped"} at sample ${replay.turn + 1} of ${count}.`}</p>
+      {running ? <button className="btn quiet" onClick={stopReply}>Stop update</button>
+        : <button className="btn" disabled={!ready || full} onClick={() => void restartReplay()}>Retry sample update</button>}
     </div>
-    {!compact && <p className="note">{running ? "Your questions stay the same. Each new answer feeds into the next; originals stay alongside."
-      : "Finish the replay or restore the originals before sending another message."}</p>}
-    {!running && <button className="linkish" disabled={!ready} onClick={() => void applyChips({})}>Restore original conversation</button>}
+    {!compact && <p className="note">{running ? "Each question is tested separately. Original answers stay alongside for comparison."
+      : "Retry the update or restore the originals before testing another question."}</p>}
+    {!running && <button className="linkish" disabled={!ready} onClick={() => void applyChips({})}>Restore original answers</button>}
   </div>;
 }

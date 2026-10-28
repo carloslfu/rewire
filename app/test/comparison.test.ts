@@ -5,7 +5,7 @@ import { chosen, comparisonTarget, latestWord, originalWord, towerValues } from 
 const token = (id: number, values: number[]): Tok => ({ id, pushes: new Float32Array(values), lp1: -1, concept: 0, cut: 1, cands: [] });
 const reply = (toks: Tok[], compare?: Forced[]): Reply => ({ toks, compare, read: [90], done: true, ended: true, changes: {}, source: "live" });
 const fixture = () => ({
-  turns: [{ user: "Hello", normal: reply([token(10, [2, -3]), token(11, [-4, 5]), token(151645, [0, 0])]),
+  turns: [{ id: 1, user: "Hello", normal: reply([token(10, [2, -3]), token(11, [-4, 5]), token(151645, [0, 0])]),
     changed: reply([token(20, [80, 90]), token(21, [90, 100]), token(22, [100, 110]), token(23, [110, 120])],
       [token(10, [1, 2]), token(11, [0, 8]), token(151645, [0, 0])]) }],
   word: { turn: 0, side: "changed" as const, index: 3 }, fork: 0,
@@ -59,4 +59,15 @@ it("resumes following the latest visible output while preserving the comparison 
   s.turns[1].changed.toks = [];
   expect(latestWord({ ...s, view: "push" })).toEqual({ turn: 1, side: "normal", index: 1 });
   expect(latestWord({ turns: [], view: "push" })).toBeNull();
+});
+
+it("measures token positions within each independent sample", () => {
+  const s = fixture();
+  s.turns.push({ ...fixture().turns[0], id: 2 });
+  const word = { turn: 1, side: "normal" as const, index: 1 };
+  const selected = chosen({ ...s, word });
+  expect(selected?.position).toBe(1);
+  expect(selected?.input).toBe(10);
+  s.turns.shift();
+  expect(chosen({ ...s, word: { ...word, turn: 0 } })?.position).toBe(selected?.position);
 });

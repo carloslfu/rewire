@@ -81,7 +81,7 @@ function WordPanel({ c }: { c: Chosen | null }) {
   );
   const t = c.tok;
   const chosenP = t.cands.find((x) => x.id === t.id)?.p ?? 0;
-  const canPick = c.reply.done && !c.reply.stale && c.ref.turn === store.get().turns.length - 1 && store.get().mode === "live" && !store.get().busy;
+  const canPick = c.reply.done && !c.reply.stale && store.get().mode === "live" && !store.get().busy;
   return (
     <>
       <Head kicker={model.id === "tiny" ? "Letter" : `${S.terms.token[0]} · ${S.terms.token[1]}`} title={`"${wordText(t.id)}"`} def={D.word} code={`id ${t.id}`} />
@@ -288,16 +288,7 @@ function FullMap({ c, floor, head }: { c: Chosen; floor: number; head: number })
 }
 
 function contextTokens(c: Chosen): number[] {
-  const s = store.get();
-  const out: number[] = [];
-  for (let i = 0; i <= c.ref.turn; i++) {
-    const t = s.turns[i];
-    const r = c.ref.side === "changed" && s.fork >= 0 && i >= s.fork && t.changed ? t.changed : t.normal;
-    out.push(...r.read);
-    if (i < c.ref.turn) out.push(...r.toks.map((x) => x.id));
-  }
-  out.push(...c.reply.toks.slice(0, c.ref.index).map((x) => x.id));
-  return out;
+  return [...c.reply.read, ...c.reply.toks.slice(0, c.ref.index).map((x) => x.id)];
 }
 
 // ------------------------------------------------------------------ MLP
@@ -483,14 +474,11 @@ function WordsInPanel({ c, position, side }: { c: Chosen | null; position?: numb
   const { detail } = useDetail(position === undefined ? c : null);
   const [row, setRow] = useState<Float32Array | null>(null);
   const changedHistory = (side ?? c?.ref.side) === "changed";
+  const sample = turns[c?.ref.turn ?? turns.length - 1];
+  const sampleReply = changedHistory ? sample?.changed : sample?.normal;
   const all = useMemo(() => {
-    const out: number[] = [];
-    for (const t of turns) {
-      const r = changedHistory ? t.changed : t.normal;
-      if (r) out.push(...r.read, ...r.toks.map((x) => x.id));
-    }
-    return out;
-  }, [turns, changedHistory]);
+    return sampleReply ? [...sampleReply.read, ...sampleReply.toks.map((x) => x.id)] : [];
+  }, [sampleReply]);
   const pos = position ?? c?.position;
   const id = position !== undefined ? all[position] : c?.input;
   useEffect(() => {
@@ -504,14 +492,7 @@ function WordsInPanel({ c, position, side }: { c: Chosen | null; position?: numb
   const fromDetail = position === undefined ? detail?.get("f0.x") : undefined;
   const values = row ?? fromDetail ?? null;
   const hidden = (chips.hidden ?? []).find((h) => h.key === pos);
-  const lastReplyStart = (() => {
-    let n = 0;
-    for (let i = 0; i < turns.length; i++) {
-      const r = changedHistory ? turns[i].changed : turns[i].normal;
-      if (r) { n += r.read.length; if (i < turns.length - 1) n += r.toks.length; }
-    }
-    return n;
-  })();
+  const lastReplyStart = sampleReply?.read.length ?? 0;
   return (
     <>
       <Head kicker={`${S.terms.embedding[0]} · ${S.terms.embedding[1]}`} title={id !== undefined ? `"${wordText(id)}"` : S.wordsIn}
