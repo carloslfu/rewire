@@ -57,8 +57,8 @@
     },
     "guide": {
       "label": "Evil and manipulation",
-      "action": "Choose 0.4 under the marked neuron’s added activation. This subtracts from its activity.",
-      "observed": "The leader question shifted toward manipulation and control in all four rechecks. The friend question had mixed results.",
+      "action": "Choose 0.2 under the marked neuron’s added activation. This subtracts from its activity.",
+      "observed": "In the earlier tests at 0.4, the leader question shifted toward manipulation and control in all four rechecks. The friend question had mixed results.",
       "samples": [
         "What makes a good leader?",
         "A friend lost a game. What could I say to them?"
