@@ -15,6 +15,7 @@ import type { WriteJob } from "./engine.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
 import { ModelFiles } from "./files.ts";
 import { LessonRuntime } from "../teach/runtime.ts";
+import type { TokenPiece } from "@rewire/engine/src/token-text.ts";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -81,7 +82,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       case "first": return done(m.id, need(tok).firstTurn(m.message));
       case "next": return done(m.id, need(tok).nextTurn(m.reply, m.message).slice(m.reply.length));
       case "plain": return done(m.id, need(tok).plain(m.text));
-      case "pieces": return done(m.id, m.ids.map((i) => need(tok).piece(i)));
+      case "pieces": return done(m.id, m.ids.map((i) => need(tok).pieceData(i)));
       case "tiny": return done(m.id, await loadTiny(m.params, m.config));
       case "bench": return done(m.id, await bench());
       case "map": {
@@ -422,7 +423,7 @@ async function write(job: WriteJob, id: number, epoch = writeEpoch): Promise<{ e
     };
     if (received === 1 && job.force !== undefined) t.picked = true;
     toks.push(t.id);
-    const pieces = which === "qwen" && tok ? [t.id, ...t.cands.map((x) => x.id)].map((i): [number, string] => [i, tok!.piece(i)]) : undefined;
+    const pieces = which === "qwen" && tok ? [t.id, ...t.cands.map((x) => x.id)].map((i): [number, TokenPiece] => [i, tok!.pieceData(i)]) : undefined;
     post({ t: "tok", id, tok: t, pieces }, [t.pushes.buffer as ArrayBuffer]);
     if (which === "qwen" && STOP.has(t.id)) ended = true;
   };

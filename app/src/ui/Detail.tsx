@@ -1,7 +1,7 @@
 // The detail panel (section 5.2): always what the tapped part is, its real numbers, and its control.
 import { useEffect, useMemo, useState } from "react";
 import type { FloorDetail } from "../model/types.ts";
-import { attentionMap, chipsWith, floorDetail, liveEngine, pathData, pick, piece, setFocus, stepAction, stepData } from "../state/actions.ts";
+import { attentionMap, chipsWith, floorDetail, liveEngine, pathData, pick, piece, setFocus, stepAction, stepData, tokenPiece } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { fmt, pct, signed } from "./color.ts";
@@ -85,6 +85,7 @@ function WordPanel({ c }: { c: Chosen | null }) {
   return (
     <>
       <Head kicker={model.id === "tiny" ? "Letter" : `${S.terms.token[0]} · ${S.terms.token[1]}`} title={`"${wordText(t.id)}"`} def={D.word} code={`id ${t.id}`} />
+      {tokenPiece(t.id).fragment && <p className="note">This token contains bytes of a character. The reply combines them with neighboring tokens; each part keeps its own probability and controls.</p>}
       <section>
         <div className="kicker">{S.numbers}</div>
         <dl className="kv">

@@ -11,16 +11,23 @@ import { QWEN_INFO, TINY_INFO } from "../model/info.ts";
 import { type DeviceState, store } from "./store.ts";
 import release from "../live/release.json";
 import { canonical } from "../model/change-key.ts";
+import { textSegments, type TokenPiece } from "@rewire/engine/src/token-text.ts";
 
 export const REPLY_CAP = 64;
 
 // ---------------------------------------------------------------- pieces
 
-const pieceText = new Map<number, string>();
+const pieceText = new Map<number, TokenPiece>();
 const pieceListeners = new Set<() => void>();
 export function piece(id: number): string {
-  if (store.get().model.id === "tiny") return letter(id);
-  return pieceText.get(id) ?? "…";
+  return tokenPiece(id).text;
+}
+export function tokenPiece(id: number): TokenPiece {
+  return store.get().model.id === "tiny" ? { text: letter(id) } : pieceText.get(id) ?? { text: "…" };
+}
+/** Contextual display text, retaining exact token ranges for inspection. */
+export function sequence(ids: number[], final = true) {
+  return textSegments(ids.map(tokenPiece), final);
 }
 export function onPieces(f: () => void) {
   pieceListeners.add(f);
@@ -28,7 +35,7 @@ export function onPieces(f: () => void) {
     pieceListeners.delete(f);
   };
 }
-function addPieces(entries: Iterable<[number, string]>) {
+function addPieces(entries: Iterable<[number, TokenPiece]>) {
   for (const [k, v] of entries) pieceText.set(k, v);
   for (const f of pieceListeners) f();
 }
@@ -36,7 +43,7 @@ async function ensurePieces(ids: number[]) {
   const missing = [...new Set(ids)].filter((i) => !pieceText.has(i));
   if (!missing.length || !engine) return;
   const txt = await engine.pieces(missing);
-  addPieces(missing.map((id, i) => [id, txt[i]] as [number, string]));
+  addPieces(missing.map((id, i) => [id, txt[i]] as [number, TokenPiece]));
 }
 
 // ---------------------------------------------------------------- experiments

@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-10-28T23:55:47.890641Z
+updated: 2026-11-04T19:10:47.995460Z
 ---
 
 # records/run
 
+- [[records/run/2026/11/2026-11-04-unicode-decoding]] — Unicode token rendering release checks and Chrome observations
 - [[records/run/2026/10/2026-10-28-independent-samples]] — Independent sample lifecycle, browser observations and release build
 - [[records/run/2026/10/2026-10-28-evil-questions]] — Screen 12 questions and recheck two at evil strength 0.2
 - [[records/run/2026/10/2026-10-28-guided-chrome]] — Manual guided example flow in Chrome desktop and phone viewport

@@ -23,7 +23,7 @@ beforeEach(async () => {
   mock.load.mockResolvedValue({ stored: true, contextCap: 1024 });
   mock.firstTurn.mockResolvedValue([11, 12]);
   mock.nextTurn.mockResolvedValue([21, 22]);
-  mock.pieces.mockImplementation(async (ids: number[]) => ids.map((i) => `word${i}`));
+  mock.pieces.mockImplementation(async (ids: number[]) => ids.map((i) => ({ text: `word${i}` })));
   mock.write.mockImplementation(async (_job: unknown, onToken: (t: Tok) => void) => { onToken(token); return { ended: true, cancelled: false }; });
   mock.compare.mockResolvedValue([]); mock.use.mockResolvedValue(true); mock.loadTiny.mockResolvedValue(true);
   vi.stubGlobal("matchMedia", () => ({ matches: true }));
@@ -548,13 +548,13 @@ it("replays the trained model with its 160-letter budget and no chat template", 
 
 it("locks an existing conversation before resolving dictionary swap names", async () => {
   await actions.send("Existing question");
-  const names = deferred<string[]>(); mock.pieces.mockReturnValueOnce(names.promise);
+  const names = deferred<{ text: string }[]>(); mock.pieces.mockReturnValueOnce(names.promise);
   const pending = actions.applyChips({ swaps: [[900, 901]] });
   expect(store.get().busy).toBe(true);
   await actions.send("Must wait");
   expect(store.get().turns).toHaveLength(1);
   actions.freshStart();
-  names.resolve(["a", "b"]); await pending;
+  names.resolve([{ text: "a" }, { text: "b" }]); await pending;
   expect(store.get().turns).toHaveLength(0);
   expect(mock.write).toHaveBeenCalledTimes(1);
 });
@@ -688,4 +688,49 @@ it("continues, forces tokens, and inspects an older sample using only that sampl
   await actions.pick({ turn: 0, side: "normal", index: 0 }, 99);
   expect(mock.write.mock.calls.at(-1)?.[0]).toMatchObject({ history: [51, 52], turn: 0, force: 99 });
   expect(store.get().turns[1]).toBe(newer);
+});
+
+it("renders the reported emoji and screen-reader text from bytes while preserving each inspected token", async () => {
+  const { ChatTokenizer } = await import("@rewire/engine/src/tokenizer.ts");
+  const { default: fixture } = await import("./unicode-fixture.json");
+  const tok = new ChatTokenizer({ normalizer: null, pre_tokenizer: null, post_processor: null,
+    model: { type: "BPE", vocab: fixture.vocab, merges: [] }, decoder: { type: "ByteLevel" }, added_tokens: fixture.added_tokens },
+    { clean_up_tokenization_spaces: false }, { im_start: 151644, im_end: 151645, think: 151667, end_think: 151668, endoftext: 151643 }, "");
+  const { replyText, replySegments } = await import("../src/ui/reply-text.ts");
+  const sample = fixture.cases[0], streamed: string[] = [];
+  actions.liveEngine()!.onPieces!(sample.ids.map((id) => [id, tok.pieceData(id)]));
+  mock.write.mockImplementationOnce(async (_job, emit) => {
+    for (const id of sample.ids) {
+      emit({ ...token, id });
+      streamed.push(replyText(store.get().turns[0].normal));
+    }
+    return { ended: true, cancelled: false };
+  });
+  await actions.send("hey buddy");
+  const reply = store.get().turns[0].normal;
+  expect(replyText(reply)).toBe(sample.text);
+  expect(streamed.every((s) => !s.includes("�"))).toBe(true);
+  expect(replySegments(reply).at(-1)).toEqual({ text: " 😊", from: 7, to: 9 });
+  expect(reply.toks.map((t) => t.id)).toEqual(sample.ids);
+  expect(actions.piece(232)).toBe("UTF-8 bytes 8A");
+  const paused = { ...reply, done: true, ended: false, toks: reply.toks.slice(0, -1) };
+  expect(replyText(paused)).toBe("Hey buddy! What's up? ");
+  expect(replyText({ ...paused, toks: reply.toks })).toBe(sample.text);
+  // An actual model end with malformed bytes still reports them honestly.
+  expect(replyText({ ...paused, ended: true })).toBe("Hey buddy! What's up? �");
+  const stateModule = await import("../src/state/store.ts");
+  const hook = vi.spyOn(stateModule, "useStore").mockImplementation((sel) => sel(store.get()));
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { Conversation, FinishedReplies } = await import("../src/ui/Conversation.tsx");
+  store.set({ word: { turn: 0, side: "normal", index: 8 }, sheet: true });
+  const html = renderToStaticMarkup(createElement(Conversation));
+  expect(html).toContain("😊");
+  expect(html).not.toContain("�");
+  expect(html).toContain('data-i="7" tabindex="0" aria-pressed="true"');
+  expect(html).toContain("Spans tokens 8 to 9");
+  expect(renderToStaticMarkup(createElement(FinishedReplies))).toContain("😊");
+  store.set((s) => ({ turns: [{ ...s.turns[0], changed: { ...reply, stale: true } }] }));
+  expect(renderToStaticMarkup(createElement(Conversation))).not.toContain("�");
+  hook.mockRestore();
 });

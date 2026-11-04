@@ -1,14 +1,14 @@
 // Independent samples, each with an editable question and its original/changed pair.
 import { Fragment, useEffect, useRef, useState } from "react";
-import type { Reply, Side, Tok, Turn } from "../model/types.ts";
+import type { Reply, Side, Turn } from "../model/types.ts";
 import { continueReply, editSample, piece, removeSample, selectWord, undoPick, undoRemoveSample } from "../state/actions.ts";
 import { useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { pct } from "./color.ts";
 import { describe } from "./describe.ts";
 import { ReplayStatus } from "./ReplayStatus.tsx";
+import { replySegments, replyText, STOP, wordGroups } from "./reply-text.ts";
 
-const STOP = new Set([151645, 151643]);
 const MARKERS: Record<number, string> = { 151644: "<|im_start|>", 151645: "<|im_end|>", 151643: "<|endoftext|>", 151667: "<think>", 151668: "</think>" };
 
 export function Conversation() {
@@ -101,11 +101,13 @@ function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; si
   // One Tab stop per reply; arrow keys move between its words (roving tabindex, like the tower).
   const textRef = useRef<HTMLDivElement>(null);
   const [cursor, setCursor] = useState(-1);
-  const shown = toks.map((t, i) => (STOP.has(t.id) ? -1 : i)).filter((i) => i >= 0);
+  const segments = replySegments(reply);
+  const shown = segments.map((s) => s.from);
   const selHere = word && word.turn === k && word.side === side ? word.index : -1;
-  const roving = shown.includes(selHere) ? selHere : shown.includes(cursor) ? cursor : shown[0];
+  const selected = segments.find((s) => s.from <= selHere && selHere < s.to)?.from;
+  const roving = selected ?? (shown.includes(cursor) ? cursor : shown[0]);
   // screen readers get the reply as one sentence on the group; the pieces stay buttons for inspecting
-  const plain = shown.map((i) => piece(toks[i].id)).join("").trim();
+  const plain = segments.map((s) => s.text).join("").trim();
   const onKey = (e: React.KeyboardEvent) => {
     const btns = [...(textRef.current?.querySelectorAll<HTMLButtonElement>("button.tok") ?? [])];
     const at = btns.indexOf(document.activeElement as HTMLButtonElement);
@@ -126,20 +128,19 @@ function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; si
       <div className="text" ref={textRef} onKeyDown={inspectable ? onKey : undefined}
         role={inspectable ? "group" : undefined} aria-label={inspectable ? `${label ?? S.reply}: ${plain}` : undefined}
         aria-description={inspectable ? S.replyWords : undefined}>
-        {wordGroups(toks).map((group) => <span className="token-word" key={group[0].i}>{group.map(({ t, i }) => {
-          if (STOP.has(t.id)) return null;
-          const sel = word && word.turn === k && word.side === side && word.index === i;
+        {wordGroups(segments).map((group) => <span className="token-word" key={group[0].from}>{group.map(({ text: txt, from: i, to }) => {
+          const members = toks.slice(i, to);
+          const sel = word && word.turn === k && word.side === side && i <= word.index && word.index < to;
+          const under = members.some((t, j) => compare?.[i + j] && Math.exp(compare[i + j].lp1) < 0.1 && Math.exp(compare[i + j].lp1) < 0.5 * Math.exp(t.lp1));
           const pc = compare?.[i] ? Math.exp(compare[i].lp1) : null;
-          const pn = Math.exp(t.lp1);
-          const under = pc !== null && pc < 0.1 && pc < 0.5 * pn;
-          const txt = piece(t.id);
+          const spanNote = to - i > 1 ? `Spans tokens ${i + 1} to ${to}. Select individual parts in Word piece.` : undefined;
           const spoken = txt.trim() || (txt.includes("\n") ? "Line break" : "Space");
           if (!inspectable) return <Fragment key={i}>{txt}</Fragment>;
           return (
-            <button key={i} type="button" className={`tok${sel ? " sel" : ""}${under ? " under" : ""}${t.picked ? " picked" : ""}`}
+            <button key={i} type="button" className={`tok${sel ? " sel" : ""}${under ? " under" : ""}${members.some((t) => t.picked) ? " picked" : ""}`}
               data-i={i} tabIndex={i === roving ? 0 : -1} aria-pressed={!!sel && inspecting}
-              aria-label={under ? `${spoken}: the changed model gives it ${pct(pc!)}` : !txt.trim() ? spoken : undefined}
-              title={under ? `Normal ${pct(pn)}, changed ${pct(pc!)}` : undefined}
+              aria-label={spanNote ? `${spoken}. ${spanNote}` : under ? `${spoken}: the changed model gives it ${pct(pc!)}` : !txt.trim() ? spoken : undefined}
+              title={spanNote ?? (under ? `Normal ${pct(Math.exp(toks[i].lp1))}, changed ${pct(pc!)}` : undefined)}
               onClick={() => selectWord({ turn: k, side, index: i })}>
               {txt}
             </button>
@@ -168,18 +169,6 @@ function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; si
   );
 }
 
-/** Keep adjacent pieces of one word together when a narrow reply wraps. */
-function wordGroups(toks: Tok[]) {
-  const groups: { t: Tok; i: number }[][] = [];
-  toks.forEach((t, i) => {
-    if (STOP.has(t.id)) return;
-    const txt = piece(t.id), previous = groups.at(-1)?.at(-1);
-    if (!previous || /^\s/.test(txt) || /\s$/.test(piece(previous.t.id))) groups.push([]);
-    groups[groups.length - 1].push({ t, i });
-  });
-  return groups;
-}
-
 /** Screen readers hear finished replies, not each streamed word (section 5.5). */
 export function FinishedReplies() {
   const turns = useStore((s) => s.turns);
@@ -188,7 +177,7 @@ export function FinishedReplies() {
   let text = "";
   const t = turns[turns.length - 1];
   if (!busy && !replay && t) {
-    const words = (r: Reply) => r.toks.filter((x) => !STOP.has(x.id)).map((x) => piece(x.id)).join("").trim();
+    const words = (r: Reply) => replyText(r).trim();
     const parts: string[] = [];
     if (t.normal.done) parts.push(t.changed ? `${S.normal}: ${words(t.normal)}` : words(t.normal));
     if (t.changed?.done && !t.changed.stale) parts.push(`${S.changedBy(describe(t.changed.changes, t.normal.read))}. ${words(t.changed)}`);
@@ -211,6 +200,8 @@ function whatMoved(turn: Turn): string | null {
   }
   if (best < 0 || gap < 0.02) return S.sameNumbers;
   const pa = Math.round(Math.exp(turn.normal.toks[best].lp1) * 100), pb = Math.round(Math.exp(c.compare[best].lp1) * 100);
+  const segment = replySegments(turn.normal).find((s) => s.from <= best && best < s.to);
+  if (segment && segment.to - segment.from > 1) return `Same text. Token ${best + 1} (${piece(a[best])}) changed from ${pa}% to ${pb}%.`;
   return S.sameWords(piece(a[best]).trim(), pa, pb);
 }
 

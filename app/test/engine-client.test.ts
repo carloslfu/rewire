@@ -21,6 +21,22 @@ const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve()
 beforeEach(() => { MockWorker.workers = []; vi.stubGlobal("Worker", MockWorker); });
 afterEach(() => vi.unstubAllGlobals());
 
+it("delivers lossless piece metadata before the corresponding streamed token", async () => {
+  const client = new EngineClient(), w = MockWorker.workers[0];
+  const piece = { text: "UTF-8 bytes 8A", bytes: [138], fragment: true as const };
+  const pieces = client.pieces([232]);
+  w.finish("pieces", [piece]);
+  await expect(pieces).resolves.toEqual([piece]);
+  let received = false;
+  client.onPieces = (data) => { expect(data).toEqual([[232, piece]]); received = true; };
+  const writing = client.write({ conv: 0 } as WriteJob, (t) => { expect(received).toBe(true); expect(t.id).toBe(232); });
+  await flush();
+  const id = w.messages.find((m) => m.t === "write")!.id;
+  w.emit({ t: "tok", id, pieces: [[232, piece]], tok: { id: 232 } as import("../src/model/types.ts").Tok });
+  w.finish("write", { ended: true, cancelled: false });
+  await writing;
+});
+
 it("streams real lesson progress without completing the training promise and stops independently of chat",async()=>{
   const client=new EngineClient(),w=MockWorker.workers[0],progress=vi.fn(),finished=vi.fn();
   const task=client.trainLesson([{prompt:"Q",answer:"A"}],200,0.003,progress).then(finished);

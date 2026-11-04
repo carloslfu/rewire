@@ -6,6 +6,7 @@ import type { LessonWeights } from "@rewire/engine/src/lora.ts";
 import type { LessonResult, LessonUpdate, ProbeResult } from "../teach/types.ts";
 import type { Example } from "../teach/lessons.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
+import type { TokenPiece } from "@rewire/engine/src/token-text.ts";
 
 export type ConvId = 0 | 1 | 2;
 
@@ -48,8 +49,8 @@ export class EngineClient {
   private recovery: Promise<void> | null = null;
   private failed = false;
   onProgress?: (loaded: number, total: number) => void;
-  /** Texts of word pieces that arrive with written words. */
-  onPieces?: (pieces: [number, string][]) => void;
+  /** Lossless token bytes and standalone labels that arrive with written words. */
+  onPieces?: (pieces: [number, TokenPiece][]) => void;
   onLost?: () => void;
   onRecovered?: () => void;
   onFailure?: (message: string) => void;
@@ -166,7 +167,7 @@ export class EngineClient {
   plain(text: string): Promise<number[]> {
     return this.call({ t: "plain", text });
   }
-  pieces(ids: number[]): Promise<string[]> {
+  pieces(ids: number[]): Promise<TokenPiece[]> {
     return this.call({ t: "pieces", ids });
   }
   async trainLesson(examples:Example[],steps:number,lr:number,onProgress:(p:LessonUpdate)=>void,continueLesson=false):Promise<LessonResult> {

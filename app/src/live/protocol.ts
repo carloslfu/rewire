@@ -5,6 +5,7 @@ import type { ConvId, WriteJob } from "./engine.ts";
 import type { LessonWeights } from "@rewire/engine/src/lora.ts";
 import type { LessonUpdate } from "../teach/types.ts";
 import type { Example } from "../teach/lessons.ts";
+import type { TokenPiece } from "@rewire/engine/src/token-text.ts";
 
 export type ToWorker = { id: number } & (
   | { t: "check" }
@@ -34,7 +35,7 @@ export type FromWorker =
   | { t: "lesson-progress"; id: number; update: LessonUpdate }
   | { t: "progress"; loaded: number; total: number }
   | { t: "lost" }
-  | { t: "tok"; id: number; tok: Tok; pieces?: [number, string][] }
+  | { t: "tok"; id: number; tok: Tok; pieces?: [number, TokenPiece][] }
   | { t: "done"; id: number; result: unknown }
   | { t: "error"; id: number; message: string };
 
