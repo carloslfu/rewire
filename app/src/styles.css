@@ -815,7 +815,7 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .stage-transport { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; }
 .stage-transport > .note { margin-top: 4px; font-size: 11px; }
 .stage-transport > .seg { margin-top: 8px; }
-.stage-transport .training-actions, .stage-question .training-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.stage-transport .training-actions, .stage-question .training-actions, .training-bar .training-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .stage-transport .training-actions .num, .stage-question .training-actions .num { margin-left: auto; color: var(--muted); }
 .stage-transport .training-status { min-height: 0; margin-top: 6px; }
 .stage-transport .lesson-loss svg { height: 64px; margin-top: 8px; }
@@ -849,8 +849,8 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .replay-how { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; margin: 0; font-size: 11px; line-height: 1.45; }
 .replay-how .linkish { font-size: 12px; min-height: 22px; }
 /* Docked, the strip takes its height from the scrolling controls below it, not from the stage. */
-.lab-scope .stage-bench:has(.stage-bar) .stage-lower { max-height: 34%; }
-.lab-scope .stage-bench:has(.replay-bar.replaying) .stage-lower { max-height: 24%; }
+.lab-scope .stage-bench:not(.immersive):has(.stage-bar) .stage-lower { max-height: 34%; }
+.lab-scope .stage-bench:not(.immersive):has(.replay-bar.replaying) .stage-lower { max-height: 24%; }
 .replay-progress { display: block; appearance: none; width: 100%; height: 3px; border: 0; border-radius: 2px; background: var(--line); overflow: hidden; }
 .replay-progress::-webkit-progress-bar { background: var(--line); }
 .replay-progress::-webkit-progress-value { background: var(--pos); }
@@ -896,7 +896,6 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .stage-real summary { color: var(--muted); }
 .stage-real p { margin-top: 8px; }
 .stage-question { display: grid; gap: 12px; align-content: start; }
-.stage-question h3 { font-size: 15px; }
 .stage-question .reply .text { font-size: 16px; line-height: 1.55; letter-spacing: 0; }
 .stage-question .chips { margin: 0; }
 .stage-question .devicebar { margin-top: 0; }
@@ -907,29 +906,6 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .stage-sample select { flex: 1; }
 .stage-examples { display: grid; gap: 8px; margin: 0; padding-left: 20px; font-size: 13px; }
 .stage-examples li > span { display: block; overflow-wrap: anywhere; }
-
-/* Full view: the same stage with the whole window, question on the left, the selected part on the right. */
-html:has(.stage-bench.expanded) { overflow: hidden; }
-/* The scope panel is sticky, so it is its own stacking context: lift the panel itself above the page header. */
-.lab-scope.stage-raised, .lab-scope:has(.stage-bench.expanded) { z-index: 40; }
-.stage-bench.expanded { position: fixed; inset: 0; z-index: 40; height: auto; background: var(--bg); }
-.stage-bench.expanded .stage-head { padding: 14px 28px 4px; }
-.stage-bench.expanded .stage-status { padding: 0 28px 10px; font-size: 12px; }
-.stage-bench.expanded .stage-main { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr) minmax(280px, 380px); grid-template-rows: minmax(0, 1fr) auto auto; border-top: 1px solid var(--line); }
-.stage-bench.expanded .stage-rail { grid-column: 1; grid-row: 1 / -1; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; border-right: 1px solid var(--line); background: var(--panel); }
-.stage-bench.expanded .stage-view { grid-column: 2; grid-row: 1; border-block: 0; }
-.stage-bench.expanded .stage-bottom { left: 16px; right: 16px; bottom: 14px; }
-.stage-bench.expanded .stage-lower { display: contents; }
-.stage-bench.expanded .stage-bar { grid-column: 2; grid-row: 2; border-top: 1px solid var(--line); border-bottom: 0; }
-.stage-bench.expanded .replay-bar { padding: 10px 24px 11px; }
-.stage-bench.expanded .stage-controls { grid-column: 2; grid-row: 3; padding: 10px 24px 14px; border-top: 1px solid var(--line); background: var(--panel); }
-.stage-bench.expanded .stage-side { grid-column: 3; grid-row: 1 / -1; overflow-y: auto; overscroll-behavior: contain; padding: 8px 24px 24px; border-left: 1px solid var(--line); background: var(--panel); }
-.stage-bench.expanded:not(:has(.stage-rail)) .stage-main { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); }
-.stage-bench.expanded:not(:has(.stage-rail)) .stage-view, .stage-bench.expanded:not(:has(.stage-rail)) .stage-bar, .stage-bench.expanded:not(:has(.stage-rail)) .stage-controls { grid-column: 1; }
-.stage-bench.expanded:not(:has(.stage-rail)) .stage-side { grid-column: 2; }
-@media (max-width: 1180px) {
-  .stage-bench.expanded .stage-main { grid-template-columns: minmax(230px, 280px) minmax(0, 1fr) minmax(250px, 310px); }
-}
 
 /* Phone: the model sheet scrolls as one page, with the stage at a fixed comfortable height. */
 @media (max-width: 900px), (max-width: 1100px) and (max-height: 500px) {
@@ -975,3 +951,170 @@ html:has(.stage-bench.expanded) { overflow: hidden; }
 }
 #chat-scope > .stage-state, #lesson-scope > .stage-state, #training-scope > .stage-state { position: static; min-height: 240px; }
 .mobile-model .stage-side .scope-part { max-height: none; overflow: visible; padding: 12px 0 4px; }
+
+/* Full screen: the stage is the whole screen, edge to edge, and everything else floats over it. The
+   question and the selected part are panels that stay closed until they are asked for. The same rules
+   serve the browser's own full screen and the viewport one, on a desktop and inside the phone's sheet. */
+html:has(.stage-bench.immersive) { overflow: hidden; }
+/* The scope panel is sticky, so it is its own stacking context: lift the panel itself above the page header. */
+.lab-scope.stage-raised, .lab-scope:has(.stage-bench.immersive) { z-index: 40; }
+/* --head and --foot are the measured heights of the title row and of the bar along the bottom. */
+.stage-bench.immersive { --head: 40px; --foot: 0px; --side-w: 360px;
+  --pad-t: max(10px, env(safe-area-inset-top)); --pad-b: max(10px, env(safe-area-inset-bottom));
+  --pad-l: max(12px, env(safe-area-inset-left)); --pad-r: max(12px, env(safe-area-inset-right));
+  position: fixed; inset: 0; z-index: 40; width: auto; height: auto; overflow: hidden; background: #0d0e10; }
+.stage-bench.immersive .stage-main { display: block; }
+.stage-bench.immersive .stage-view { position: absolute; inset: 0; height: auto; min-height: 0; border: 0; }
+.stage-screen svg { flex: none; }
+.stage-bench.immersive .stage-head { position: absolute; z-index: 3; top: var(--pad-t); left: var(--pad-l); right: var(--pad-r); padding: 0; pointer-events: none; }
+.stage-bench.immersive .stage-head > * { pointer-events: auto; }
+.stage-bench.immersive .stage-title, .stage-bench.immersive .stage-head-actions, .stage-bench.immersive .stage-bar { background: color-mix(in oklab, var(--panel) 95%, transparent); border: 1px solid var(--line); box-shadow: 0 2px 10px rgb(0 0 0 / .3); }
+.stage-bench.immersive .stage-title, .stage-bench.immersive .stage-head-actions { min-height: 40px; border-radius: 9px; }
+.stage-bench.immersive .stage-title { display: flex; align-items: center; padding: 4px 12px; }
+.stage-bench.immersive .stage-title .eyebrow { display: none; }
+.stage-bench.immersive .stage-title h2 { min-width: 0; font-size: 14px; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage-bench.immersive .stage-head-actions { gap: 2px; padding: 2px; }
+.stage-bench.immersive .stage-head-actions .btn { min-height: 34px; padding: 4px 10px; }
+.stage-bench.immersive .stage-head-actions .btn.quiet { color: var(--fg); }
+.stage-bench.immersive .stage-head-actions .btn[aria-expanded="true"] { background: var(--fg); color: var(--bg); }
+.stage-bench.immersive .stage-top { top: calc(var(--pad-t) + var(--head) + 8px); left: var(--pad-l); right: var(--pad-r); }
+.stage-bench.immersive .stage-toolbar { justify-content: flex-start; }
+.stage-caption { max-width: min(100%, 400px); padding: 3px 8px; font-size: 11px; line-height: 1.4; color: var(--stage-muted); background: rgb(14 15 18 / .62); border-radius: 6px; }
+.stage-bench.immersive .stage-bottom { left: var(--pad-l); right: var(--pad-r); bottom: calc(var(--pad-b) + var(--foot) + 8px); }
+.stage-bench.immersive .stage-pop { max-height: max(140px, calc(100cqh - var(--head) - var(--foot) - 150px)); }
+.stage-bench.immersive .stage-bar { position: absolute; z-index: 3; left: var(--pad-l); right: var(--pad-r); bottom: var(--pad-b); max-width: 1080px; margin-inline: auto; overflow: hidden; border-radius: 12px; }
+/* The two panels: the question or lesson on the left, the selected part and its experiments on the right. */
+.stage-bench.immersive .stage-rail, .stage-bench.immersive .stage-lower { position: absolute; z-index: 4; top: calc(var(--pad-t) + var(--head) + 8px); bottom: calc(var(--pad-b) + var(--foot) + 8px);
+  width: min(var(--side-w), calc(100% - var(--pad-l) - var(--pad-r))); max-height: none; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0 16px 16px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px rgb(0 0 0 / .4); }
+.stage-bench.immersive .stage-rail { left: var(--pad-l); }
+.stage-bench.immersive .stage-lower { right: var(--pad-r); }
+.stage-bench.immersive:not(.rail-open) .stage-rail, .stage-bench.immersive:not(.side-open) .stage-lower { display: none; }
+.stage-panel-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 -16px 12px; padding: 6px 8px 6px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.stage-panel-head h3 { font-size: 14px; }
+.stage-panel-head .btn { flex: none; min-height: 32px; font-size: 12px; }
+.stage-bench.immersive .stage-controls { padding: 0 0 4px; }
+.stage-bench.immersive .stage-side { padding: 0; }
+/* Beside an open panel the floating controls move over, so nothing they hold is under it. */
+.stage-bench.immersive.rail-open:not(.narrow) .stage-top, .stage-bench.immersive.rail-open:not(.narrow) .stage-bottom { left: calc(var(--pad-l) + var(--side-w) + 12px); }
+.stage-bench.immersive.side-open:not(.narrow) .stage-top, .stage-bench.immersive.side-open:not(.narrow) .stage-bottom { right: calc(var(--pad-r) + var(--side-w) + 12px); }
+/* The bar along the bottom: Live output and Replay in Dismantle, the training controls in Teach and Grow. */
+.stage-bench.immersive .replay-bar { gap: 6px 14px; padding: 8px 12px; }
+.stage-bench.immersive .replay-bar:not(.replaying), .stage-bench.immersive .replay-bar.replaying { display: flex; flex-wrap: wrap; align-items: center; }
+.stage-bench.immersive .replay-bar:not(.replaying) .replay-head { flex: 1 1 420px; min-width: 0; }
+.stage-bench.immersive .replay-follow .follow-hint { display: none; }
+.stage-bench.immersive .replay-how, .stage-bench.immersive .replay-bar.replaying > .replay-head, .stage-bench.immersive .replay-progress { flex: 1 1 100%; }
+.stage-bench.immersive .replay-transport { flex: 1 1 520px; flex-wrap: nowrap; min-width: 0; }
+.stage-bench.immersive .replay-scrub { flex-wrap: nowrap; }
+.stage-bench.immersive .replay-scrub-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* What the step is reads last, under the controls, where its changing length moves nothing. */
+.stage-bench.immersive .replay-readout { order: 1; flex: 1 1 100%; }
+.training-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 8px 12px; font-size: 12px; }
+.training-bar .training-actions { margin: 0; }
+.training-bar .training-actions .num { color: var(--muted); }
+.training-bar .btn { min-height: 34px; padding: 5px 12px; font-size: 13px; }
+.training-bar .note { flex: 1 1 260px; min-height: 0; margin: 0; font-size: 12px; }
+.training-bar .error-message { flex: 1 1 100%; margin: 0; padding: 6px 10px; font-size: 12px; }
+/* A short screen (a phone on its side) has no height to spare: an open panel covers the bar, and the step is one line. */
+@media (max-height: 500px) {
+  .stage-bench.immersive .stage-rail, .stage-bench.immersive .stage-lower { bottom: var(--pad-b); }
+  .stage-bench.immersive .replay-readout { min-height: 1.45em; }
+}
+@media (pointer: coarse) {
+  .stage-bench.immersive .stage-head-actions .btn, .stage-bench.immersive .stage-toolbar .seg button, .stage-bench.immersive .stage-resets .btn, .stage-panel-head .btn, .training-bar .btn { min-height: 44px; }
+  .stage-bench.immersive .dock-btn { width: 40px; height: 44px; }
+  .stage-bench.immersive .crumb { min-height: 40px; }
+}
+/* With no pointer to hover, a camera action names itself while it is pressed. */
+@media (hover: none) { .stage-bench.immersive .dock-btn:active::after { opacity: 1; } }
+/* A phone: one compact row for each group, icons where a word would not fit, and one panel at a time. */
+.stage-bench.immersive.narrow { --pad-t: max(8px, env(safe-area-inset-top)); --pad-b: max(8px, env(safe-area-inset-bottom)); --pad-l: max(8px, env(safe-area-inset-left)); --pad-r: max(8px, env(safe-area-inset-right)); }
+.stage-bench.immersive.narrow .stage-head { gap: 8px; }
+.stage-bench.immersive.narrow .stage-title { min-height: 44px; }
+.stage-bench.immersive.narrow .stage-head-actions .btn, .stage-bench.immersive.narrow .stage-panel-head .btn, .stage-bench.immersive.narrow .training-bar .btn { min-height: 40px; }
+.stage-bench.immersive.narrow .stage-screen .wide { display: none; }
+.stage-bench.immersive.narrow .stage-top[data-tool="explore"] .stage-hint { display: none; }
+.stage-bench.immersive.narrow .stage-reset { order: 1; }
+.stage-bench.immersive.narrow .stage-reset:disabled { display: none; }
+.stage-bench.immersive.narrow .stage-rail, .stage-bench.immersive.narrow .stage-lower { width: auto; left: var(--pad-l); right: var(--pad-r); }
+.stage-bench.immersive.narrow .stage-pop { left: 0; width: auto; }
+.stage-bench.immersive.narrow .stage-dock { flex-wrap: wrap; justify-content: flex-end; }
+.stage-bench.immersive.narrow .dock-sep { display: none; }
+.stage-bench.immersive.narrow .dock-btn { width: 40px; height: 44px; }
+.stage-bench.immersive.narrow .crumb { min-height: 40px; }
+.stage-bench.immersive.narrow .replay-bar { gap: 6px; padding-inline: 10px; font-size: 12px; }
+.stage-bench.immersive.narrow .replay-what { display: none; }
+.stage-bench.immersive.narrow .replay-head { flex-wrap: nowrap; gap: 6px; }
+.stage-bench.immersive.narrow .replay-head .token-navigation, .stage-bench.immersive.narrow .replay-empty { order: 0; flex: 1 1 auto; flex-wrap: nowrap; }
+.stage-bench.immersive.narrow .replay-head .token-navigation strong { max-width: 72px; }
+.stage-bench.immersive.narrow .replay-mode { width: 24px; padding: 0; gap: 0; justify-content: center; font-size: 0; }
+.stage-bench.immersive.narrow .replay-mode.live, .stage-bench.immersive.narrow .replay-head .token-navigation .note, .stage-bench.immersive.narrow .replay-word,
+.stage-bench.immersive.narrow .replay-option > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.stage-bench.immersive.narrow .replay-enter, .stage-bench.immersive.narrow .replay-exit { white-space: nowrap; }
+.stage-bench.immersive.narrow .replay-follow { flex: none; }
+.stage-bench.immersive.narrow .replay-how { flex: 1 1 140px; }
+.stage-bench.immersive.narrow .replay-transport { flex: 1 1 100%; flex-wrap: nowrap; }
+.stage-bench.immersive.narrow .replay-bar .replay-main { flex: none; min-width: 44px; padding-inline: 0; }
+.stage-bench.immersive.narrow .replay-steps { flex: none; }
+.stage-bench.immersive.narrow .replay-steps .replay-step { flex: none; width: 44px; padding-inline: 0; }
+.stage-bench.immersive.narrow .replay-scrub { flex: 1 1 120px; margin-left: 0; }
+/* Start over shares the last row with the words for the step, which have height to spare. */
+.stage-bench.immersive.narrow .replay-options { display: contents; }
+.stage-bench.immersive.narrow .replay-option { flex: 0 1 auto; }
+.stage-bench.immersive.narrow .replay-options .seg button { padding-inline: 7px; }
+.stage-bench.immersive.narrow .replay-readout { flex: 1 1 200px; min-height: 4.35em; }
+.stage-bench.immersive.narrow .replay-restart { order: 2; flex: none; margin-left: 0; }
+@media (max-height: 500px) { .stage-bench.immersive.narrow .replay-readout { min-height: 1.45em; } }
+
+/* On a phone the tool and replay controls stay on the canvas. The full camera
+   dock opens on request so its two rows never cover the model. */
+.stage-camera-trigger { min-height: 40px; padding-inline: 14px; }
+.stage-bench.immersive.narrow .stage-camera-panel {
+  position: absolute; z-index: 5; top: calc(var(--pad-t) + var(--head) + 8px);
+  left: var(--pad-l); right: var(--pad-r); max-width: 440px;
+  max-height: calc(100% - var(--head) - var(--pad-t) - var(--pad-b) - 16px); overflow: auto;
+  overscroll-behavior: contain; padding: 0 16px 12px; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--panel); box-shadow: 0 8px 28px rgb(0 0 0 / .4);
+}
+.stage-camera-panel .stage-panel-head { margin-bottom: 0; }
+.stage-camera-panel .stage-dockbar { padding: 8px 0 0; border: 0; }
+.stage-bench.immersive .stage-camera-panel .stage-bottom { position: static; gap: 6px; }
+.stage-bench.immersive .stage-camera-panel .stage-pop {
+  position: static; width: 100%; max-height: none; margin: 0; box-shadow: none;
+}
+.stage-bench.immersive.narrow .stage-camera-panel .stage-dock > .dock-btn { width: auto; height: 50px; }
+.stage-bench.immersive.narrow .replay-transport .replay-scrub input { min-width: 0; width: 100%; }
+.stage-bench.immersive.narrow .replay-bar.replaying { column-gap: 8px; }
+.stage-bench.immersive.narrow .replay-readout { flex: 1 1 125px; min-height: 2.9em; align-content: center; }
+.replay-settings { order: 2; }
+.replay-settings summary { display: flex; align-items: center; gap: 6px; cursor: pointer; min-height: 40px; font-weight: 600; list-style: none; }
+.replay-settings summary::-webkit-details-marker { display: none; }
+.replay-settings summary::after { content: "▾"; }
+.replay-settings[open] { flex-basis: 100%; }
+.replay-settings[open] summary::after { content: "▴"; }
+.stage-bench.immersive.narrow .replay-settings .replay-option > span { position: static; width: auto; height: auto; clip: auto; }
+.stage-bench.immersive.narrow .replay-head .replay-mode.on {
+  width: auto; gap: 4px; padding-inline: 6px; font-size: 9px; white-space: nowrap;
+}
+@media (max-height: 500px) {
+  .stage-bench.immersive.narrow .stage-camera-panel { bottom: var(--pad-b); }
+  .stage-bench.immersive.narrow .stage-bar { max-height: 50dvh; overflow-y: auto; overscroll-behavior: contain; }
+}
+.stage-bench.immersive.narrow .stage-resets:not(:has(button:enabled)) { display: none; }
+.stage-bench.immersive.narrow .replay-head { width: 100%; min-width: 0; }
+.stage-bench.immersive.narrow .replay-head .token-navigation { gap: 2px; min-width: 0; }
+.stage-bench.immersive.narrow .replay-head .token-navigation .btn { min-width: 36px; width: 36px; }
+.stage-bench.immersive.narrow .replay-head .replay-exit { padding-inline: 8px; }
+@media (min-width: 640px) and (max-height: 500px) {
+  .stage-bench.immersive.narrow .replay-bar.replaying {
+    display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr) auto;
+    grid-template-areas: "head transport transport" "progress progress progress" "readout readout options";
+    gap: 2px 14px;
+  }
+  .stage-bench.immersive.narrow .replay-head { grid-area: head; }
+  .stage-bench.immersive.narrow .replay-transport { grid-area: transport; }
+  .stage-bench.immersive.narrow .replay-progress { grid-area: progress; }
+  .stage-bench.immersive.narrow .replay-readout { grid-area: readout; min-height: 0; }
+  .stage-bench.immersive.narrow .replay-settings { grid-area: options; }
+  .stage-bench.immersive.narrow .replay-settings[open] { grid-column: 1 / -1; grid-row: 4; }
+}

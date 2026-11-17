@@ -1,12 +1,14 @@
 // The frame around the 3D stage, shared by Dismantle, Teach and Grow: tools and resets above, the
-// stage in the middle, the selected part's real controls beside it. Expanding keeps the same mounted
-// stage and only gives it the whole window.
+// stage in the middle, the selected part's real controls beside it. Full screen keeps the same mounted
+// stage and gives it the whole screen: its controls float over it, and the question and the selected
+// part are panels that stay closed until they are asked for.
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { stageShown } from "../state/actions.ts";
 import { store } from "../state/store.ts";
 import { onThemeChange } from "../ui/color.ts";
 import { useNarrow } from "../ui/useNarrow.ts";
 import { type Arch, groupHeads, movePart, type Part, partKey } from "./arch.ts";
+import { Immersive, nativeScreen } from "./immersive.ts";
 import { isolate } from "./isolate.ts";
 import { escapeIntent, stageKey } from "./keys.ts";
 import { type DockPanel, NavDock } from "./NavDock.tsx";
@@ -15,6 +17,10 @@ import { readTheme } from "./theme.ts";
 import { ViewToggle } from "./ViewToggle.tsx";
 
 const TOOL_NAME: Record<Tool, string> = { explore: "Explore", grab: "Grab", punch: "Punch" };
+const SIDE_TITLE = "Selected part and experiments";
+
+type Overlay = "rail" | "side" | "camera";
+const NONE: Overlay[] = [];
 
 export interface WorkbenchProps {
   arch: Arch;
@@ -35,11 +41,15 @@ export interface WorkbenchProps {
   onHidden?: () => void;
   onStage: (stage: Stage | null) => void;
   restore?: { label: string; disabled: boolean; run: () => void };
-  /** Question or training controls, shown beside the stage in the full view and below it on a phone. */
+  /** The question or the lesson. A panel over the stage in full screen, and below the stage on a phone. */
   rail?: ReactNode;
   railTitle?: string;
+  /** The word on the button that opens the rail in full screen. */
+  railName?: string;
   /** Always in sight directly under the stage, in every layout. It does not scroll with the controls below it. */
   bar?: ReactNode;
+  /** Along the bottom in full screen on a bench with no `bar`: the training controls, whose docked copy is then in a closed panel. */
+  immersiveBar?: ReactNode;
   transport?: ReactNode;
   children: ReactNode;
 }
@@ -47,23 +57,29 @@ export interface WorkbenchProps {
 export function Workbench(p: WorkbenchProps) {
   const { arch, selected } = p;
   const narrow = useNarrow();
-  const hint = useId();
+  const hint = useId(), id = useId();
   const root = useRef<HTMLDivElement>(null), host = useRef<HTMLDivElement>(null), labels = useRef<HTMLDivElement>(null), tip = useRef<HTMLDivElement>(null);
   const expander = useRef<HTMLButtonElement>(null), lower = useRef<HTMLDivElement>(null);
+  const head = useRef<HTMLElement>(null), foot = useRef<HTMLDivElement>(null), railEl = useRef<HTMLElement>(null);
+  const cameraEl = useRef<HTMLElement>(null), cameraToggle = useRef<HTMLButtonElement>(null);
+  const railToggle = useRef<HTMLButtonElement>(null), sideToggle = useRef<HTMLButtonElement>(null);
   const [stage, setStage] = useState<Stage | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "lost">("loading");
   const [generation, setGeneration] = useState(0);
   const [tool, setTool] = useState<Tool>("explore");
-  const [expanded, setExpanded] = useState(false);
+  const [immersive, setImmersive] = useState(false);
+  // The panels open over the stage, in the order they were opened. Every full screen starts with none.
+  const [overlays, setOverlays] = useState<Overlay[]>(NONE);
   const [arranged, setArranged] = useState(0);
   const [drag, setDrag] = useState<DragMode>("turn");
   const [spread, setSpread] = useState(0);
   const [panel, setPanel] = useState<DockPanel>(null);
-  // The select whose menu the last Escape closed. A second Escape there closes the full view.
+  // The select whose menu the last Escape closed. A second Escape there moves on.
   const escaped = useRef<EventTarget | null>(null);
   // The stage outlives renders; it always calls the newest handlers.
   const latest = useRef(p);
   latest.current = p;
+  const open = immersive ? overlays : NONE, railOpen = open.includes("rail"), sideOpen = open.includes("side");
 
   // A bench that is not on screen holds no WebGL context; its stage is rebuilt when the visitor returns.
   const live = p.active;
@@ -92,13 +108,16 @@ export function Workbench(p: WorkbenchProps) {
           onArranged: setArranged,
           onLost: () => setState("lost"),
           // The tool buttons and help text float over the stage; labels and the framing keep clear of them.
+          // In full screen the title, the exit and the bar along the bottom float over it too.
           reserved: () => {
-            const view = host.current;
+            const view = host.current, bench = root.current;
             if (!view) return [];
             const origin = view.getBoundingClientRect();
-            return Array.from(view.querySelectorAll(".stage-toolbar > *, .stage-hint, .stage-crumb, .stage-dock"), (el) => {
+            const floating = [...view.querySelectorAll(".stage-toolbar > *, .stage-caption, .stage-hint, .stage-crumb, .stage-dock"),
+              ...(bench?.classList.contains("immersive") ? bench.querySelectorAll(".stage-head > *, .stage-bar") : [])];
+            return floating.flatMap((el) => {
               const r = el.getBoundingClientRect();
-              return { left: r.left - origin.left, top: r.top - origin.top, width: r.width, height: r.height };
+              return r.width > 0 && r.height > 0 ? [{ left: r.left - origin.left, top: r.top - origin.top, width: r.width, height: r.height }] : [];
             });
           },
         });
@@ -133,9 +152,34 @@ export function Workbench(p: WorkbenchProps) {
   // Docked, the controls share one scroll area under the stage: bring a newly selected part's controls into it.
   const selectedKey = selected ? partKey(selected) : "";
   useEffect(() => { if (selectedKey && lower.current) lower.current.scrollTop = 0; }, [selectedKey]);
+  // In full screen the floating controls sit clear of the title above and the bar below, whatever height those take.
+  useEffect(() => {
+    const bench = root.current;
+    if (!immersive || !bench) return;
+    const measure = () => {
+      bench.style.setProperty("--head", `${head.current?.offsetHeight ?? 0}px`);
+      bench.style.setProperty("--foot", `${foot.current?.offsetHeight ?? 0}px`);
+      stage?.overlaysChanged();
+    };
+    const sizes = new ResizeObserver(measure);
+    for (const el of [head.current, foot.current]) if (el) sizes.observe(el);
+    measure();
+    return () => { sizes.disconnect(); bench.style.removeProperty("--head"); bench.style.removeProperty("--foot"); };
+  }, [immersive, stage]);
   // The breadcrumb and the dock change size with the selection and the spread; labels and framing keep clear of them.
   const spreading = spread > 0;
-  useEffect(() => { stage?.overlaysChanged(); }, [stage, selectedKey, spreading, expanded, narrow]);
+  // In full screen on a phone, Reset layout is on the toolbar only while there is something to reset.
+  const resettable = immersive && narrow && arranged > 0;
+  useEffect(() => { stage?.overlaysChanged(); }, [stage, selectedKey, spreading, immersive, narrow, railOpen, sideOpen, resettable]);
+  // A panel open beside the stage covers one edge of it: the model is framed in what stays clear. On a
+  // phone a panel covers the whole stage, and the framing is left alone.
+  useEffect(() => {
+    const view = host.current?.getBoundingClientRect();
+    if (!stage || !view) return;
+    const beside = (el: HTMLElement | null, shown: boolean) => (shown && !narrow ? el?.getBoundingClientRect() : undefined);
+    const left = beside(railEl.current, railOpen), right = beside(lower.current, sideOpen);
+    stage.setCover(left ? left.right - view.left : 0, right ? view.right - right.left : 0);
+  }, [stage, narrow, railOpen, sideOpen]);
   useEffect(() => stage ? onThemeChange(() => stage.setTheme(readTheme())) : undefined, [stage]);
   useEffect(() => {
     if (!stage) return;
@@ -143,15 +187,38 @@ export function Workbench(p: WorkbenchProps) {
     motion.addEventListener("change", follow);
     return () => motion.removeEventListener("change", follow);
   }, [stage]);
-  // Full view is the foreground: its panel is lifted above the page header and the page behind it goes inert.
+
+  const leave = () => {
+    screen.current?.exit();
+    setImmersive(false);
+    requestAnimationFrame(() => expander.current?.focus());
+  };
+  // The browser's own full screen, on top of the viewport one. When the browser ends it by its own
+  // means (its Escape, a gesture), the full screen view closes with it.
+  const screen = useRef<ReturnType<typeof nativeScreen> | null>(null), left = useRef(leave);
+  left.current = leave;
+  useEffect(() => {
+    if (!root.current) return;
+    const made = screen.current = nativeScreen(root.current, () => left.current());
+    return () => { made.exit(); made.dispose(); screen.current = null; };
+  }, []);
+  // Asked for inside the click itself, as browsers require. A refusal leaves the viewport view, which needs no permission.
+  const enter = () => {
+    if (!p.active) return;
+    screen.current?.enter();
+    setOverlays(NONE);
+    setImmersive(true);
+  };
+  useEffect(() => { if (!p.active) setImmersive(false); }, [p.active]);
+  useEffect(() => { if (!immersive) screen.current?.exit(); }, [immersive]);
+  // Full screen is the foreground: its panel is lifted above the page header and the page behind it goes inert.
   useEffect(() => {
     const bench = root.current;
-    if (!expanded || !bench) return;
+    if (!immersive || !bench) return;
     const scope = bench.closest(".lab-scope"), release = isolate(bench);
     scope?.classList.add("stage-raised");
     return () => { release(); scope?.classList.remove("stage-raised"); };
-  }, [expanded]);
-  useEffect(() => { if (!p.active || narrow) setExpanded(false); }, [p.active, narrow]);
+  }, [immersive]);
   useEffect(() => { if (!p.tools.includes(tool)) setTool("explore"); }, [p.tools, tool]);
 
   const help: Record<Tool, string> = {
@@ -159,22 +226,79 @@ export function Workbench(p: WorkbenchProps) {
     grab: "Drag a part to move it. This rearranges the drawing only. The model does not change.",
     punch: p.punchHelp ?? "",
   };
-  const collapse = () => { setExpanded(false); requestAnimationFrame(() => expander.current?.focus()); };
+
+  const panelRefs = { rail: railEl, side: lower, camera: cameraEl };
+  const toggleRefs = { rail: railToggle, side: sideToggle, camera: cameraToggle };
+  const closeOverlay = (which: Overlay) => {
+    // The focus goes back to the button that opened the panel, never to nothing.
+    if (panelRefs[which].current?.contains(document.activeElement)) toggleRefs[which].current?.focus();
+    if (which === "camera") setPanel(null);
+    setOverlays((now) => now.filter((o) => o !== which));
+  };
+  const toggleOverlay = (which: Overlay) => {
+    if (open.includes(which)) { closeOverlay(which); return; }
+    if (narrow) setPanel(null);
+    // A phone has room for one panel at a time.
+    setOverlays((now) => (narrow ? [which] : [...now, which]));
+    requestAnimationFrame(() => panelRefs[which].current?.querySelector<HTMLElement>(".stage-panel-head button")?.focus());
+  };
+
+  /**
+   * One press of Escape, from the element that has the focus. An open dock panel closes first, from
+   * anywhere on the bench. In full screen the press then belongs to what has the focus (an open menu,
+   * a text field), then to an open panel over the stage, and only then to full screen itself.
+   * False when the press is not ours: the browser's or the input method's.
+   */
+  const pressEscape = (from: HTMLElement, composing: boolean): boolean => {
+    const intent = escapeIntent(from, escaped.current === from, composing, !!panel, open.length > 0);
+    if (intent === "panel") { escaped.current = null; setPanel(null); return true; }
+    if (!immersive) return false;
+    escaped.current = intent === "menu" ? from : null;
+    if (intent === "leave") host.current?.focus();
+    else if (intent === "overlay") closeOverlay(railEl.current?.contains(from) ? "rail" : lower.current?.contains(from) ? "side" : open[open.length - 1]);
+    else if (intent === "close") leave();
+    else return false;
+    return true;
+  };
+  const press = useRef(pressEscape);
+  press.current = pressEscape;
+  // Two ways a press can miss the bench. The control that had the focus is gone, so the key lands on
+  // the page: it is still full screen's key. And on a phone the bench is inside a sheet, where the back
+  // gesture asks the sheet to close: full screen takes that request first.
+  useEffect(() => {
+    const bench = root.current;
+    if (!immersive || !bench) return;
+    const doc = bench.ownerDocument, sheet = bench.closest("dialog");
+    let keyed = -Infinity;
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      keyed = e.timeStamp;
+      const from = e.target instanceof Element ? e.target : null, within = from?.closest("dialog");
+      // On the bench the press was already handled. In a dialog opened over the bench it is the dialog's.
+      if (e.defaultPrevented || (from && bench.contains(from)) || (within && within !== sheet)) return;
+      if (host.current && press.current(host.current, e.isComposing)) e.preventDefault();
+    };
+    const cancel = (e: Event) => {
+      if (e.target !== sheet) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      // A request that follows an Escape key press is that same press, already handled as a key.
+      if (e.timeStamp - keyed < 100) return;
+      const focused = doc.activeElement instanceof HTMLElement && bench.contains(doc.activeElement) ? doc.activeElement : host.current;
+      if (focused) press.current(focused, false);
+    };
+    doc.addEventListener("keydown", key);
+    sheet?.addEventListener("cancel", cancel, true);
+    return () => { doc.removeEventListener("keydown", key); sheet?.removeEventListener("cancel", cancel, true); };
+  }, [immersive]);
 
   const frameKeys = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape" && !e.defaultPrevented) {
-      // Escape first closes an open dock panel, from anywhere on the bench. Then it belongs to what has
-      // focus: it closes an open menu, or steps out of a text field. Only then does it close the full view.
-      const from = e.target as HTMLInputElement, intent = escapeIntent(from, escaped.current === from, e.nativeEvent.isComposing, !!panel);
-      if (intent === "panel") { e.preventDefault(); escaped.current = null; setPanel(null); return; }
-      if (!expanded) return;
-      escaped.current = intent === "menu" ? from : null;
-      if (intent === "leave") { e.preventDefault(); host.current?.focus(); }
-      else if (intent === "close") { e.preventDefault(); collapse(); }
+      if (pressEscape(e.target as HTMLElement, e.nativeEvent.isComposing)) e.preventDefault();
       return;
     }
     escaped.current = null;
-    if (!expanded || e.key !== "Tab") return;
+    if (!immersive || e.key !== "Tab") return;
     const items = [...e.currentTarget.querySelectorAll<HTMLElement>("button, a[href], input, select, textarea, summary, [tabindex]")]
       .filter((el) => el.tabIndex >= 0 && !el.matches(":disabled") && el.getClientRects().length > 0);
     const first = items[0], last = items[items.length - 1];
@@ -185,7 +309,7 @@ export function Workbench(p: WorkbenchProps) {
   const resetLayout = () => { setSpread(0); stage?.resetLayout(); };
 
   const stageKeys = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    // An open panel takes Escape before the full view does, wherever in the stage the focus is.
+    // An open panel takes Escape before full screen does, wherever in the stage the focus is.
     if (e.key === "Escape" && panel) { e.preventDefault(); setPanel(null); return; }
     if (e.target !== e.currentTarget) return;
     // A browser or system shortcut. While its modifier is down the release of Space may never reach
@@ -202,7 +326,10 @@ export function Workbench(p: WorkbenchProps) {
       case "focus": if (selected) stage?.focus(selected); else if (key.orFit) stage?.resetView(); break;
       case "view": stage?.view(key.view); break;
       case "spread": setSpread((now) => (now > 0 ? 0 : 1)); break;
-      case "help": setPanel((now) => (now === "help" ? null : "help")); break;
+      case "help":
+        if (immersive && narrow) setOverlays(["camera"]);
+        setPanel((now) => (now === "help" ? null : "help"));
+        break;
       case "pan": stage?.holdPan(true); break;
       case "punch": if (selected && p.tools.includes("punch")) stage?.react(selected, p.onPunch(selected)); break;
       case "ignore": break;
@@ -214,36 +341,49 @@ export function Workbench(p: WorkbenchProps) {
 
   const dock = <NavDock arch={arch} stage={stage} selected={selected} onSelect={p.onSelect} drag={drag} onDrag={setDrag}
     spread={spread} onSpread={setSpread} panel={panel} onPanel={setPanel} punch={p.tools.includes("punch")} />;
+  const bar = p.bar ?? (immersive ? p.immersiveBar : null);
+  const panelHead = (which: Overlay, title?: string) => <div className="stage-panel-head">
+    <h3>{title}</h3><button type="button" className="btn quiet" aria-label={`Hide: ${title}`} onClick={() => closeOverlay(which)}>Hide</button>
+  </div>;
 
-  return <div ref={root} className={`stage-bench${expanded ? " expanded" : ""}`} role={expanded ? "dialog" : undefined} aria-modal={expanded || undefined}
-    aria-label={expanded ? `${p.title}, full view` : undefined} onKeyDown={frameKeys}>
-    <header className="stage-head">
-      <div className="stage-title">{p.eyebrow && <p className="eyebrow">{p.eyebrow}</p>}<h2>{p.title}</h2></div>
+  return <Immersive value={immersive}><div ref={root} className={`stage-bench${immersive ? " immersive" : ""}${immersive && narrow ? " narrow" : ""}${railOpen ? " rail-open" : ""}${sideOpen ? " side-open" : ""}`}
+    role={immersive ? "dialog" : undefined} aria-modal={immersive || undefined} aria-label={immersive ? `${p.title}, full screen` : undefined} onKeyDown={frameKeys}>
+    <header className="stage-head" ref={head}>
+      <div className="stage-title">{p.eyebrow && <p className="eyebrow">{p.eyebrow}</p>}<h2>{immersive && narrow ? "3D model" : p.title}</h2></div>
       <div className="stage-head-actions">
-        <ViewToggle />
-        {!narrow && <button ref={expander} type="button" className="btn quiet" aria-pressed={expanded} onClick={() => (expanded ? collapse() : setExpanded(true))}>{expanded ? "Close full view" : "Full view"}</button>}
+        {!immersive && <ViewToggle />}
+        {immersive && p.rail && <button ref={railToggle} type="button" className="btn quiet" aria-expanded={railOpen} aria-controls={`${id}-rail`} title={p.railTitle} onClick={() => toggleOverlay("rail")}>{p.railName}</button>}
+        {immersive && <button ref={sideToggle} type="button" className="btn quiet" aria-expanded={sideOpen} aria-controls={`${id}-side`} title={SIDE_TITLE} onClick={() => toggleOverlay("side")}>Part</button>}
+        <button ref={expander} type="button" className="btn stage-screen" aria-label={immersive ? "Exit full screen" : undefined} onClick={() => (immersive ? leave() : enter())}>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d={immersive ? "M6 2v4H2M10 2v4h4M14 10h-4v4M2 10h4v4" : "M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"} /></svg>
+          <span>{immersive ? <>Exit<span className="wide"> full screen</span></> : "Full screen"}</span></button>
       </div>
     </header>
-    {(p.status || p.restore) && <div className="stage-status">
+    {!immersive && (p.status || p.restore) && <div className="stage-status">
       {p.status}
       {p.restore && <button type="button" className="btn quiet" disabled={p.restore.disabled} onClick={p.restore.run}>{p.restore.label}</button>}
     </div>}
     <div className="stage-main">
-      {p.rail && (expanded || narrow) && <aside className="stage-rail" aria-label={p.railTitle}>
-        {narrow ? <details><summary>{p.railTitle}</summary>{p.rail}</details> : p.rail}
+      {p.rail && (immersive || narrow) && <aside className="stage-rail" ref={railEl} id={`${id}-rail`} aria-label={p.railTitle}>
+        {immersive ? <>{panelHead("rail", p.railTitle)}{p.rail}</> : <details><summary>{p.railTitle}</summary>{p.rail}</details>}
       </aside>}
       <div className="stage-view" ref={host} tabIndex={0} role="group" aria-describedby={hint} onKeyDown={stageKeys} onKeyUp={stageKeyUp} onBlur={() => stage?.holdPan(false)}
         aria-label={`3D model of ${arch.model.name}: ${arch.floors} layers, each with ${arch.heads} attention heads and one MLP. Arrow keys move between parts.`}>
         <div className="stage-labels" ref={labels} aria-hidden="true" />
-        <div className="stage-top">
+        <div className="stage-top" data-tool={tool}>
           <div className="stage-toolbar">
             <div className="seg" role="group" aria-label="Tool">
               {p.tools.map((t) => <button key={t} type="button" aria-pressed={tool === t} onClick={() => setTool(t)}>{TOOL_NAME[t]}</button>)}
             </div>
+            {immersive && narrow && <button type="button" ref={cameraToggle} className="btn stage-camera-trigger"
+              aria-expanded={open.includes("camera")} aria-controls={`${id}-camera`} onClick={() => toggleOverlay("camera")}>Camera</button>}
             <div className="stage-resets">
-              <button type="button" className="btn" disabled={!stage || (!arranged && !spread)} title="Put moved parts back and close the spread. The model is not changed." onClick={resetLayout}>Reset layout</button>
+              <button type="button" className="btn stage-reset" disabled={!stage || (!arranged && !spread)} title="Put moved parts back and close the spread. The model is not changed." onClick={resetLayout}>Reset layout</button>
+              {immersive && p.restore && <button type="button" className="btn" disabled={p.restore.disabled} onClick={p.restore.run}>{p.restore.label}</button>}
             </div>
           </div>
+          {immersive && p.status && <p className="stage-caption">{p.status}</p>}
           <p className="stage-hint" id={hint}><strong>{TOOL_NAME[tool]}.</strong> {help[tool]}</p>
         </div>
         {!narrow && dock}
@@ -255,17 +395,23 @@ export function Workbench(p: WorkbenchProps) {
             <button type="button" className="btn quiet" onClick={() => store.set({ scopeView: "2d", replayRequest: null })}>Use the 2D view</button></div>
         </div>}
       </div>
-      {p.bar && <div className="stage-bar">{p.bar}</div>}
-      {narrow && <div className="stage-dockbar">{dock}</div>}
-      <div className="stage-lower" ref={lower}>
+      {immersive && narrow && <aside className="stage-camera-panel" ref={cameraEl} id={`${id}-camera`}
+        aria-label="Camera controls" hidden={!open.includes("camera")}>
+        {panelHead("camera", "Camera controls")}
+        <div className="stage-dockbar">{dock}</div>
+      </aside>}
+      {bar && <div className="stage-bar" ref={foot}>{bar}</div>}
+      {narrow && !immersive && <div className="stage-dockbar">{dock}</div>}
+      <div className="stage-lower" ref={lower} id={`${id}-side`}>
+        {immersive && panelHead("side", SIDE_TITLE)}
         <div className="stage-controls">
           <PartPicker arch={arch} selected={selected} onSelect={p.onSelect} />
           {p.transport}
         </div>
-        <aside className="stage-side" aria-label="Selected part and experiments">{p.children}</aside>
+        <aside className="stage-side" aria-label={SIDE_TITLE}>{p.children}</aside>
       </div>
     </div>
-  </div>;
+  </div></Immersive>;
 }
 
 /** The same selection the pointer makes, as two ordinary menus. */

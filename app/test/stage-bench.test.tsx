@@ -622,3 +622,27 @@ it("gives no total and does not say every part is lit when some of a token's pus
   said = readout(renderToString(<Dismantle />));
   expect(said).toMatch(/^No direct pushes were measured for “.+”\. Nothing is lit\.$/);
 });
+
+it("offers full screen on every bench, on a desktop and on a phone, and starts docked with one set of training controls", () => {
+  const reference = initialLesson({ width: 1024, units: 3072 });
+  const teach = { weights: null, reference, step: 0, running: false, losses: [], run: null, examples: [{ prompt: "Q", answer: "A" }], active: true,
+    controls: { busy: false, phase: "idle" as const, ready: true, validation: "", status: "", error: "", revision: 0, train() {}, halt() {}, dismantle() {} } };
+  const grow = { params: null, reference: null, intact: null, step: 0, running: false, active: true,
+    controls: { disabled: false, unavailable: false, validText: true, status: "", loss: null, mutation: "", damage: null, strength: 0.25, setStrength() {}, teach() {}, stop() {},
+      mutate() {}, restore() {}, keepLabel: "Keep learning", continueNote: "", retrained: 0, intactStep: 0, adopt() {}, prompt: "red star = ", setPrompt() {}, test() {}, result: null, baseline: null } };
+  for (const phone of [false, true]) {
+    vi.stubGlobal("matchMedia", () => ({ matches: phone, addEventListener() {}, removeEventListener() {} }));
+    const benches = [renderToString(<Dismantle />), renderToString(<Teach {...teach} />), renderToString(<Grow {...grow} />)];
+    for (const html of benches) {
+      expect(buttons(html).get("Full screen")).toEqual([false]);
+      // Docked until asked: no dialog, no panels over the stage, and the 2D switch still in reach.
+      expect(html).not.toMatch(/role="dialog"|stage-panel-head|immersive|training-bar/);
+      expect(buttons(html).get("2D")).toEqual([false]);
+    }
+    // The bar along the bottom of full screen is a second home for the training controls, never a second copy.
+    if (!phone) {
+      expect(buttons(benches[1]).get("Teach Qwen")).toEqual([false]);
+      expect(buttons(benches[2]).get("Start learning")).toEqual([false]);
+    }
+  }
+});

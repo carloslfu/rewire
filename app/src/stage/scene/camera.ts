@@ -16,9 +16,9 @@ const NO_INSET: Inset = { top: 0, bottom: 0, side: 0 };
 
 /**
  * Camera placement that frames a box from a direction, for a vertical field of view and aspect ratio.
- * `inset` keeps fractions of the view clear (the toolbar above, the dock below, labels at the edges):
- * the box is fitted to what remains and centered there. `span` is the box's half-width as a fraction
- * of half the view.
+ * `inset` keeps fractions of the view clear (the toolbar above, the dock below, labels at the edges,
+ * a panel over the left or right): the box is fitted to what remains and centered there. `span` is
+ * the box's half-width as a fraction of half the view.
  */
 export function frame(box: THREE.Box3, dir: THREE.Vector3, fovDeg: number, aspect: number, margin = 1.08, inset: Inset = NO_INSET) {
   const center = box.getCenter(new THREE.Vector3());
@@ -30,10 +30,12 @@ export function frame(box: THREE.Box3, dir: THREE.Vector3, fovDeg: number, aspec
     w = Math.max(w, Math.abs(v.dot(right))); h = Math.max(h, Math.abs(v.dot(up))); d = Math.max(d, v.dot(dir));
   }
   const tan = Math.tan((fovDeg * Math.PI) / 360), wide = tan * Math.max(0.1, aspect);
-  const clearH = Math.max(0.2, 1 - inset.top - inset.bottom), clearW = Math.max(0.2, 1 - 2 * inset.side);
+  const coverL = inset.left ?? 0, coverR = inset.right ?? 0;
+  const clearH = Math.max(0.2, 1 - inset.top - inset.bottom), clearW = Math.max(0.2, 1 - 2 * inset.side - coverL - coverR);
   const distance = Math.max(h / (tan * clearH), w / (wide * clearW)) * margin + d;
-  // Aim above the box when more is reserved at the top than the bottom, so the box sits lower in the view.
-  const target = center.clone().addScaledVector(up, (inset.top - inset.bottom) * distance * tan);
+  // Aim above the box when more is reserved at the top than the bottom, so the box sits lower in the view,
+  // and to the side of it when a panel covers one edge, so the box sits in what stays clear.
+  const target = center.clone().addScaledVector(up, (inset.top - inset.bottom) * distance * tan).addScaledVector(right, (coverR - coverL) * distance * wide);
   return { target, position: target.clone().addScaledVector(dir, distance), span: w / (distance * wide), distance };
 }
 

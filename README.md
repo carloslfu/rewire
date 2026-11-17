@@ -113,9 +113,10 @@ apart: one deck per layer in a four-post rack, its attention heads seated in pai
 the keys and values they share, its MLP under a finned heatsink, and the two points where their
 output joins the residual stream, a glass tube running from the dictionary below to the output above.
 It is lit as a product photograph: brushed aluminum, dark ceramic, gold contacts and copper bus bars
-under studio softboxes, on a dark seamless backdrop in both themes. **Full view** gives the stage the
-whole window, with the question and replies (or the training controls) on the left and the selected
-part's controls on the right. The page behind it is inert until the full view is closed. Three.js
+under studio softboxes, on a dark seamless backdrop in both themes. Choose **Full screen** in the 3D
+view to give the model the whole screen. Camera controls float over the model. Open the question,
+lesson or part details when you need them. Replay or training controls stay within reach at the bottom.
+Leaving full screen returns you to the same 3D session. Three.js
 loads only when the 3D view is opened. If the browser cannot create a WebGL context, the benches stay
 in 2D. Touch-first devices get simpler shapes and materials and no shadow pass.
 
@@ -142,7 +143,8 @@ Moving around:
   move a camera you have placed.
 - The dock at the bottom right holds Fit, Focus, zoom, Pan, Spread, Views (three-quarter, front, side,
   top, around the part in focus) and a help panel listing every mouse, trackpad, touch and keyboard
-  control. On a phone the dock sits under the stage with each action named.
+  control. On a phone, open **Camera** in full screen to see each action by name. In the docked view
+  the same controls sit under the stage.
 - **Pan** makes plain drags slide the view. While it is on, or Space is held, clicks select nothing and
   change nothing. A press that ever travelled, a second finger, or a modifier key is always the
   camera's: it can never end as a Punch or leave a part dragged.
@@ -153,8 +155,10 @@ Moving around:
   the layers, Space held pans, P punches the selected part, and ? opens the help panel. E, P, ? and
   Space act once per press: holding one down does not repeat it, while arrows and zoom do repeat.
   Space stops panning when it is released, when a modifier key goes down or when the stage loses
-  focus. In the docked and the full view alike, Escape closes an open panel or menu first, steps out
-  of a text field next, and only then closes the full view.
+  focus. Docked and in full screen alike, Escape closes an open Views or Help panel or a menu first
+  and steps out of a text field next. In full screen it then closes an open question, lesson or part
+  panel, and only then leaves full screen. Where the browser's own full screen is on, the browser
+  takes Escape and leaves full screen at once.
 
 A selected part has its own restore button, and it undoes only what belongs to that part. Restore this
 head clears the head's strength and direction change. Restore this MLP clears its strength and the
@@ -228,8 +232,8 @@ toolbar; where two would touch, the less important one is left out.
 
 ### Live output and Replay
 
-A strip directly under the 3D stage, in the docked view, the full view and on a phone, says which of
-two modes the model is in and holds everything that belongs to it.
+The controls sit under the docked 3D stage and float along the bottom edge in full screen. On a
+phone, open **Replay options** for speed, whole-answer or single-token playback, and restart.
 
 **Live output** is the default. The model shows the selected token complete, Follow output keeps it
 on the newest token, and Previous and Next choose another.

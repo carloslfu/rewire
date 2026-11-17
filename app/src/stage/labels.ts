@@ -31,8 +31,11 @@ export function declutter(labels: { box: Box; priority: number }[], reserved: Bo
   return shown;
 }
 
-/** Fractions of the view kept clear when framing the model: under the toolbar, and for labels at the edges. */
-export interface Inset { top: number; bottom: number; side: number }
+/**
+ * Fractions of the view kept clear when framing the model: under the toolbar, and for labels at the edges.
+ * `left` and `right` are what a panel opened over that edge covers.
+ */
+export interface Inset { top: number; bottom: number; side: number; left?: number; right?: number }
 
 /**
  * How much of the top of the view the toolbar and help text take from the model. Only the pieces that

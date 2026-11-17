@@ -8,6 +8,7 @@ import type { Example } from "../teach/lessons.ts";
 import type { LessonResult } from "../teach/types.ts";
 import { lessonPlates, lessonStats } from "./adapters.ts";
 import { buildArch, type Part, partName } from "./arch.ts";
+import { Docked } from "./immersive.ts";
 import type { Pose } from "./intervene.ts";
 import type { BaySpec, Stage } from "./scene/stage.ts";
 import { RealNote, Workbench } from "./Workbench.tsx";
@@ -57,10 +58,15 @@ export default function TeachStage({ weights, reference, step, running, losses, 
     <span className="num">{step} steps</span>
   </div>;
 
-  const transport = <section className="stage-transport" aria-label="Teaching">
+  // Under the stage when it is docked, and along the bottom in full screen.
+  const training = <>
     {actions}
     <p className="note training-status" role="status">{controls.status || validation || "Training runs on this device. The plates update every 10 steps with the real adapter weights."}</p>
     {controls.error && <p className="error-message" role="alert">{controls.error}</p>}
+  </>;
+
+  const transport = <section className="stage-transport" aria-label="Teaching">
+    <Docked>{training}</Docked>
     <div className="seg" role="group" aria-label="Plates show"><button type="button" aria-pressed={difference} onClick={() => setDifference(true)}>Change from original adapter</button><button type="button" aria-pressed={!difference} onClick={() => setDifference(false)}>Weights now</button></div>
     {losses.length > 0 && <div className="lesson-loss"><svg viewBox="0 0 400 70" role="img" aria-label="Cross entropy on training tokens over gradient steps, this round"><path d="M 1 1 V 64 H 399" stroke="var(--line)" fill="none" />
       <polyline points={losses.map((p) => `${1 + (p.step / Math.max(1, losses.at(-1)!.step)) * 398},${64 - (p.loss / maxLoss) * 60}`).join(" ")} fill="none" stroke="var(--changed)" strokeWidth="2" /></svg>
@@ -68,18 +74,17 @@ export default function TeachStage({ weights, reference, step, running, losses, 
   </section>;
 
   const rail = <div className="stage-question">
-    <h3>Your lesson</h3>
-    <p className="note">{examples.length ? `${examples.length} ${examples.length === 1 ? "example" : "examples"}. Close the full view to edit them.` : validation || "Close the full view to write examples."}</p>
+    <p className="note">{examples.length ? `${examples.length} ${examples.length === 1 ? "example" : "examples"}. Edit them in the lesson editor.` : validation || "Write examples in the lesson editor."}</p>
     <ol className="stage-examples">{examples.slice(0, 8).map((e, i) => <li key={i}><span>{e.prompt}</span><span className="note">{e.answer}</span></li>)}</ol>
     {examples.length > 8 && <p className="note">And {examples.length - 8} more.</p>}
-    {actions}
-    <p className="note training-status">{controls.status}</p>
+    <Docked>{actions}<p className="note training-status">{controls.status}</p></Docked>
   </div>;
 
   return <Workbench arch={arch} active={active} eyebrow="Same Qwen · live training" title={running ? "A lesson taking shape" : weights ? "What you taught it" : "Where learning happens"}
     status={<span>Qwen3-0.6B · {arch.floors} layers frozen · 32,768 trainable parameters beside layer {last + 1}’s MLP</span>}
     tools={["explore", "grab"]} selected={selected} onSelect={setSelected} onPunch={() => false} describe={describe} onStage={setStage}
-    rail={rail} railTitle="Your lesson" transport={transport}>
+    rail={rail} railTitle="Your lesson" railName="Lesson" transport={transport}
+    immersiveBar={<section className="training-bar" aria-label="Teaching">{training}</section>}>
     <section className="stage-info">
       <div className="section-heading"><h3>{selected ? partName(QWEN_INFO, selected) : "The learned addition"}</h3>
         <button type="button" className="btn quiet" disabled={!stage} onClick={() => stage?.focusBay()}>Look at the adapter</button></div>

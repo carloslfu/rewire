@@ -149,6 +149,7 @@ export class Stage {
   private readonly shadows: boolean;
   private reduced: boolean;
   private reserved: Box[] = [];
+  private cover = { left: 0, right: 0 };
   private look: Theme;
 
   constructor(private readonly o: StageOptions) {
@@ -332,9 +333,11 @@ export class Stage {
   /** Where the camera should stand to frame a box from a direction, clear of the toolbar above and the dock below. */
   private placement(box: THREE.Box3, dir: THREE.Vector3, margin?: number): Pose {
     // Leave room for token and layer labels at the edges, and for the overlays where they sit over the model.
-    const W = this.width, H = this.height, edges: Inset = { top: 0, bottom: Math.min(0.1, 20 / H), side: Math.min(0.08, 16 / W) };
+    const W = this.width, H = this.height, left = Math.min(0.42, this.cover.left / W), right = Math.min(0.42, this.cover.right / W);
+    const edges: Inset = { top: 0, bottom: Math.min(0.1, 20 / H), side: Math.min(0.08, 16 / W), left, right };
     let placed = frame(box, dir, this.camera.fov, this.camera.aspect, margin, edges);
-    const half = (placed.span * W) / 2, top = toolbarInset(this.reserved, W / 2 - half, W / 2 + half, H), bottom = Math.max(edges.bottom, dockInset(this.reserved, W / 2 - half, W / 2 + half, H));
+    const mid = (W * (1 + left - right)) / 2, half = (placed.span * W) / 2;
+    const top = toolbarInset(this.reserved, mid - half, mid + half, H), bottom = Math.max(edges.bottom, dockInset(this.reserved, mid - half, mid + half, H));
     if (top > 0 || bottom > edges.bottom) placed = frame(box, dir, this.camera.fov, this.camera.aspect, margin, { ...edges, top, bottom });
     return placed;
   }
@@ -462,6 +465,16 @@ export class Stage {
     // A flight already under way is steered to the new framing instead of being cut short.
     if (this.auto) this.reframe(!!this.flight);
     this.invalidate();
+  }
+
+  /**
+   * Panels opened over the left and right edges of the view, in view pixels. The model is framed in
+   * what stays clear. A camera the visitor has placed stays where it is.
+   */
+  setCover(left: number, right: number) {
+    if (left === this.cover.left && right === this.cover.right) return;
+    this.cover = { left, right };
+    if (this.auto) this.reframe(true);
   }
 
   /** Follow a change of the reduced-motion preference while the stage is open. */

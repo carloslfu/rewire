@@ -267,6 +267,30 @@ it("frames the model inside the clear part of the view when the toolbar and labe
   }
 });
 
+it("frames the model in what a panel over the left or right edge leaves clear", () => {
+  const arch = buildArch(QWEN_INFO), box = new THREE.Box3(new THREE.Vector3(...arch.bounds.min), new THREE.Vector3(...arch.bounds.max));
+  const dir = new THREE.Vector3(0.42, 0.26, 1).normalize(), v = new THREE.Vector3();
+  for (const [aspect, inset] of [[1.8, { top: 0.1, bottom: 0.2, side: 0.02, left: 0.3, right: 0 }], [1.8, { top: 0, bottom: 0.1, side: 0.02, left: 0, right: 0.32 }], [2.2, { top: 0, bottom: 0.1, side: 0.01, left: 0.25, right: 0.27 }]] as const) {
+    const { target, position, span } = frame(box, dir, 30, aspect, 1.08, inset);
+    const camera = new THREE.PerspectiveCamera(30, aspect, 0.1, 600);
+    camera.position.copy(position); camera.lookAt(target); camera.updateMatrixWorld(true); camera.updateProjectionMatrix();
+    let top = -1, bottom = 1, left = 1, right = -1;
+    for (let i = 0; i < 8; i++) {
+      v.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(camera);
+      top = Math.max(top, v.y); bottom = Math.min(bottom, v.y); left = Math.min(left, v.x); right = Math.max(right, v.x);
+    }
+    // In view coordinates the left edge is -1: nothing of the model is under either panel, or in the bands above and below.
+    expect(left).toBeGreaterThanOrEqual(-1 + 2 * (inset.left + inset.side) - 1e-6);
+    expect(right).toBeLessThanOrEqual(1 - 2 * (inset.right + inset.side) + 1e-6);
+    expect(top).toBeLessThanOrEqual(1 - 2 * inset.top + 1e-6);
+    expect(bottom).toBeGreaterThanOrEqual(-1 + 2 * inset.bottom - 1e-6);
+    // It stands in the middle of the clear part, and the clear part is used.
+    expect((left + right) / 2).toBeCloseTo(inset.left - inset.right, 1);
+    expect(Math.max((top - bottom) / (2 - 2 * inset.top - 2 * inset.bottom), (right - left) / (2 - 2 * inset.left - 2 * inset.right - 4 * inset.side))).toBeGreaterThan(0.7);
+    expect(span).toBeLessThanOrEqual((right - left) / 2 + 1e-6);
+  }
+});
+
 // ------------------------------------------------------------------ stage lifecycle with a fake renderer
 
 function harness(arch: Arch, options: { hidden?: boolean; width?: number; height?: number; coarse?: boolean; reduced?: boolean; reserved?: { left: number; top: number; width: number; height: number }[]; describe?: () => string } = {}) {
@@ -1157,6 +1181,47 @@ it("carries the camera with the selection once focused, and never moves a camera
   expect(bay).toBeGreaterThan(fresh.stage.specimen.center(partIndex(arch, { kind: "layer", floor: 20 }), v).y);
   expect(bay).toBeLessThan(fresh.stage.specimen.center(partIndex(arch, { kind: "layer", floor: 21 }), v).y);
   fresh.stage.dispose();
+});
+
+it("moves the model out from under a panel opened beside it, back when it closes, and never moves a camera the visitor has placed", () => {
+  const arch = buildArch(QWEN_INFO), h = harness(arch, { width: 1200, height: 700 }), { camera } = h, v = new THREE.Vector3();
+  /** The model's left and right edges in the view, in pixels. */
+  const edges = () => {
+    camera.updateMatrixWorld(true);
+    let left = Infinity, right = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      v.set(arch.bounds[i & 1 ? "max" : "min"][0], arch.bounds[i & 2 ? "max" : "min"][1], arch.bounds[i & 4 ? "max" : "min"][2]).project(camera);
+      left = Math.min(left, (v.x * 0.5 + 0.5) * 1200); right = Math.max(right, (v.x * 0.5 + 0.5) * 1200);
+    }
+    return { left, right, middle: (left + right) / 2 };
+  };
+  h.run(4);
+  const open = edges();
+  expect(open.middle).toBeGreaterThan(540);
+  expect(open.middle).toBeLessThan(660);
+  // The selected part's panel opens over the right 384 pixels: the model stands in the 816 that are left.
+  h.stage.setCover(0, 384); h.run(80);
+  const beside = edges();
+  expect(beside.right).toBeLessThanOrEqual(816);
+  expect(beside.middle).toBeLessThan(open.middle - 120);
+  // Both panels open, then both closed: it is back where it started.
+  h.stage.setCover(384, 384); h.run(80);
+  expect(edges().left).toBeGreaterThanOrEqual(384);
+  expect(edges().right).toBeLessThanOrEqual(816);
+  h.stage.setCover(0, 0); h.run(80);
+  expect(edges().middle).toBeCloseTo(open.middle, 3);
+  // The same cover again asks for nothing.
+  const drawn = h.renderer.render.mock.calls.length;
+  h.stage.setCover(0, 0); h.run(4);
+  expect(h.renderer.render.mock.calls.length).toBe(drawn);
+  // A camera the visitor has placed stays put when a panel opens over the stage.
+  h.takeCamera();
+  camera.position.add(new THREE.Vector3(0.6, 0.1, -0.3));
+  const placed = { position: camera.position.clone(), target: h.controls.target.clone() };
+  h.stage.setCover(384, 0); h.stage.overlaysChanged(); h.run(80);
+  expect(camera.position.distanceTo(placed.position)).toBeLessThan(1e-6);
+  expect(h.controls.target.distanceTo(placed.target)).toBeLessThan(1e-6);
+  h.stage.dispose();
 });
 
 it("focuses on a double click, goes home on a double click of the backdrop, and never doubles in Punch", () => {

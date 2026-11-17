@@ -1,10 +1,12 @@
 // Live output and Replay, in one strip directly under the 3D stage. Live shows what the model is
 // writing. Replay walks a finished answer back through the whole model from values already measured.
-import { useEffect, useId, useMemo, useRef } from "react";
+import { useContext, useEffect, useId, useMemo, useRef } from "react";
 import { chooseWord, piece } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { modelPct, pct, signed } from "../ui/color.ts";
 import { FollowControl } from "../ui/FollowControl.tsx";
+import { useNarrow } from "../ui/useNarrow.ts";
+import { Immersive } from "./immersive.ts";
 import { chosen, towerValues, visibleTokens } from "../ui/word.ts";
 import { beatAt, beatLabel, pushCoverage, pushSoFar, runningPush } from "./playback.ts";
 import { type Scope, SPEEDS } from "./replay.ts";
@@ -35,6 +37,8 @@ export function ReplayBar() {
   const update = useStore((s) => s.replay);
   const mode = useStore((s) => s.mode);
   const id = useId();
+  const narrow = useNarrow();
+  const compact = useContext(Immersive) && narrow;
   const main = useRef<HTMLButtonElement>(null);
   /** Set when a button here changes the mode, so the focus goes to the button that took its place. */
   const moved = useRef(false);
@@ -76,7 +80,7 @@ export function ReplayBar() {
         title={wait ? undefined : "Play this reply back through the model from its first token. Nothing is generated again."} onClick={() => enter("answer")}><Icon name="play" />Replay answer</button>
     </div>
     <div className="replay-follow"><FollowControl /></div>
-    <p className="note replay-how" id={`${id}-how`}>{wait || <>Walks this reply through the whole model, token by token. <button type="button" className="linkish" onClick={() => enter("token")}>Replay only this token</button></>}</p>
+    <p className="note replay-how" id={`${id}-how`}>{wait || <><span className="replay-what">Walks this reply through the whole model, token by token.</span> <button type="button" className="linkish" onClick={() => enter("token")}>Replay only this token</button></>}</p>
   </section>;
 
   const whole = rp.step >= rp.beats, beat = beatAt(model, rp.step - 1);
@@ -94,10 +98,23 @@ export function ReplayBar() {
   const whollyAnswer = rp.scope === "answer";
   const span = (whollyAnswer ? rp.tokens * rp.beats : rp.beats) - 1, done = (whollyAnswer ? rp.token * rp.beats : 0) + rp.step - 1;
 
+  const options = <div className="replay-options">
+      <div className="replay-option"><span id={`${id}-scope`}>Play</span>
+        <div className="seg" role="group" aria-labelledby={`${id}-scope`}>
+          <button type="button" aria-pressed={rp.scope === "answer"} title="Play every token of the answer, one after another" onClick={() => session.setScope("answer")}>Whole answer</button>
+          <button type="button" aria-pressed={rp.scope === "token"} title="Play this token and stop" onClick={() => session.setScope("token")}>This token</button>
+        </div></div>
+      <div className="replay-option"><span id={`${id}-speed`}>Speed</span>
+        <div className="seg" role="group" aria-labelledby={`${id}-speed`}>
+          {SPEEDS.map((v) => <button key={v.id} type="button" aria-pressed={rp.speed === v.id} onClick={() => session.setSpeed(v.id)}>{v.label}</button>)}
+        </div></div>
+      {!rp.ended && started && <button type="button" className="linkish replay-restart" onClick={() => session.restart()}>{rp.scope === "answer" ? "Start over" : "Start this token over"}</button>}
+    </div>;
+
   return <section className="replay-bar replaying" aria-label="Replay of this answer">
     <p className="sr-only" aria-live="polite">{spoken}</p>
     <div className="replay-head">
-      <span className={`replay-mode on ${state}`}>{rp.playing ? "Replaying" : rp.ended ? "Replay finished" : "Replay paused"}</span>
+      <span className={`replay-mode on ${state}`}>{rp.playing ? "Replaying" : rp.ended ? (compact ? "Finished" : "Replay finished") : (compact ? "Paused" : "Replay paused")}</span>
       {token}
       <button type="button" className="btn replay-exit" title="End the replay and show the newest output again" onClick={back}>Back to live</button>
     </div>
@@ -105,12 +122,12 @@ export function ReplayBar() {
       aria-label={whollyAnswer ? `Replay progress through the whole answer: ${where}` : `Replay progress through this token: step ${rp.step} of ${rp.beats}`} />
     <div className="replay-transport" role="group" aria-label="Replay controls">
       <button ref={main} type="button" className="btn primary replay-main" onClick={() => (rp.playing ? session.pause() : session.play())}>
-        <Icon name={rp.playing ? "pause" : rp.ended ? "again" : "play"} />{label}</button>
+        <Icon name={rp.playing ? "pause" : rp.ended ? "again" : "play"} /><span className="replay-word">{label}</span></button>
       <div className="replay-steps" role="group" aria-label="Step through the model">
         <button type="button" className="btn replay-step" title="Back one step through the model. Pauses the replay."
-          disabled={rp.step <= 1 && (rp.scope !== "answer" || rp.token <= 0)} onClick={() => session.stepBy(-1)}><Icon name="back" />Back a step</button>
+          disabled={rp.step <= 1 && (rp.scope !== "answer" || rp.token <= 0)} onClick={() => session.stepBy(-1)}><Icon name="back" /><span className="replay-word">Back a step</span></button>
         <button type="button" className="btn replay-step" title="Forward one step through the model. Pauses the replay."
-          disabled={whole && (rp.scope !== "answer" || rp.token >= rp.tokens - 1)} onClick={() => session.stepBy(1)}>Next step<Icon name="forward" /></button>
+          disabled={whole && (rp.scope !== "answer" || rp.token >= rp.tokens - 1)} onClick={() => session.stepBy(1)}><span className="replay-word">Next step</span><Icon name="forward" /></button>
       </div>
       <label className="replay-scrub" htmlFor={`${id}-steps`}>
         <span className="replay-scrub-name">Steps for this token</span>
@@ -124,17 +141,14 @@ export function ReplayBar() {
         : <><strong>{beatLabel(beat)}.</strong>{view === "push" && total ? ` Direct pushes so far: ${signed(pushSoFar(running!, rp.step))} of ${total}.` : view === "push" ? partial : ""}
           {guess ? ` If it stopped after this layer it would say “${text(guess.id)}” (${pct(guess.p)}).` : ""}</>}
     </p>
-    <div className="replay-options">
-      <div className="replay-option"><span id={`${id}-scope`}>Play</span>
-        <div className="seg" role="group" aria-labelledby={`${id}-scope`}>
-          <button type="button" aria-pressed={rp.scope === "answer"} title="Play every token of the answer, one after another" onClick={() => session.setScope("answer")}>Whole answer</button>
-          <button type="button" aria-pressed={rp.scope === "token"} title="Play this token and stop" onClick={() => session.setScope("token")}>This token</button>
-        </div></div>
-      <div className="replay-option"><span id={`${id}-speed`}>Speed</span>
-        <div className="seg" role="group" aria-labelledby={`${id}-speed`}>
-          {SPEEDS.map((v) => <button key={v.id} type="button" aria-pressed={rp.speed === v.id} onClick={() => session.setSpeed(v.id)}>{v.label}</button>)}
-        </div></div>
-      {!rp.ended && started && <button type="button" className="linkish replay-restart" onClick={() => session.restart()}>{rp.scope === "answer" ? "Start over" : "Start this token over"}</button>}
-    </div>
+    {compact ? <details className="replay-settings" onKeyDown={(event) => {
+      if (event.key !== "Escape" || !event.currentTarget.open) return;
+      event.preventDefault();
+      event.currentTarget.open = false;
+      event.currentTarget.querySelector("summary")?.focus();
+    }}>
+      <summary>Replay options</summary>
+      {options}
+    </details> : options}
   </section>;
 }

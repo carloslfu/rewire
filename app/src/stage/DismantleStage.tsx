@@ -201,7 +201,7 @@ export default function DismantleStage() {
   return <Workbench arch={arch} active={active} title={model.id === "tiny" ? "Your trained brain" : "Under the hood"} status={status}
     tools={["explore", "grab", "punch"]} selected={selected} onSelect={select} onPunch={punch} describe={describe}
     punchHelp="Click a head, an MLP or a layer to knock it out. Its real output is set to zero and your samples update. Click it again to put it back."
-    onHidden={() => session.pause()} onStage={setStage} rail={<StageQuestion />} railTitle="Question and replies" bar={<ReplayBar />} transport={transport}
+    onHidden={() => session.pause()} onStage={setStage} rail={<StageQuestion />} railTitle="Question and replies" railName="Question" bar={<ReplayBar />} transport={transport}
     restore={{ label: "Restore model", disabled: !!reason || !changes.length, run: () => void applyChips({}) }}>
     <ReplayStatus compact />
     {part ? <>

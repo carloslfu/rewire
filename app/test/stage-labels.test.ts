@@ -81,7 +81,7 @@ it("reserves the bottom of the view only where the breadcrumb and dock sit under
   expect(dockInset([dock], 0, 800, 0)).toBe(0);
 });
 
-it("lets Escape close a menu or leave a text field before it closes the full view", () => {
+it("lets Escape close a menu or leave a text field before it closes the full screen view", () => {
   // A select: the first Escape belongs to its menu, the second closes the view.
   expect(escapeIntent({ tagName: "SELECT" }, false, false)).toBe("menu");
   expect(escapeIntent({ tagName: "SELECT" }, true, false)).toBe("close");
@@ -93,7 +93,7 @@ it("lets Escape close a menu or leave a text field before it closes the full vie
   for (const target of [{ tagName: "INPUT", type: "range" }, { tagName: "BUTTON" }, { tagName: "DIV" }]) expect(escapeIntent(target, false, false)).toBe("close");
 });
 
-it("makes the page behind the full view inert and restores it exactly", () => {
+it("makes the page behind the full screen view inert and restores it exactly", () => {
   const bench = node("DIV"), sibling = node("P");
   const scope = node("ASIDE", {}, [sibling, bench]), main = node("MAIN");
   const layout = node("DIV", {}, [main, scope]);
@@ -107,7 +107,7 @@ it("makes the page behind the full view inert and restores it exactly", () => {
   const release = isolate(bench as unknown as Element);
   // The header, the skip link, the conversation and the bench's own neighbors stop taking input.
   expect(inert()).toEqual([skip, header, main, sibling, hidden, already]);
-  // The bench and its ancestors stay live; so do dialogs (the inspector opens over the full view) and announcements.
+  // The bench and its ancestors stay live; so do dialogs (the inspector opens over the full screen view) and announcements.
   for (const n of [bench, scope, layout, root, body, html, inspector, about, live, script]) expect(n.hasAttribute("inert")).toBe(false);
   release();
   // Only what was added is removed: something inert for its own reasons stays inert.
@@ -118,7 +118,7 @@ it("makes the page behind the full view inert and restores it exactly", () => {
   expect(() => isolate(node("DIV") as unknown as Element)()).not.toThrow();
 });
 
-it("stacks the full view above the sticky page header", () => {
+it("stacks the full screen view above the sticky page header and keeps the docked sizes out of it", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const z = (selector: string) => {
     const rule = new RegExp(`(?:^|[},])\\s*${selector.replace(/[.:()]/g, "\\$&")}\\s*(?:,[^{]*)?\\{([^}]*)\\}`, "m").exec(css);
@@ -129,7 +129,14 @@ it("stacks the full view above the sticky page header", () => {
   expect(css).toMatch(/\.top \{ position: sticky;[^}]*z-index: 5;/);
   expect(css).toMatch(/\.lab-scope \{ position: sticky;/);
   expect(z(".lab-scope.stage-raised")).toBeGreaterThan(5);
-  expect(z(".stage-bench.expanded")).toBeGreaterThan(5);
+  expect(z(".stage-bench.immersive")).toBeGreaterThan(5);
+  // It fills the viewport by itself, so it is complete where the browser has no full screen of its own or refuses it.
+  expect(css).toMatch(/\.stage-bench\.immersive \{[^}]*position: fixed; inset: 0;/);
+  expect(css).toMatch(/\.stage-bench\.immersive \.stage-view \{ position: absolute; inset: 0;/);
+  // The docked height limits name more classes than any full screen rule. They must not apply to its panel.
+  for (const rule of css.match(/^\.lab-scope \.stage-bench[^{]*\.stage-lower \{[^}]*max-height[^}]*\}/gm) ?? [null]) expect(rule).toMatch(/^\.lab-scope \.stage-bench:not\(\.immersive\)/);
+  // Both panels are closed until their class says otherwise.
+  expect(css).toContain(".stage-bench.immersive:not(.rail-open) .stage-rail, .stage-bench.immersive:not(.side-open) .stage-lower { display: none; }");
 });
 
 it("closes an open dock panel first, wherever the focus is, and leaves a composition to the input method", () => {

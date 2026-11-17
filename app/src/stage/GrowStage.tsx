@@ -7,6 +7,7 @@ import { TINY_INFO } from "../model/info.ts";
 import { store } from "../state/store.ts";
 import { tinyDictPlate, tinyLayerPlates, tinyValues } from "./adapters.ts";
 import { buildArch, type Part, partIndex, partName } from "./arch.ts";
+import { Docked } from "./immersive.ts";
 import type { Pose } from "./intervene.ts";
 import type { BaySpec, Stage, Tool } from "./scene/stage.ts";
 import { RealNote, Workbench } from "./Workbench.tsx";
@@ -99,15 +100,19 @@ export default function GrowStage({ params, reference, intact, step, running, ac
     <span className="num">{step.toLocaleString("en-US")} steps{controls.loss !== null ? ` · loss ${controls.loss.toFixed(3)}` : ""}</span>
   </div>;
 
-  const transport = <section className="stage-transport" aria-label="Training">
+  // Under the stage when it is docked, and along the bottom in full screen.
+  const training = <>
     {actions}
     <p className="note training-status" role="status">{controls.unavailable ? "Live training needs WebGPU. Try Chrome on a supported device." : controls.status || (params ? "Colors refresh from the real weights every 100 steps." : "Start learning to watch every part's weights move.")}</p>
     {controls.continueNote && !running && <p className="note">{controls.continueNote}</p>}
+  </>;
+
+  const transport = <section className="stage-transport" aria-label="Training">
+    <Docked>{training}</Docked>
     <div className="seg" role="group" aria-label="Colors show"><button type="button" aria-pressed={difference} onClick={() => setDifference(true)}>Change since start</button><button type="button" aria-pressed={!difference} onClick={() => setDifference(false)}>Weights now</button></div>
   </section>;
 
   const rail = <div className="stage-question">
-    <h3>Ask it something</h3>
     <p className="note">Only this starting text goes into the model.</p>
     <div className="probe-input"><input aria-label="Test starting text" value={controls.prompt} disabled={disabled} onChange={(e) => controls.setPrompt(e.target.value)} />
       <button type="button" className="btn" disabled={!params || disabled || !controls.prompt.trim()} onClick={controls.test}>Generate</button></div>
@@ -120,7 +125,8 @@ export default function GrowStage({ params, reference, intact, step, running, ac
     status={<span>{arch.floors} transformer layers · {layout(cfg).total.toLocaleString("en-US")} trainable numbers{controls.mutation ? " · damaged copy" : ""}</span>}
     tools={["explore", "grab", "punch"]} selected={selected} onSelect={setSelected} onPunch={punch} describe={describe} onStage={setStage}
     punchHelp="Click any part of a layer to scramble that layer's real weights at the strength below, starting from the intact copy. Click the same layer again to restore it."
-    rail={rail} railTitle="Ask it something" transport={transport}
+    rail={rail} railTitle="Ask it something" railName="Ask" transport={transport}
+    immersiveBar={<section className="training-bar" aria-label="Training">{training}</section>}
     restore={{ label: "Restore intact model", disabled: !controls.mutation || disabled, run: controls.restore }}>
     <section className="stage-info">
       {selected ? <>
