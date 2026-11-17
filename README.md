@@ -141,8 +141,18 @@ What is measured and what is drawn:
   normalization, the query, key and value projections, the normalized and position-rotated queries and
   keys, the scores, attention, mixed values, the combined heads and the addition to the stream, then
   the MLP's normalization, gate, up projection, neurons, down projection and the stream out. During a
-  replay the plates of the selected layer come up in that order. Hover a tile to read its number. With a head selected, arcs show its measured attention over the context. The bars on top are
-  the real candidate probabilities.
+  replay the plates of the selected layer come up in that order. Hover a tile to read its number. With a head selected, arcs show its measured attention over the context. The bars over
+  Words out are the model's own probabilities for the pieces it ranked highest and for the piece that
+  was written: temperature 1, over the whole vocabulary, the same measure as the written piece's
+  log-probability. They are not the sampler's odds, which are a softmax at the sampling temperature
+  over the top 20 only and can read 100% for a piece the model gave far less. The 2D view keeps those
+  odds where the draw is the subject, and says so: the candidate table (where a candidate is picked)
+  is headed Odds in the draw, the detail panel lists Probability when drawn beside At temperature 1,
+  and the tower's Words out figure is described as in the draw. The written piece always has a bar,
+  also when you picked it from outside the top 20. Every number has two decimals (62.18%, 99.72%,
+  1.00%), so tokens with different probabilities read differently as a replay moves through them.
+  Below 0.01% a bar reads <0.01%, from 99.995% up it reads >99.99%, never exactly 0% or 100%, and a
+  value that is not a probability reads unavailable.
 - Teach shows the adapter's actual A and B matrices and the size of each of its eight ranks, refreshed
   every 10 steps. Frozen layers are drawn dimmed. No activations are measured during teaching, so
   nothing else lights up.
@@ -170,8 +180,8 @@ on the newest token, and Previous and Next choose another.
 
 **Replay answer** walks a finished reply back through the whole model. It starts at the reply's first
 visible token, lights that token's steps in the order the architecture computes them (the token read,
-each layer's attention then its MLP, then the choice: 58 steps for Qwen, 10 for the tiny model), holds
-the finished token with its real candidate probabilities, and moves on to the next token until the
+each layer's attention then its MLP, then the choice: 58 steps for Qwen, 10 for the tiny model), then shows
+the finished token's result, and moves on to the next token until the
 last one. Then it stops; it does not loop. A replay reads only values that were measured while the
 reply was written. Nothing is generated again, no number is invented, and the pace is an
 illustration, not a timing of the real computation. (Updating your samples after a model change is a
@@ -190,6 +200,14 @@ different thing: there the model really writes the changed answers again.)
   at: the dictionary, one layer's attention heads, one layer's MLP, or the output. They are a position
   only. They light nothing, do not depend on what was measured, leave the selection outline and the
   guide mark as they are, and never move the camera. With reduced motion they are a still cue.
+- The output is shown where the model produces it: after the token's last step. Until then Words out
+  carries no bar, no word and no number, the written piece included, only the note Not chosen yet,
+  and no bar grows toward its value in between. Scrubbing or stepping back hides the result again, and
+  when a replay reaches another token (by playing on, by a step, or because you selected one in this
+  reply, the other reply or another sample) the output is emptied at once and stays empty until that
+  token's own result has been handed over. Labels are placed before they are first shown, so none
+  appears early or out of place. The reply text beside the stage and the token named in the strip are the answer already
+  written, and stay. Live output shows each result as soon as it is generated.
 - The strip says Replaying, Replay paused or Replay finished, and its progress line matches the
   scope: the whole answer from its first step to its last, or this token alone from empty to full.
 - Pause and Resume hold and continue. Back a step and Next step, and the scrubber labelled

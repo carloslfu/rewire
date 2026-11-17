@@ -281,3 +281,101 @@ it("tells the engine when a 3D view is open, so writing and comparing leave the 
   actions.stageShown(false);
   expect(mock.setStageOpen).toHaveBeenLastCalledWith(false);
 });
+
+/** A stage that records what the link asks of it, and keeps the hold as the real stage does. */
+function fakeStage() {
+  const log: string[] = [];
+  const st = {
+    log, held: false, replaying: false, driver: null as unknown,
+    setDriver(d: unknown) { st.driver = d; log.push(d ? "driver" : "no driver"); },
+    setPlayhead(t: number | null) { st.replaying = t !== null; if (t === null) st.held = false; log.push(`playhead ${t}`); },
+    holdOutput(held = true) { held &&= st.replaying; if (held !== st.held) { st.held = held; log.push(held ? "hold" : "release"); } },
+    setCandidates(list: { label: string }[]) { st.held = false; log.push(`candidates ${list.map((c) => c.label).join(",")}`); },
+  };
+  return st;
+}
+/** What React does after a render: hand over the selected token's candidates with its identity. */
+const handOver = (link: ReturnType<typeof R.linkStage>) => {
+  const s = store.get(), w = s.word!, turn = s.turns[w.turn], reply = w.side === "normal" ? turn.normal : turn.changed!;
+  link.deliver([{ label: `tok${reply.toks[w.index].id}`, p: 0.5, chosen: true }], R.outputIdentity(s));
+};
+
+it("holds the output from the moment a replay reaches a token until that token's own result is handed over", async () => {
+  await actions.send("One"); await actions.send("Two");
+  await actions.applyChips(head(0)); await flush();
+  const stage = fakeStage(), link = R.linkStage(stage as never);
+  // Live: results are handed over and shown at once; nothing is ever held.
+  handOver(link);
+  expect(stage.log).toEqual(["driver", "playhead null", "candidates tok201"]);
+  actions.chooseWord(at(1, "normal", 1)); handOver(link);
+  expect(stage.held).toBe(false);
+  expect(stage.log).not.toContain("hold");
+
+  // A replay of the whole answer goes to the first token: held before anything else can be drawn, until its result arrives.
+  stage.log.length = 0;
+  expect(R.startReplay("answer")).toBe(true);
+  expect(stage.log).toEqual(["playhead 1", "hold"]);
+  handOver(link);
+  expect(stage.log.slice(2)).toEqual(["candidates tok100"]);
+  expect(stage.held).toBe(false);
+  // Playing on into the next token: its first step and the hold arrive together, before React has rendered anything.
+  stage.log.length = 0;
+  frames(() => R.session.get().token === 1);
+  expect(stage.log.slice(-2)).toEqual(["playhead 1", "hold"]);
+  expect(stage.log.filter((l) => l === "hold")).toHaveLength(1);
+  handOver(link);
+  expect(stage.held).toBe(false);
+
+  // The same index in the changed reply is another token: held, though the index did not move.
+  R.session.pause();
+  stage.log.length = 0;
+  actions.chooseWord(at(1, "changed", 1));
+  expect(R.session.get().token).toBe(1);
+  expect(stage.log).toEqual([`playhead ${beats}`, "hold"]);
+  handOver(link);
+  expect(stage.log.at(-1)).toBe("candidates tok201");
+  expect(stage.held).toBe(false);
+  // And the same index of the same side in another sample.
+  stage.log.length = 0;
+  actions.chooseWord(at(0, "changed", 1));
+  expect(stage.log).toEqual([`playhead ${beats}`, "hold"]);
+  // Back to the token whose result is already there, before React rendered the one in between: released, since nothing new will arrive.
+  actions.chooseWord(at(1, "changed", 1));
+  expect(stage.held).toBe(false);
+  expect(stage.log.at(-1)).toBe("release");
+  // A step within the token never holds.
+  stage.log.length = 0;
+  R.session.seek(3); R.session.stepBy(1);
+  expect(stage.log).toEqual(["playhead 3", "playhead 4"]);
+
+  // Back to live while a result is still awaited: live output is not held.
+  actions.chooseWord(at(0, "normal", 0));
+  expect(stage.held).toBe(true);
+  R.session.exit("live");
+  expect(stage.held).toBe(false);
+  expect(stage.log.at(-1)).toBe("playhead null");
+  // Closing the link: the stage is let go, the replay is not left running, and nothing reaches the stage afterwards.
+  R.startReplay("answer");
+  stage.log.length = 0;
+  link.close();
+  expect(stage.log).toEqual(["no driver"]);
+  expect(R.session.get().playing).toBe(false);
+  R.session.play(); R.session.seek(5);
+  expect(stage.log).toEqual(["no driver"]);
+});
+
+it("names a token by its model, sample, reply and place, so the same index elsewhere is not the same token", async () => {
+  await actions.send("One"); await actions.send("Two");
+  await actions.applyChips(head(0)); await flush();
+  const id = (w: WordRef) => R.outputIdentity({ ...store.get(), word: w });
+  const all = [at(0, "normal", 1), at(0, "changed", 1), at(1, "normal", 1), at(1, "changed", 1), at(0, "normal", 0)].map(id);
+  expect(new Set(all).size).toBe(all.length);
+  expect(id(at(0, "normal", 1))).toBe(id(at(0, "normal", 1)));
+  // A model change makes every token a new one; a measurement patched into the reply does not.
+  const before = id(at(0, "normal", 1));
+  await actions.floorDetail(at(0, "normal", 1));
+  expect(id(at(0, "normal", 1))).toBe(before);
+  await actions.applyChips(head(2)); await flush();
+  expect(id(at(0, "normal", 1))).not.toBe(before);
+  expect(R.outputIdentity({ ...store.get(), word: null })).toBe("");
+});

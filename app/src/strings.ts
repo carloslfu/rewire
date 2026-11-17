@@ -153,7 +153,7 @@ export const S = {
   }),
 
   candidates: "Candidates",
-  candidatesNote: (k: number) => `The draw used the top ${k} after the cut (top-p 0.8).`,
+  candidatesNote: (k: number) => `Odds in the draw: the top 20 at the sampling temperature, not the model's probability over its whole vocabulary. The draw used the top ${k} after the cut (top-p 0.8).`,
   cut: "cut",
   forcePick: "Use this word",
   floorGuesses: "Layer predictions",

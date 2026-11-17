@@ -3,7 +3,7 @@
 import { LESSON_RANK, type LessonWeights } from "@rewire/engine/src/lora.ts";
 import { layout, type Tensor, type TinyConfig } from "@rewire/tiny/src/config.ts";
 import type { ModelInfo } from "../model/info.ts";
-import type { FloorDetail } from "../model/types.ts";
+import type { FloorDetail, Tok } from "../model/types.ts";
 import { type Arch, pushIndex, pushLength } from "./arch.ts";
 
 export interface PartValues {
@@ -17,6 +17,25 @@ export interface PartValues {
 function finish(raw: Float32Array, scale: number): PartValues {
   const s = scale > 0 && Number.isFinite(scale) ? scale : 1;
   return { raw, scale: s, scaled: raw.map((v) => (Number.isNaN(v) ? NaN : Math.max(-1, Math.min(1, v / s)))) };
+}
+
+export interface OutputBar { id: number; p: number; chosen: boolean }
+
+/**
+ * The bars over Words out for one written token: the model's own probability of the pieces it ranked
+ * highest and of the piece that was written, all at temperature 1 over the whole vocabulary. The
+ * written piece always has a bar, with exp(lp1), also when it was picked by hand from outside the
+ * list. The draw's odds are never used here, so one chart never mixes the two measures; a candidate
+ * with no model probability is left out rather than drawn with the other kind of number. A written
+ * piece whose log-probability is not a number keeps its bar with NaN, which is labelled unavailable.
+ */
+export function outputBars(tok: Pick<Tok, "id" | "lp1" | "cands">, limit: number): OutputBar[] {
+  const own: OutputBar = { id: tok.id, p: Number.isNaN(tok.lp1) ? Number.NaN : Math.max(0, Math.min(1, Math.exp(tok.lp1))), chosen: true };
+  const others = tok.cands.filter((c) => c.id !== tok.id && c.modelP !== undefined && c.modelP >= 0 && c.modelP <= 1)
+    .map((c): OutputBar => ({ id: c.id, p: c.modelP!, chosen: false })).sort((a, b) => b.p - a.p).slice(0, Math.max(0, limit - 1));
+  const at = Number.isNaN(own.p) ? -1 : others.findIndex((o) => o.p < own.p);
+  others.splice(at < 0 ? others.length : at, 0, own);
+  return others;
 }
 
 /** A token's direct pushes placed on the parts that made them. A layer's deck carries the sum of its parts. */

@@ -281,6 +281,9 @@ function harness(arch: Arch, options: { hidden?: boolean; width?: number; coarse
   const element = () => {
     const listeners = new Map<string, Set<unknown>>();
     return { listeners, style: {} as Record<string, string>, className: "", textContent: "", hidden: false, removed: false, children: [] as unknown[],
+      /** How the element was styled each time its size was read, for labels that are measured before they may be seen. */
+      measured: [] as string[],
+      get offsetWidth() { this.measured.push(`${this.style.visibility ?? ""}|${this.hidden}`); return 0; },
       addEventListener(type: string, f: unknown) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type)!.add(f); },
       removeEventListener(type: string, f: unknown) { listeners.get(type)?.delete(f); },
       setAttribute() {}, remove() { this.removed = true; }, append(child: unknown) { this.children.push(child); }, prepend(child: unknown) { this.children.unshift(child); },
@@ -533,6 +536,101 @@ it("brackets and names the step a replay is at, as a position only, and keeps se
   still.stage.dispose();
 });
 
+it("shows the output of a replayed token only after its last step: no bar, no word and no number before it", () => {
+  for (const info of [TINY_INFO, QWEN_INFO]) {
+    const arch = buildArch(info), h = harness(arch), beats = beatCount(info), sp = h.stage.specimen;
+    const bars = () => (sp as unknown as { bars: THREE.InstancedMesh }).bars.count;
+    /** Output labels on screen after a drawn frame: the candidate words with their numbers, or the waiting note. The fake renderer does not update the camera, so the test does. */
+    const labels = () => h.spans.filter((x) => x.className.startsWith("stage-label bar") && !x.removed && !x.hidden).map((x) => x.textContent);
+    const output = () => { h.camera.updateMatrixWorld(true); h.stage.invalidate(); h.run(2); return labels(); };
+    const first = [{ label: "Paris", p: 0.62, chosen: true }, { label: "London", p: 0.2, chosen: false }, { label: "Rome", p: 0.004, chosen: false }];
+    const second = [{ label: "is", p: 0.99996, chosen: true }, { label: "was", p: 0.00002, chosen: false }];
+    h.run(120);
+    // Live: the result is on show the moment its data arrives, with the model's probabilities as given.
+    h.stage.setCandidates(first);
+    expect(bars()).toBe(3);
+    // Before any frame is drawn: each new label was measured laid out but unpainted, and is hidden until a frame places it.
+    const fresh = h.spans.filter((x) => x.className.startsWith("stage-label bar") && !x.removed);
+    expect(fresh.map((x) => x.textContent)).toEqual(["Paris 62.00%", "London 20.00%", "Rome 0.40%", "Not chosen yet"]);
+    for (const x of fresh) {
+      expect(x.measured).toEqual(["hidden|false"]);
+      expect(x.hidden).toBe(true);
+      expect(x.style.visibility).toBe("");
+    }
+    expect(labels()).toEqual([]);
+    expect(output()).toContain("Paris 62.00%");
+    expect(output()).not.toContain("Not chosen yet");
+    // A replay starts: every step before the last shows nothing of the result, the written word included.
+    for (const step of [1, 2, Math.floor(beats / 2), beats - 1]) {
+      h.stage.setPlayhead(step);
+      expect(bars()).toBe(0);
+      expect(output()).toEqual(["Not chosen yet"]);
+    }
+    // The last step lighting up: still nothing, at any point of it. No bar grows toward its value.
+    h.stage.setPlayhead(beats, 140);
+    expect(sp.playheadNow).toBe(beats - 1);
+    expect(bars()).toBe(0);
+    for (let i = 0; i < 6; i++) {
+      h.run();
+      if (sp.playheadNow !== null) { expect(bars()).toBe(0); expect(labels()).toEqual(["Not chosen yet"]); }
+    }
+    // Done: the exact result, whole, with its real numbers.
+    h.run(20);
+    expect(sp.playheadNow).toBeNull();
+    expect(bars()).toBe(3);
+    expect(output()).toContain("Paris 62.00%");
+    expect(output()).not.toContain("Not chosen yet");
+    const top = sp.barTop(0, new THREE.Vector3()).y, base = sp.barTop(1, new THREE.Vector3()).y;
+    expect(top - base).toBeCloseTo((0.62 - 0.2) * arch.barRoom, 4);
+    // Scrubbing back hides it again at once, and forward to the end shows it again.
+    expect(labels()).toContain("Paris 62.00%");
+    h.stage.setPlayhead(beats - 3);
+    // In the same call, before any frame: the words and numbers are already off.
+    expect(labels().filter((t) => t !== "Not chosen yet")).toEqual([]);
+    expect(bars()).toBe(0);
+    expect(output()).toEqual(["Not chosen yet"]);
+    h.stage.setPlayhead(beats);
+    expect(bars()).toBe(3);
+    // The replay goes on to the next token: back to its first step, and that token's data arrives afterwards. Nothing of either shows.
+    h.stage.setPlayhead(1);
+    h.stage.holdOutput();
+    h.stage.setCandidates(second);
+    expect(bars()).toBe(0);
+    expect(output()).toEqual(["Not chosen yet"]);
+    h.stage.setPlayhead(beats);
+    expect(output()).toContain("is >99.99%");
+    // A token chosen by hand is shown whole. Until its own data arrives the previous token's result is not passed off as its result.
+    expect(labels()).toContain("is >99.99%");
+    h.stage.holdOutput();
+    // Again at once, with no frame in between.
+    expect(labels().filter((t) => t !== "Not chosen yet")).toEqual([]);
+    expect(bars()).toBe(0);
+    expect(output()).toEqual(["Not chosen yet"]);
+    h.stage.setCandidates(first);
+    expect(bars()).toBe(3);
+    // The new labels do not flash before their first frame either, and the old ones are gone.
+    expect(labels()).toEqual([]);
+    expect(output()).toContain("Paris 62.00%");
+    // Released without new data (the replay came back to the token whose data is already there): shown again.
+    h.stage.holdOutput();
+    h.stage.holdOutput(false);
+    expect(bars()).toBe(3);
+    expect(output()).toContain("Paris 62.00%");
+    // Back to live while waiting: live output is never held.
+    h.stage.holdOutput();
+    h.stage.setPlayhead(null);
+    expect(bars()).toBe(3);
+    expect(output()).toContain("Paris 62.00%");
+    h.stage.holdOutput();
+    expect(bars()).toBe(3);
+    // No output at all: no bars, and no note about one.
+    h.stage.setCandidates([]);
+    h.stage.setPlayhead(2);
+    expect(output()).toEqual([]);
+    h.stage.dispose();
+  }
+});
+
 it("stops lending frames to a replay while hidden, off screen or lost, and says so", () => {
   const arch = buildArch(TINY_INFO), h = harness(arch), beats = beatCount(TINY_INFO), replay = replayOf(3, beats);
   h.events.hidden.mockClear();
@@ -586,7 +684,7 @@ it("keeps every label it shows inside the view, off the toolbar and apart from t
       return { text: s.textContent, left: Number(x), top: Number(y), width: s.textContent.length * 6.2 + 8, height: 14 };
     });
     // The words that matter are among them.
-    for (const need of ["Words in", "Words out", "token15", "Paris 80%"]) expect(boxes.map((b) => b.text)).toContain(need);
+    for (const need of ["Words in", "Words out", "token15", "Paris 80.00%"]) expect(boxes.map((b) => b.text)).toContain(need);
     for (const a of boxes) {
       expect(a.left).toBeGreaterThanOrEqual(0);
       expect(a.left + a.width).toBeLessThanOrEqual(width);

@@ -242,7 +242,7 @@ it("shows Replay as its own mode: what is playing, where it is, what each contro
   R.session.toToken(1);
   html = renderToString(<Dismantle />); t = text(html);
   expect(buttons(html).get("Play from this token")).toEqual([false]);
-  expect(t).toContain("Token written: “…”, which the model gave 90%. Direct pushes add up to +1.25.");
+  expect(t).toContain("Token written: “…”, which the model gave 90.48%. Direct pushes add up to +1.25.");
   // This token: the same bar is about the token alone. Its first step is empty and its last is full, wherever the token sits in the answer.
   R.session.setScope("token");
   html = renderToString(<Dismantle />);

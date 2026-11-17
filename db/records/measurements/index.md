@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/measurements
-updated: 2026-11-17T16:58:21.987657Z
+updated: 2026-11-17T17:23:56.678911Z
 ---
 
 # records/measurements
 
+- [[records/measurements/2026-11-17-output-reveal-probabilities]] — Output reveal timing and full-vocabulary probability verification
 - [[records/measurements/2026-11-17-replay-experience]] — Whole-answer replay, render pacing and fast-output verification
 - [[records/measurements/2026-11-17-follow-output]] — Follow output selection, comparison and replay verification
 - [[records/measurements/2026-11-17-3d-materials-navigation]] — Detailed 3D materials and navigation pass release and browser checks

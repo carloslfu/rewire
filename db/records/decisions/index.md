@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/decisions
-updated: 2026-11-17T16:58:22.009185Z
+updated: 2026-11-17T17:23:56.696371Z
 ---
 
 # records/decisions
 
+- [[records/decisions/2026-11-17-output-reveal-probabilities]] — Reveal measured model probabilities only at the replay output step
 - [[records/decisions/2026-11-17-replay-experience]] — Whole-answer replay with frame-driven steps and explicit controls
 - [[records/decisions/2026-11-17-follow-output]] — Consistent following and paused selection in both visualizers
 - [[records/decisions/2026-11-17-3d-materials-navigation]] — Use detailed physical materials and direct camera controls in the 3D workbench

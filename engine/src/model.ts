@@ -151,6 +151,8 @@ export class Conversation {
   /** Per floor, each head's output and the memory block's output at the last position: [floors][heads + 1][width]. */
   readonly parts: GPUBuffer; readonly scores: GPUBuffer; readonly cand: GPUBuffer;
   readonly sampleOut: GPUBuffer; readonly pushes: GPUBuffer;
+  /** Log-probability at temperature 1 of each listed candidate, over the whole vocabulary. */
+  readonly candLp: GPUBuffer;
   /** A word to use instead of the drawn one (a visitor's pick, or the comparison pass). */
   readonly forced: GPUBuffer;
   /** Mappable buffers that receive each step's results, read a few steps behind. */
@@ -186,6 +188,7 @@ export class Conversation {
     this.scores = f(cfg.vocabRows, "scores");
     this.cand = f(K.TOPK_SLICES * K.TOPK * 2, "cand");
     this.sampleOut = f(48, "sample");
+    this.candLp = f(K.TOPK, "candidate log-probabilities");
     this.pushes = f(cfg.floors * (H + 1) + 2, "pushes");
     this.forced = f(4, "forced");
     for (let i = 0; i < RING; i++) {
@@ -200,7 +203,7 @@ export class Conversation {
   destroy() {
     for (const b of [this.ct, this.SP, this.x, this.h, this.q, this.k, this.kout, this.v, this.att, this.o,
       this.mid, this.h2, this.act, this.m, this.xn, this.rinv, this.intok, this.tok, this.parts, this.scores,
-      this.cand, this.sampleOut, this.pushes, this.forced, this.lessonZ, ...this.kcache, ...this.vcache, ...this.stage, this.capture,
+      this.cand, this.sampleOut, this.candLp, this.pushes, this.forced, this.lessonZ, ...this.kcache, ...this.vcache, ...this.stage, this.capture,
       this.geometryBuffers?.before, this.geometryBuffers?.after, this.insp?.buf, this.insp?.rows, this.insp?.g, this.insp?.u]) b?.destroy();
   }
 
@@ -352,7 +355,7 @@ export class Conversation {
     a.push({ pipeline: sm, group: bind(dev, sm, [this.cand, this.SP, this.tok, this.sampleOut]), x: 1 });
     const b: Dispatch[] = [];
     const lse = m.pipe("lse", () => K.lseKernel(kc));
-    b.push({ pipeline: lse, group: bind(dev, lse, [this.scores, this.tok, this.SP, this.sampleOut]), x: 1 });
+    b.push({ pipeline: lse, group: bind(dev, lse, [this.scores, this.tok, this.SP, this.sampleOut, this.candLp]), x: 1 });
     const pk = m.pipe("push", () => K.pushKernel(kc));
     b.push({ pipeline: pk, group: bind(dev, pk, [this.tok, this.intok, m.w.dict, m.aux, this.rinv,
       this.parts, this.ct, this.SP, this.pushes]), x: cfg.floors * (cfg.queryHeads + 1) + 2 });
@@ -721,7 +724,10 @@ export class Conversation {
     const st = this.stage[slot % RING];
     enc.copyBufferToBuffer(this.sampleOut, 0, st, 0, 48 * 4);
     enc.copyBufferToBuffer(this.tok, 0, st, 48 * 4, 16);
-    enc.copyBufferToBuffer(this.pushes, 0, st, 52 * 4, (this.cfg.floors * (this.cfg.queryHeads + 1) + 2) * 4);
+    const pushes = this.cfg.floors * (this.cfg.queryHeads + 1) + 2;
+    enc.copyBufferToBuffer(this.pushes, 0, st, 52 * 4, pushes * 4);
+    // After everything that was already there, so no earlier offset moves.
+    enc.copyBufferToBuffer(this.candLp, 0, st, (52 + pushes) * 4, K.TOPK * 4);
   }
 
   /** Results of the step copied to `slot`. Call in submission order; at most RING steps behind. */
@@ -734,13 +740,13 @@ export class Conversation {
     const P = this.cfg.floors * (this.cfg.queryHeads + 1) + 1;
     return {
       drawn: u[0], token: u[48], cut: u[1], ids: u.slice(2, 22), probs: f.slice(22, 42), lp1: f[42],
-      pushes: f.slice(52, 52 + P), concept: f[52 + P],
+      pushes: f.slice(52, 52 + P), concept: f[52 + P], candLp: f.slice(53 + P, 53 + P + K.TOPK),
     };
   }
 }
 
 export const RING = 4;
-const STAGE_BYTES = (cfg: ModelConfig) => (52 + cfg.floors * (cfg.queryHeads + 1) + 2) * 4;
+const STAGE_BYTES = (cfg: ModelConfig) => (52 + cfg.floors * (cfg.queryHeads + 1) + 2 + K.TOPK) * 4;
 
 export interface StepResult {
   /** The word the draw picked. */
@@ -749,7 +755,17 @@ export interface StepResult {
   token: number;
   cut: number;
   ids: Uint32Array;
+  /**
+   * The draw's odds: a softmax at the sampling temperature over these 20 only, before the top-p cut
+   * (`cut` is how many the draw kept). A greedy step gives 1 to the first and 0 to the rest.
+   */
   probs: Float32Array;
+  /**
+   * The model's own log-probability of each candidate: temperature 1, over the whole vocabulary, the
+   * same measure as `lp1`. K.NO_CANDIDATE where the slot holds no real word. After a comparison step
+   * (which lists no candidates) these describe an earlier step's list and must not be used.
+   */
+  candLp: Float32Array;
   lp1: number;
   pushes: Float32Array;
   concept: number;

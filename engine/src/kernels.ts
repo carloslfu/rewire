@@ -904,7 +904,15 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
 }
 
 
-/** Log-probability at temperature 1 of tok[0] (sampled or forced): out[42] = scores[tok] - logsumexp(scores). */
+/** A candidate slot with no real word in it: a log-probability can never be positive. */
+export const NO_CANDIDATE = 1;
+
+/**
+ * Log-probability at temperature 1 of tok[0] (sampled or forced): out[42] = scores[tok] - logsumexp(scores).
+ * The same logsumexp gives the log-probability of each of the 20 candidates the draw listed in
+ * out[2..22): cand[k] = scores[id] - logsumexp(scores), over the whole vocabulary, whatever the
+ * sampling temperature or top-p cut was. Nothing the draw uses is written here.
+ */
 export function lseKernel(c: KernelConsts) {
   return /* wgsl */ `
 @group(0) @binding(0) var<storage, read> scores: array<f32>;
@@ -912,6 +920,7 @@ export function lseKernel(c: KernelConsts) {
 @group(0) @binding(2) var<uniform> SP: array<vec4u, 4>;
 fn sp(i: u32) -> u32 { return SP[i / 4u][i % 4u]; }
 @group(0) @binding(3) var<storage, read_write> out: array<u32>;
+@group(0) @binding(4) var<storage, read_write> cand: array<f32>;
 var<workgroup> red: array<f32, 256>;
 @compute @workgroup_size(256)
 fn main(@builtin(local_invocation_index) li: u32) {
@@ -934,7 +943,14 @@ fn main(@builtin(local_invocation_index) li: u32) {
     if (li < s) { red[li] += red[li + s]; }
     workgroupBarrier();
   }
-  if (li == 0u) { out[42] = bitcast<u32>(scores[tok[0]] - m - log(red[0])); }
+  if (li == 0u) {
+    let lse = m + log(red[0]);
+    out[42] = bitcast<u32>(scores[tok[0]] - m - log(red[0]));
+    for (var k = 0u; k < ${TOPK}u; k++) {
+      let id = out[2u + k];
+      if (id < n) { cand[k] = scores[id] - lse; } else { cand[k] = ${NO_CANDIDATE}.0; }
+    }
+  }
 }
 // ${c.cfg.vocabReal}`;
 }

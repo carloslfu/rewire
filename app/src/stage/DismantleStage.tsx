@@ -15,9 +15,8 @@ import { ReplayStatus } from "../ui/ReplayStatus.tsx";
 import { replySegments } from "../ui/reply-text.ts";
 import { chosen, comparisonTarget, isStop, towerValues } from "../ui/word.ts";
 import { ReplayBar } from "./ReplayBar.tsx";
-import { fadeMs } from "./replay.ts";
-import { replayWait, session, startReplay, useReplay } from "./replay-session.ts";
-import { attentionRow, layerPlates, pushValues, tray } from "./adapters.ts";
+import { linkStage, outputIdentity, replayWait, session, startReplay, useReplay } from "./replay-session.ts";
+import { attentionRow, layerPlates, outputBars, pushValues, tray } from "./adapters.ts";
 import { buildArch, groupHeads, type Part, partIndex, partName } from "./arch.ts";
 import { blocked, focusOf, isTarget, partChanged, partOf, poseOf, punched, restored, restoreLabel, strengthOf } from "./intervene.ts";
 import { measurementKey } from "./latest.ts";
@@ -103,11 +102,7 @@ export default function DismantleStage() {
   const trayLabels = slots.map((s) => (s.to - s.from > 1 ? `${s.to - s.from} earlier` : text(context[s.from]).replace(/\n/g, "↵")));
   const trayKey = JSON.stringify([trayLabels, slots.map((s) => Math.round(s.weight * 1000)), c?.input ?? null, selected?.kind === "head" && row ? partIndex(model, selected) : -1]);
   const candidates = useMemo(() => {
-    if (!c) return [];
-    const top = c.tok.cands.slice(0, 5);
-    const own = c.tok.cands.find((x) => x.id === c.tok.id);
-    if (own && !top.includes(own)) top[top.length - 1] = own;
-    return top.map((x) => ({ label: text(x.id), p: x.p, chosen: x.id === c.tok.id }));
+    return c ? outputBars(c.tok, 5).map((x) => ({ label: text(x.id), p: x.p, chosen: x.chosen })) : [];
   }, [c]);
   const candidateKey = JSON.stringify(candidates);
 
@@ -119,19 +114,21 @@ export default function DismantleStage() {
     stage?.setTray(slots.map((s, i) => ({ label: trayLabels[i], weight: s.weight })), slots.length - 1, c?.input ?? null, selected?.kind === "head" && row ? selected : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, trayKey]);
-  useEffect(() => { stage?.setCandidates(candidates); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [stage, candidateKey]);
-
-  // ------------------------------------------------------------ replay
   // The stage lends the replay its frames and draws its playhead. Each step reaches the stage directly,
   // without a render of this component. With no stage (2D, another bench, a rebuilt context) nothing moves.
+  // This effect comes before the one that hands over candidates, so the link exists when they arrive.
+  const link = useRef<ReturnType<typeof linkStage> | null>(null);
   useEffect(() => {
     if (!stage) return;
-    const show = () => { const r = session.get(); stage.setPlayhead(r.mode === "replay" ? r.step : null, fadeMs(r.speed)); };
-    stage.setDriver(session);
-    show();
-    const off = session.subscribe(show);
-    return () => { off(); stage.setDriver(null); session.pause(); };
+    const made = link.current = linkStage(stage);
+    return () => { made.close(); link.current = null; };
   }, [stage]);
+  // Keyed on the token's identity too: a replay that reached this token is waiting for exactly this
+  // handover, even when the numbers are the same as the last token's.
+  const outputKey = outputIdentity({ model, version, turns, word, fork });
+  useEffect(() => { link.current?.deliver(candidates, outputKey); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [stage, candidateKey, outputKey]);
+
+  // ------------------------------------------------------------ replay (the stage link is with the data above)
   // Leaving the 3D view or this bench ends the replay. It never starts again by itself.
   useEffect(() => { if (!active) { session.exit("closed"); store.set({ replayRequest: null }); } }, [active]);
   useEffect(() => () => session.exit("closed"), []);
@@ -222,7 +219,7 @@ export default function DismantleStage() {
     </section>}
     <LearnedControl disabled={busy || mode !== "live"} />
     <MoreExperiments disabled={busy || mode !== "live"} />
-    <RealNote punch real={`${model.floors} layers, ${model.heads} attention heads and one MLP in each, and heads paired on shared keys and values. The color of each lit window is a measured direct push. Plates are measured values. Candidate bars are real probabilities. Punch and the strength controls change the running model.`}
+    <RealNote punch real={`${model.floors} layers, ${model.heads} attention heads and one MLP in each, and heads paired on shared keys and values. The color of each lit window is a measured direct push. Plates are measured values. The bars over Words out are the model's own probabilities for its top pieces and the piece it wrote, over its whole vocabulary before any sampling setting. Punch and the strength controls change the running model.`}
       drawing={`The shapes, sizes and positions. A model has no physical form. The dictionary tiles and MLP fins stand in for ${model.vocab.toLocaleString("en-US")} rows and ${model.units.toLocaleString("en-US")} neurons; they are not drawn one by one. During a replay, the amber corner brackets and their label mark the step the replay is at. They are a position, not a measurement.`} />
   </Workbench>;
 }

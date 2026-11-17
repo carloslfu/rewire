@@ -6,7 +6,8 @@ import { setFollowing } from "../state/actions.ts";
 import { type State, store } from "../state/store.ts";
 import { chosen, comparisonTarget, visibleTokens } from "../ui/word.ts";
 import { beatCount } from "./playback.ts";
-import { ReplayController, type Scope, type Snapshot, type Subject } from "./replay.ts";
+import { fadeMs, ReplayController, type Scope, type Snapshot, type Subject } from "./replay.ts";
+import type { Stage } from "./scene/stage.ts";
 
 type Live = Pick<State, "model" | "version" | "turns" | "word" | "fork" | "busy" | "replay">;
 
@@ -23,6 +24,15 @@ export function replaySubject(s: Live): Subject | null {
     // `busy` covers writing and comparing; `replay` is the store's name for an update of the samples after a model change.
     ready: !s.busy && !s.replay && c.reply.done && !c.reply.stale,
   };
+}
+
+/**
+ * Which token's result belongs on the output: the model and its changes, the sample, the reply and
+ * the token in it. The same index in the other reply or in another sample is another token.
+ */
+export function outputIdentity(s: Pick<State, "model" | "version" | "turns" | "word" | "fork">): string {
+  const c = chosen(s);
+  return c ? `${s.model.id}.${s.version}.${c.turn.id}.${c.ref.side}.${c.ref.index}.${c.tok.id}` : "";
 }
 
 /** Why Replay answer is not available yet, in the visitor's words. Empty when it is. */
@@ -79,4 +89,33 @@ export function startReplay(scope: Scope, of?: { sample: number; side: Side }): 
 export function useReplay<T>(select: (s: Snapshot) => T): T {
   const read = () => select(session.get());
   return useSyncExternalStore(session.subscribe, read, read);
+}
+
+type Linked = Pick<Stage, "setDriver" | "setPlayhead" | "holdOutput" | "setCandidates">;
+
+/**
+ * Join the replay to a stage: the stage lends its frames and draws the playhead, and the output shows
+ * a result only for the token it was handed for. The replay reaches a token (by playing on, by a
+ * step, or because the visitor selected one, in this reply, the other reply or another sample) before
+ * React hands over that token's candidates with `deliver`. Until then the output is held empty.
+ * `deliver` must be called with outputIdentity of the state the candidates were made from.
+ */
+export function linkStage(stage: Linked) {
+  let delivered = "";
+  const show = () => {
+    const r = session.get();
+    stage.setPlayhead(r.mode === "replay" ? r.step : null, fadeMs(r.speed));
+    stage.holdOutput(r.mode === "replay" && outputIdentity(store.get()) !== delivered);
+  };
+  stage.setDriver(session);
+  show();
+  const off = session.subscribe(show);
+  return {
+    deliver(list: Parameters<Stage["setCandidates"]>[0], identity: string) {
+      delivered = identity;
+      stage.setCandidates(list);
+      stage.holdOutput(session.get().mode === "replay" && outputIdentity(store.get()) !== delivered);
+    },
+    close() { off(); stage.setDriver(null); session.pause(); },
+  };
 }

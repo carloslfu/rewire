@@ -159,7 +159,8 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
           minWidth: enlarged && embedded ? 44 + HEADS * 44 + 8 + 44 + HEADS + 2 : compact || embedded ? undefined : 40 + HEADS * 24 + 8 + 36 + HEADS + 2 }}>
         {!embedded && <><span aria-hidden="true" />
         <button type="button" className={`wide${isOn({ kind: "words-out" }) ? " on" : ""}`} onClick={() => onSelect({ kind: "words-out" })}
-          aria-label={`${S.wordsOut}${c ? `: "${wq}"${prob !== undefined ? `, ${Math.round(prob * 100)}%` : ""}` : ""}`}>
+          aria-label={`${S.wordsOut}${c ? `: "${wq}"${prob !== undefined ? `, ${Math.round(prob * 100)}% in the draw` : ""}` : ""}`}
+          title={c && prob !== undefined ? "Odds in the draw: among the top 20 at the sampling temperature. Open it for the probability at temperature 1." : undefined}>
           <span>{S.wordsOut}</span>
           {c && <span className="num">"{wq}" {prob !== undefined ? `${Math.round(prob * 100)}%` : ""}</span>}
         </button></>}

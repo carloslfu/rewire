@@ -70,6 +70,20 @@ export function signed(v: number, digits = 2): string {
   return v >= 0 ? `+${Math.abs(v).toFixed(digits)}` : `−${Math.abs(v).toFixed(digits)}`;
 }
 
+/**
+ * A model probability, always to two decimals, so a real difference between two tokens shows as a
+ * different number. Below 0.01% it reads <0.01%, and from 99.995% up, where two decimals would round
+ * to 100%, it reads >99.99%: over a whole vocabulary nothing is exactly 0% or 100%. A value that is
+ * not a probability at all is called unavailable rather than passed off as a small one.
+ */
+export function modelPct(p: number): string {
+  if (!Number.isFinite(p) || p < 0 || p > 1) return "unavailable";
+  const x = p * 100;
+  if (x < 0.01) return "<0.01%";
+  if (x >= 99.995) return ">99.99%";
+  return `${x.toFixed(2)}%`;
+}
+
 export function pct(p: number): string {
   const x = p * 100;
   if (x >= 99.5 && x < 100) return ">99%";

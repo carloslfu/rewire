@@ -725,6 +725,7 @@ html:has(dialog[open]) { overflow: hidden; }
 .stage-label.bar { font-family: var(--mono); font-size: 10px; }
 .stage-label.plate { padding: 1px 5px; font-size: 10px; color: var(--stage-ink); background: rgb(14 15 18 / .74); border-radius: 3px; text-shadow: none; }
 .stage-label.current { padding: 1px 5px; color: var(--stage-ink); font-weight: 600; background: rgb(14 15 18 / .78); border-radius: 3px; text-shadow: none; }
+.stage-label.pending { font-family: var(--sans); font-style: italic; color: var(--stage-faint); }
 .stage-label.step { padding: 2px 7px; font-size: 11px; font-weight: 700; color: #1d1606; background: #ffc65c; border-radius: 4px; text-shadow: none; }
 .stage-label.message { width: 200px; white-space: normal; text-align: center; font-size: 12px; padding: 9px 11px; color: var(--stage-muted); background: rgb(20 21 25 / .92); border: 1px dashed rgb(255 255 255 / .3); border-radius: 6px; text-shadow: none; }
 .stage-top { position: absolute; top: 10px; left: 12px; right: 12px; display: grid; gap: 6px; justify-items: start; pointer-events: none; }

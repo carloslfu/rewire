@@ -46,3 +46,9 @@ Captured whole-answer replay release checks, Chrome UX evidence and the fixed fa
 ## [2026-11-17 16:58] decide | records/decisions/2026-11-17-replay-experience
 Adopted whole-answer replay, explicit transport controls, frame-paced progression and GPU sharing.
 
+## [2026-11-17 17:24] capture | records/measurements/2026-11-17-output-reveal-probabilities
+Captured final release checks, full GPU suites, early-reveal reproduction and corrected Qwen/Tiny Chrome replay behavior.
+
+## [2026-11-17 17:24] decide | records/decisions/2026-11-17-output-reveal-probabilities
+Reveal output at the final replay step, gate candidate delivery by full identity and show full-vocabulary probabilities with honest precision.
+

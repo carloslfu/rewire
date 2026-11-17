@@ -7,6 +7,7 @@ import { type Arch, type Part, partIndex } from "../arch.ts";
 import { type Box, declutter, dockInset, type Inset, placeBox, toolbarInset } from "../labels.ts";
 import { beatAt, beatCount, beatLabel, seek } from "../playback.ts";
 import { DARK, type Theme } from "../theme.ts";
+import { modelPct } from "../../ui/color.ts";
 import { Bay, type BaySpec, type PlateHit } from "./bay.ts";
 import { along, ease, frame, type Pose, type ViewName, VIEWS } from "./camera.ts";
 import { MAX_BARS, Specimen } from "./specimen.ts";
@@ -548,11 +549,15 @@ export class Stage {
   setCandidates(list: { label: string; p: number; chosen: boolean }[]) {
     const shown = list.slice(0, MAX_BARS);
     this.specimen.setCandidates(shown);
-    this.replaceLabels("bar", shown.map((c, i) => ({
-      text: `${c.label} ${Math.round(c.p * 100)}%`, className: `stage-label bar${c.chosen ? " current" : ""}`, at: (out: THREE.Vector3) => { this.specimen.barTop(i, out); },
-      anchor: [0.5, 1] as [number, number], nudge: [0, -3] as [number, number], priority: c.chosen ? 90 : 60,
-      show: () => c.chosen || this.spacing("bar") >= 46,
-    })));
+    // A replay shows the result where the model produces it: after the last step. Before that neither a
+    // bar nor a word is on the output, the written one included, and a plain note stands in their place.
+    const out = () => this.specimen.outputShown;
+    this.replaceLabels("bar", [...shown.map((c, i): LabelSpec => ({
+      text: `${c.label} ${modelPct(c.p)}`, className: `stage-label bar${c.chosen ? " current" : ""}`, at: (v) => { this.specimen.barTop(i, v); },
+      anchor: [0.5, 1], nudge: [0, -3], priority: c.chosen ? 90 : 60,
+      show: () => out() && (c.chosen || this.spacing("bar") >= 46),
+    })), ...(shown.length ? [{ text: "Not chosen yet", className: "stage-label bar pending", at: (v) => { this.specimen.barTop((shown.length - 1) / 2, v); },
+      anchor: [0.5, 1], nudge: [0, -3], priority: 88, show: () => !out() } satisfies LabelSpec] : [])]);
     this.invalidate();
   }
 
@@ -601,6 +606,19 @@ export class Stage {
 
   get hasBay() { return !!this.bay; }
 
+  /**
+   * The replay is on a token whose candidates have not been handed over yet. The output stays empty
+   * until they arrive with setCandidates, so another token's result is never shown as this one's.
+   * Live output is never held.
+   */
+  holdOutput(held = true) {
+    held &&= this.replaying;
+    if (held === this.specimen.held) return;
+    this.specimen.holdOutput(held);
+    this.hideOutput();
+    this.invalidate();
+  }
+
   /** Hand the stage a replay to move with its frames, or take it away. */
   setDriver(driver: ReplayDriver | null) {
     this.driver = driver;
@@ -615,8 +633,10 @@ export class Stage {
   setPlayhead(t: number | null, fadeMs = 0) {
     const goal = t === null ? this.beats : seek(t, this.beats), ahead = goal - this.shown;
     this.goal = goal; this.fadeMs = fadeMs; this.replaying = t !== null;
+    if (t === null) this.specimen.holdOutput(false);
     if (!(fadeMs > 0 && !this.reduced && ahead > 0 && ahead <= 1)) this.shown = goal;
     this.drawPlayhead();
+    this.hideOutput();
     this.invalidate();
   }
 
@@ -677,10 +697,21 @@ export class Stage {
     for (const item of list) {
       const el = this.o.labels.ownerDocument.createElement("span");
       el.className = item.className; el.textContent = item.text;
+      // Measured once, laid out but not painted, so placing labels each frame never forces a layout.
+      // It then stays hidden until a drawn frame has placed it: a new label is never seen at the corner
+      // of the stage, or before its own `show` has had a say.
+      el.style.visibility = "hidden";
       this.o.labels.append(el);
-      // Measured once, while it is visible, so placing labels each frame never forces a layout.
-      this.labels.push({ ...item, el, group, width: el.offsetWidth || item.text.length * 6.2 + 8, height: el.offsetHeight || 14 });
+      const width = el.offsetWidth || item.text.length * 6.2 + 8, height = el.offsetHeight || 14;
+      el.hidden = true;
+      el.style.visibility = "";
+      this.labels.push({ ...item, el, group, width, height });
     }
+  }
+
+  /** Take the output's labels off at once when they may no longer be shown, without waiting for the next frame. */
+  private hideOutput() {
+    for (const l of this.labels) if (l.group === "bar" && l.show && !l.show()) l.el.hidden = true;
   }
 
   private project(v: THREE.Vector3): boolean {

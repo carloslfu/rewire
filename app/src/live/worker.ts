@@ -10,10 +10,11 @@ import { ChatTokenizer } from "@rewire/engine/src/tokenizer.ts";
 import { engineConfig, engineWeights } from "@rewire/tiny/src/engine.ts";
 import type { TinyConfig } from "@rewire/tiny/src/config.ts";
 import { canonical } from "../model/change-key.ts";
-import type { Cand, Forced, Tok } from "../model/types.ts";
+import type { Forced, Tok } from "../model/types.ts";
 import type { WriteJob } from "./engine.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
 import { ModelFiles } from "./files.ts";
+import { candidates } from "./cands.ts";
 import { FULL, paceFor, runUnits } from "./pace.ts";
 import { LessonRuntime } from "../teach/runtime.ts";
 import type { TokenPiece } from "@rewire/engine/src/token-text.ts";
@@ -425,7 +426,7 @@ async function write(job: WriteJob, id: number, epoch = writeEpoch): Promise<{ e
     const r = await c.result(i);
     const t: Tok = {
       id: r.token, lp1: r.lp1, concept: r.concept, cut: r.cut, pushes: r.pushes,
-      cands: Array.from(r.ids, (cid, k) => ({ id: cid, p: r.probs[k] })) as Cand[],
+      cands: candidates(r.ids, r.probs, r.candLp),
     };
     if (i === 0 && job.force !== undefined) t.picked = true;
     toks.push(t.id);

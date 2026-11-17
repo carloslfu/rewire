@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useRef } from "react";
 import { chooseWord, piece } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
-import { pct, signed } from "../ui/color.ts";
+import { modelPct, pct, signed } from "../ui/color.ts";
 import { FollowControl } from "../ui/FollowControl.tsx";
 import { chosen, towerValues, visibleTokens } from "../ui/word.ts";
 import { beatAt, beatLabel, pushSoFar, runningPush } from "./playback.ts";
@@ -117,7 +117,7 @@ export function ReplayBar() {
       </label>
     </div>
     <p className="replay-readout">
-      {!c ? "" : whole ? <>{rp.ended ? (rp.scope === "answer" ? "End of the answer. " : "End of this token. ") : ""}Token written: “{wq}”, which the model gave {pct(Math.exp(c.tok.lp1))}.{total ? ` ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${total}.` : ""}</>
+      {!c ? "" : whole ? <>{rp.ended ? (rp.scope === "answer" ? "End of the answer. " : "End of this token. ") : ""}Token written: “{wq}”, {Number.isFinite(Math.exp(c.tok.lp1)) ? `which the model gave ${modelPct(Math.min(1, Math.exp(c.tok.lp1)))}.` : "whose probability is unavailable."}{total ? ` ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${total}.` : ""}</>
         : <><strong>{beatLabel(beat)}.</strong>{view === "push" && running ? ` Direct pushes so far: ${signed(pushSoFar(running, rp.step))} of ${total}.` : ""}
           {guess ? ` If it stopped after this layer it would say “${text(guess.id)}” (${pct(guess.p)}).` : ""}</>}
     </p>

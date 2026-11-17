@@ -5,7 +5,16 @@ export type { ChangeSpec };
 
 export interface Cand {
   id: number;
+  /**
+   * The draw's odds: a softmax at the sampling temperature over the listed top 20 only, before the
+   * top-p cut (`Tok.cut` says how many the draw kept). The 2D candidate table shows these.
+   */
   p: number;
+  /**
+   * The model's own probability of this piece: temperature 1, over the whole vocabulary, the same
+   * measure as exp(lp1). Absent where the engine did not report one.
+   */
+  modelP?: number;
 }
 
 /** One written word piece and everything the page shows about it. */

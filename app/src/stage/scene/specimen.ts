@@ -561,26 +561,44 @@ export class Specimen {
   /** Real candidate probabilities as bars on the output block. */
   setCandidates(list: { p: number; chosen: boolean }[]) {
     this.candidates = list.slice(0, MAX_BARS);
+    this.outputHeld = false;
     this.layoutBars();
     this.recolor();
   }
 
   private layoutBars() {
     const a = this.arch, n = this.candidates.length, top = a.pos[this.n - 1][1] + a.size[this.n - 1][1] / 2 + this.lift;
-    const w = 0.34 * this.u, room = a.barRoom, k = lit(beatCount(a.model) - 1, this.playhead);
-    this.bars.count = n;
+    const w = 0.34 * this.u, room = a.barRoom;
+    // The result exists only once the last step is done. Until then there is no bar at any height:
+    // a bar growing toward its value would be a confidence the model never had.
+    this.bars.count = this.outputShown ? n : 0;
     for (let i = 0; i < n; i++) {
-      const p = Math.max(0, Math.min(1, this.candidates[i].p));
-      this.bars.setMatrixAt(i, this.M.compose(this.V.set(a.spineX + (i - (n - 1) / 2) * w * 1.5, top, 0), this.Q.identity(), this.S.set(w, Math.max(0.02, p * room * k), w)));
+      const p = Math.max(0, Math.min(1, this.candidates[i].p || 0));
+      this.bars.setMatrixAt(i, this.M.compose(this.V.set(a.spineX + (i - (n - 1) / 2) * w * 1.5, top, 0), this.Q.identity(), this.S.set(w, Math.max(0.02, p * room), w)));
     }
     this.bars.instanceMatrix.needsUpdate = true;
   }
 
   barTop(i: number, out: THREE.Vector3): THREE.Vector3 {
     const a = this.arch, n = this.candidates.length, top = a.pos[this.n - 1][1] + a.size[this.n - 1][1] / 2 + this.lift;
-    const p = Math.max(0, Math.min(1, this.candidates[i]?.p ?? 0));
-    return out.set(a.spineX + (i - (n - 1) / 2) * 0.34 * this.u * 1.5, top + Math.max(0.02, p * a.barRoom * lit(beatCount(a.model) - 1, this.playhead)), 0);
+    const p = Math.max(0, Math.min(1, this.candidates[i]?.p || 0));
+    return out.set(a.spineX + (i - (n - 1) / 2) * 0.34 * this.u * 1.5, top + (this.outputShown ? Math.max(0.02, p * a.barRoom) : 0.02), 0);
   }
+
+  /** Whether the output of the selected token is on show: always in live, and in a replay only after its last step. */
+  get outputShown(): boolean { return this.playhead === null && !this.outputHeld; }
+
+  /**
+   * Keep the output off show while the bars still belong to another token. A replay moves to a token
+   * before the page hands over that token's candidates; in between, nothing is better than the wrong result.
+   */
+  holdOutput(held: boolean) {
+    if (held === this.outputHeld) return;
+    this.outputHeld = held;
+    this.layoutBars();
+  }
+  private outputHeld = false;
+  get held(): boolean { return this.outputHeld; }
 
   /** Attention of one head drawn as arcs from the context tray to the head. */
   setArcs(target: number, weights: number[]) {
