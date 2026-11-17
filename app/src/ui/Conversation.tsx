@@ -1,7 +1,7 @@
 // Independent samples, each with an editable question and its original/changed pair.
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { Reply, Side, Turn } from "../model/types.ts";
-import { continueReply, editSample, piece, removeSample, selectWord, undoPick, undoRemoveSample } from "../state/actions.ts";
+import { askReplay, continueReply, editSample, piece, removeSample, selectWord, undoPick, undoRemoveSample } from "../state/actions.ts";
 import { useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { pct } from "./color.ts";
@@ -89,6 +89,7 @@ function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; si
   const busy = useStore((s) => s.busy);
   const replay = useStore((s) => s.replay);
   const model = useStore((s) => s.model);
+  const stage3d = useStore((s) => s.stage3d);
   const compare = side === "normal" ? turn.changed?.compare : undefined;
   const changed = side === "changed";
   const label = !changed ? (model.id === "tiny" ? "Your tiny model" : "Original")
@@ -163,6 +164,9 @@ function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; si
             <span>{S.stopped(reply.toks.length, model.piece)}</span>
             {live && <button type="button" className="btn" disabled={busy} onClick={() => void continueReply(k)}>{S.cont}</button>}
           </>
+        )}
+        {reply.done && !reply.stale && !busy && !replay && stage3d && segments.length > 0 && (
+          <button type="button" className="linkish reply-replay" title={S.replayIn3dTitle} onClick={() => askReplay(turn.id, side)}>{S.replayIn3d}</button>
         )}
       </div>
     </div>

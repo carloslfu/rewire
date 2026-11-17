@@ -2,6 +2,7 @@
 // stage in the middle, the selected part's real controls beside it. Expanding keeps the same mounted
 // stage and only gives it the whole window.
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { stageShown } from "../state/actions.ts";
 import { store } from "../state/store.ts";
 import { onThemeChange } from "../ui/color.ts";
 import { useNarrow } from "../ui/useNarrow.ts";
@@ -9,7 +10,6 @@ import { type Arch, groupHeads, movePart, type Part, partKey } from "./arch.ts";
 import { isolate } from "./isolate.ts";
 import { escapeIntent } from "./keys.ts";
 import { type DockPanel, NavDock } from "./NavDock.tsx";
-import type { Clock } from "./playback.ts";
 import type { DragMode, Stage, Tool, ViewName } from "./scene/stage.ts";
 import { readTheme } from "./theme.ts";
 import { ViewToggle } from "./ViewToggle.tsx";
@@ -32,12 +32,15 @@ export interface WorkbenchProps {
   /** Run the real edit. Returns whether it was accepted. */
   onPunch: (part: Part) => boolean;
   describe: (part: Part, tool: Tool) => string;
-  onClock?: (clock: Clock) => void;
+  /** The stage stopped drawing: a hidden tab, scrolled out of sight, or a lost context. */
+  onHidden?: () => void;
   onStage: (stage: Stage | null) => void;
   restore?: { label: string; disabled: boolean; run: () => void };
   /** Question or training controls, shown beside the stage in the full view and below it on a phone. */
   rail?: ReactNode;
   railTitle?: string;
+  /** Always in sight directly under the stage, in every layout. It does not scroll with the controls below it. */
+  bar?: ReactNode;
   transport?: ReactNode;
   children: ReactNode;
 }
@@ -72,7 +75,7 @@ export function Workbench(p: WorkbenchProps) {
     const unavailable = (reason: unknown) => {
       if (cancelled) return;
       console.error("Rewire: the 3D view could not start.", reason);
-      store.set({ stage3d: false, scopeView: "2d", announce: "The 3D view could not start in this browser. Showing the 2D view." });
+      store.set({ stage3d: false, scopeView: "2d", replayRequest: null, announce: "The 3D view could not start in this browser. Showing the 2D view." });
     };
     setState("loading");
     setArranged(0);
@@ -86,7 +89,7 @@ export function Workbench(p: WorkbenchProps) {
           onSelect: (part) => latest.current.onSelect(part),
           onPunch: (part) => latest.current.onPunch(part),
           describe: (part, t) => latest.current.describe(part, t),
-          onClock: (clock) => latest.current.onClock?.(clock),
+          onHidden: () => latest.current.onHidden?.(),
           onArranged: setArranged,
           onLost: () => setState("lost"),
           // The tool buttons and help text float over the stage; labels and the framing keep clear of them.
@@ -118,6 +121,12 @@ export function Workbench(p: WorkbenchProps) {
     };
   }, [arch, generation, live]);
 
+  // While a stage is open the engine leaves the GPU room to draw it.
+  useEffect(() => {
+    if (!stage) return;
+    stageShown(true);
+    return () => stageShown(false);
+  }, [stage]);
   useEffect(() => { stage?.setTool(tool); }, [stage, tool]);
   useEffect(() => { stage?.setSelection(selected); }, [stage, selected]);
   useEffect(() => { stage?.setDragMode(drag); }, [stage, drag]);
@@ -236,9 +245,10 @@ export function Workbench(p: WorkbenchProps) {
         {state === "lost" && <div className="stage-state" role="alert">
           <p>The 3D view stopped drawing. The model and your changes are not affected.</p>
           <div className="row"><button type="button" className="btn" onClick={() => setGeneration((g) => g + 1)}>Reload 3D view</button>
-            <button type="button" className="btn quiet" onClick={() => store.set({ scopeView: "2d" })}>Use the 2D view</button></div>
+            <button type="button" className="btn quiet" onClick={() => store.set({ scopeView: "2d", replayRequest: null })}>Use the 2D view</button></div>
         </div>}
       </div>
+      {p.bar && <div className="stage-bar">{p.bar}</div>}
       {narrow && <div className="stage-dockbar">{dock}</div>}
       <div className="stage-lower" ref={lower}>
         <div className="stage-controls">

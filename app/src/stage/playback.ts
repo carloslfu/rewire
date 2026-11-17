@@ -1,5 +1,6 @@
-// Replay of one token's measured values in the order the architecture computes them. The clock is
-// an illustration: it is not how long any step took on the GPU.
+// One token's measured values in the order the architecture computes them: the steps a replay walks
+// through. The order is the model's; the pace is an illustration, not how long any step took on the GPU.
+// Moving through the steps, and from token to token, is replay.ts.
 import type { ModelInfo } from "../model/info.ts";
 import type { Part } from "./arch.ts";
 
@@ -65,58 +66,9 @@ export function pushSoFar(running: Float32Array, t: number | null): number {
   return done <= 0 ? 0 : running[done - 1];
 }
 
-export const SPEEDS = [0.5, 1, 2, 4] as const;
-/** Beats per second at 1×. */
-export const BASE_RATE = 2.5;
-
-export interface Clock {
-  /** Position in beats, from 0 to the beat count. */
-  t: number;
-  playing: boolean;
-  speed: number;
-}
-
-/** Advance a playing clock. It stops at the end and never runs backwards or jumps on a long frame. */
-export function advance(c: Clock, dtMs: number, beats: number): Clock {
-  if (!c.playing) return c;
-  const dt = Math.max(0, Math.min(100, dtMs)) / 1000;
-  const t = c.t + dt * BASE_RATE * c.speed;
-  return t >= beats ? { ...c, t: beats, playing: false } : { ...c, t };
-}
-
-/** Step to the end of the next beat or the start of the current one. */
-export function stepClock(t: number, direction: 1 | -1, beats: number): number {
-  const next = direction > 0 ? Math.floor(t + 1e-6) + 1 : Math.ceil(t - 1e-6) - 1;
-  return Math.max(0, Math.min(beats, next));
-}
-
+/** A playhead position kept inside the token: 0 is before anything ran, the beat count is everything lit. */
 export function seek(t: number, beats: number): number {
   return Number.isFinite(t) ? Math.max(0, Math.min(beats, t)) : 0;
-}
-
-/** Everything the replay controls can ask for. `reveal` shows the token complete. */
-export type ReplayAction =
-  | { kind: "play" }
-  | { kind: "pause" }
-  | { kind: "step"; direction: 1 | -1 }
-  | { kind: "seek"; t: number }
-  | { kind: "speed"; speed: number }
-  | { kind: "reveal" };
-
-/**
- * The clock after one replay control. Play, step and scrub place the visitor inside one token, so
- * they are `manual`: the caller pauses following. Revealing stops the replay with every part lit; it
- * is what a new token and resumed following do. The speed is a preference and survives all of them.
- */
-export function applyReplay(c: Clock, action: ReplayAction, beats: number): { clock: Clock; manual: boolean } {
-  switch (action.kind) {
-    case "play": return { clock: { ...c, t: c.t >= beats ? 0 : c.t, playing: true }, manual: true };
-    case "pause": return { clock: { ...c, playing: false }, manual: false };
-    case "step": return { clock: { ...c, playing: false, t: stepClock(c.t, action.direction, beats) }, manual: true };
-    case "seek": return { clock: { ...c, playing: false, t: seek(action.t, beats) }, manual: true };
-    case "speed": return { clock: { ...c, speed: action.speed }, manual: false };
-    case "reveal": return { clock: { ...c, t: beats, playing: false }, manual: false };
-  }
 }
 
 /** Height of the replay marker on the spine, as a fraction of the tower from the dictionary to the output. */

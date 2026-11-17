@@ -24,6 +24,7 @@ export function App() {
   const turns = useStore((s) => s.turns);
   const step = useStore((s) => s.step);
   const error = useStore((s) => s.error);
+  const replayRequest = useStore((s) => s.replayRequest);
   const [, setTick] = useState(0);
   const [about, setAbout] = useState(false);
   const [trainingVisited, setTrainingVisited] = useState(false);
@@ -31,6 +32,8 @@ export function App() {
   const [scope, setScope] = useState(false);
   const narrow = useNarrow();
   useEffect(() => onPieces(() => setTick((t) => t + 1)), []);
+  // "Replay in 3D" on a reply: on a phone the model is a sheet, so open it.
+  useEffect(() => { if (replayRequest) setScope(true); }, [replayRequest]);
   useEffect(() => { if (tiny) setTrainingVisited(true); }, [tiny]);
   useEffect(() => { if (teach) setTeachVisited(true); }, [teach]);
   useEffect(() => {

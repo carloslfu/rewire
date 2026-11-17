@@ -7,15 +7,15 @@ import { chosen } from "./word.ts";
 
 /**
  * The toggle and its one-line hint, as siblings for the row they sit in. The control is usable before
- * any output: following then waits for the first token. `replay` adds what the 3D Replay does instead.
+ * any output: following then waits for the first token.
  */
-export function FollowControl({ replay = false }: { replay?: boolean }) {
+export function FollowControl() {
   const follow = useStore((s) => s.follow);
   const selected = useStore((s) => !!chosen(s));
   const hint = useId();
   return <>
     <button type="button" className="follow-toggle" aria-pressed={follow} aria-describedby={hint} title={S.followTitle(follow)}
       onClick={() => setFollowing(!follow)}>{S.follow}</button>
-    <p className="note follow-hint" id={hint}>{S.followHint(follow, selected, replay)}</p>
+    <p className="note follow-hint" id={hint}>{S.followHint(follow, selected)}</p>
   </>;
 }

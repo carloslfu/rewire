@@ -1,26 +1,29 @@
 // Dismantle in 3D: the running model as a specimen. Colors are the selected token's measured pushes,
-// the replay walks those values through the architecture, and Punch writes the same change spec as
-// the 2D controls.
+// Replay walks a finished answer's values through the architecture token by token, and Punch writes
+// the same change spec as the 2D controls.
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FloorDetail, Focus, Reply, Side } from "../model/types.ts";
 import { guideTarget } from "../path/steps.ts";
-import { applyChips, chipsWith, chooseWord, floorDetail, piece, retryComparison, send, setFocus, setFollowing, setTowerView, stepData, stopReply } from "../state/actions.ts";
+import { applyChips, chipsWith, chooseWord, floorDetail, piece, retryComparison, send, setFocus, setTowerView, stepData, stopReply } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
-import { pct, signed } from "../ui/color.ts";
+import { signed } from "../ui/color.ts";
 import { chips as describeChips } from "../ui/describe.ts";
-import { FollowControl } from "../ui/FollowControl.tsx";
 import { LearnedControl, MoreExperiments, PartControls } from "../ui/Lab.tsx";
 import { Chips, DeviceBar } from "../ui/Panels.tsx";
 import { ReplayStatus } from "../ui/ReplayStatus.tsx";
 import { replySegments } from "../ui/reply-text.ts";
-import { chosen, comparisonTarget, isStop, towerValues, visibleTokens } from "../ui/word.ts";
+import { chosen, comparisonTarget, isStop, towerValues } from "../ui/word.ts";
+import { ReplayBar } from "./ReplayBar.tsx";
+import { fadeMs } from "./replay.ts";
+import { replayWait, session, startReplay, useReplay } from "./replay-session.ts";
 import { attentionRow, layerPlates, pushValues, tray } from "./adapters.ts";
 import { buildArch, groupHeads, type Part, partIndex, partName } from "./arch.ts";
 import { blocked, focusOf, isTarget, partChanged, partOf, poseOf, punched, restored, restoreLabel, strengthOf } from "./intervene.ts";
-import { Latest, measure, type Measured, measurementKey } from "./latest.ts";
-import { applyReplay, beatAt, beatCount, beatLabel, type Clock, pushSoFar, type ReplayAction, runningPush, SPEEDS } from "./playback.ts";
+import { measurementKey } from "./latest.ts";
+import { runningPush } from "./playback.ts";
 import type { BaySpec, Stage, Tool } from "./scene/stage.ts";
+import { useMeasured } from "./useMeasured.ts";
 import { RealNote, Workbench } from "./Workbench.tsx";
 
 const TRAY = 16;
@@ -37,19 +40,17 @@ export default function DismantleStage() {
   const mode = useStore((s) => s.mode);
   const replay = useStore((s) => s.replay);
   const teachingBusy = useStore((s) => s.teachingBusy);
-  const follow = useStore((s) => s.follow);
-  const followRevision = useStore((s) => s.followRevision);
+  const request = useStore((s) => s.replayRequest);
   const focus = useStore((s) => s.focus);
   const version = useStore((s) => s.version);
   const active = useStore((s) => !s.tiny && !s.teach);
   const st = stepData(useStore((s) => s.step));
   const arch = useMemo(() => buildArch(model), [model]);
-  const beats = beatCount(model);
   const [stage, setStage] = useState<Stage | null>(null);
   const [selected, setSelected] = useState<Part | null>(() => partOf(store.get().focus));
-  const [clock, setClock] = useState<Clock>({ t: beats, playing: false, speed: 1 });
-  const [detail, setDetail] = useState<Measured<FloorDetail>>({ state: "none" });
-  const gate = useRef(new Latest());
+  const replaying = useReplay((r) => r.mode === "replay");
+  // While a whole answer plays, the selected layer is not measured again for every token that goes by.
+  const passing = useReplay((r) => r.mode === "replay" && r.playing && r.scope === "answer");
 
   const c = useMemo(() => chosen({ turns, word, fork }), [turns, word, fork]);
   const vals = useMemo(() => towerValues(c, view), [c, view]);
@@ -82,13 +83,7 @@ export default function DismantleStage() {
   const floor = selected && "floor" in selected ? selected.floor : -1;
   const measurable = !!c && c.reply.done && !c.reply.stale && mode === "live";
   const key = c ? measurementKey({ model: model.id, version, turn: c.ref.turn, side: c.ref.side, index: c.ref.index, token: c.tok.id, length: c.reply.toks.length }) : "";
-  useEffect(() => {
-    const requests = gate.current;
-    if (!c || !measurable || floor < 0) { requests.cancel(); setDetail({ state: "none" }); return; }
-    void measure(requests, key, () => floorDetail(c.ref), setDetail);
-    return () => requests.cancel();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, measurable, floor >= 0]);
+  const detail = useMeasured<FloorDetail>(key, !!c && measurable && floor >= 0, passing, () => (c ? floorDetail(c.ref) : Promise.resolve(null)));
   const measured = detail.state === "ready" && detail.key === key ? detail.value : null;
 
   const plates = useMemo(() => (measured && floor >= 0 ? layerPlates(model, measured, floor) : null), [model, measured, floor]);
@@ -96,7 +91,7 @@ export default function DismantleStage() {
     : c.reply.stale ? "This reply used earlier settings. Select a token in a current reply."
     : !c.reply.done ? "Waiting for the reply to finish."
     : mode !== "live" ? "Measurements need the model to be ready."
-    : !plates ? (detail.state === "unavailable" ? S.noDetail : "Measuring every step for this token…") : "";
+    : !plates ? (detail.state === "unavailable" ? S.noDetail : passing ? "Pause the replay to measure this layer for the token on screen." : "Measuring every step for this token…") : "";
   // The tower opens only for real plates. Until then the reason is given beside the stage, and the model stays whole.
   const bay = useMemo((): BaySpec | null => (floor < 0 || waiting || !plates ? null
     : { key: `${model.id}.layer.${floor}`, floor, plates }), [floor, model.id, plates, waiting]);
@@ -127,29 +122,28 @@ export default function DismantleStage() {
   useEffect(() => { stage?.setCandidates(candidates); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [stage, candidateKey]);
 
   // ------------------------------------------------------------ replay
-  const wordKey = c ? `${c.ref.turn}.${c.ref.side}.${c.ref.index}.${c.tok.id}` : "";
-  const speed = useRef(1);
-  const run = (next: Clock) => { speed.current = next.speed; setClock(next); stage?.setClock(next); };
-  // Play, Back, Step and the scrubber place the visitor inside this one token, so they pause following.
-  const act = (action: ReplayAction) => {
-    const next = applyReplay(clock, action, beats);
-    if (next.manual && follow) setFollowing(false);
-    run(next.clock);
-  };
-  // A new token shows complete, and so does resuming Follow output, even on the token already selected:
-  // any replay in progress stops. Replaying a token is a choice.
+  // The stage lends the replay its frames and draws its playhead. Each step reaches the stage directly,
+  // without a render of this component. With no stage (2D, another bench, a rebuilt context) nothing moves.
   useEffect(() => {
-    run(applyReplay({ t: beats, playing: false, speed: speed.current }, { kind: "reveal" }, beats).clock);
+    if (!stage) return;
+    const show = () => { const r = session.get(); stage.setPlayhead(r.mode === "replay" ? r.step : null, fadeMs(r.speed)); };
+    stage.setDriver(session);
+    show();
+    const off = session.subscribe(show);
+    return () => { off(); stage.setDriver(null); session.pause(); };
+  }, [stage]);
+  // Leaving the 3D view or this bench ends the replay. It never starts again by itself.
+  useEffect(() => { if (!active) { session.exit("closed"); store.set({ replayRequest: null }); } }, [active]);
+  useEffect(() => () => session.exit("closed"), []);
+  // "Replay in 3D" on a reply: start once the stage is drawing.
+  useEffect(() => {
+    if (!request || !stage) return;
+    store.set({ replayRequest: null });
+    if (!startReplay("answer", request)) store.set({ announce: replayWait(store.get()) || "That reply cannot be replayed now." });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wordKey, stage, beats, followRevision]);
-  const complete = clock.t >= beats;
-  const beat = beatAt(model, Math.min(beats - 1, Math.floor(clock.t)));
-  const guess = !complete && beat.kind === "mlp" ? c?.tok.guesses?.[beat.floor]?.[0] : undefined;
+  }, [request?.n, stage]);
 
   // ------------------------------------------------------------ tokens
-  const visible = visibleTokens(c?.reply);
-  const at = c ? visible.indexOf(c.ref.index) : -1;
-  const move = (d: number) => { const index = visible[at + d]; if (c && index !== undefined) chooseWord({ ...c.ref, index }); };
   const hasDiff = !!comparisonTarget({ turns, word, fork });
   const turn = word ? turns[word.turn] : turns.at(-1);
   const canRetry = !!turn?.changed && !replay && !turn.changed.stale && !turn.changed.comparing && turn.normal.done && turn.changed.done && !hasDiff;
@@ -181,46 +175,26 @@ export default function DismantleStage() {
 
   const status = <span>{model.id === "tiny" ? "Your tiny model" : "Qwen3-0.6B"} · {model.floors} layers · {changes.length ? `${changes.length} active ${changes.length === 1 ? "change" : "changes"}` : "original model"}{reason ? ` · ${reason}` : ""}</span>;
 
-  const transport = <section className="stage-transport" aria-label="Replay of the selected token">
+  const transport = <section className="stage-transport" aria-label="Colors and totals for the selected token">
     <div className="stage-token">
-      {c ? <div className="token-navigation" role="group" aria-label="Selected token">
-        <button type="button" className="btn quiet" aria-label="Previous token" disabled={at <= 0} onClick={() => move(-1)}>‹</button>
-        <strong title={wq}>“{wq}”</strong>
-        <button type="button" className="btn quiet" aria-label="Next token" disabled={at < 0 || at >= visible.length - 1} onClick={() => move(1)}>›</button>
-        <span className="note">{c.ref.side === "normal" ? "Original" : "Changed"} reply · token {c.ref.index + 1}</span>
-      </div> : <p className="note">{replay ? "Updating samples…" : busy ? "Writing the reply…" : mode === "live" ? "Ask a question to light up the model." : "The model lights up once it is ready and you ask a question."}</p>}
+      <span className="note" aria-hidden="true">Colors show</span>
       <div className="seg" role="group" aria-label="Colors show">
         <button type="button" aria-pressed={view === "push"} onClick={() => setTowerView("push")}>{S.viewPush}</button>
         <button type="button" aria-pressed={view === "difference"} disabled={!hasDiff} title={hasDiff ? S.diffNote : S.diffNone} onClick={() => setTowerView("difference")}>{S.viewDiff}</button>
       </div>
     </div>
     {canRetry && <p className="note">No comparison for this token yet. <button type="button" className="linkish" disabled={mode !== "live" || busy} onClick={() => void retryComparison()}>Retry comparison</button></p>}
-    <div className="stage-play" role="group" aria-label="Replay controls">
-      <button type="button" className="btn" disabled={!c} onClick={() => act({ kind: clock.playing ? "pause" : "play" })}>{clock.playing ? "Pause" : c && complete ? "Replay" : "Play"}</button>
-      <button type="button" className="btn quiet" disabled={!c} aria-label="Step back" onClick={() => act({ kind: "step", direction: -1 })}>Back</button>
-      <button type="button" className="btn quiet" disabled={!c || complete} aria-label="Step forward" onClick={() => act({ kind: "step", direction: 1 })}>Step</button>
-      <input type="range" aria-label="Position in the replay" min={0} max={beats} step={0.25} value={clock.t} disabled={!c}
-        onChange={(e) => act({ kind: "seek", t: Number(e.target.value) })} />
-      <label className="stage-speed">Speed
-        <select value={clock.speed} onChange={(e) => act({ kind: "speed", speed: Number(e.target.value) })}>
-          {SPEEDS.map((v) => <option key={v} value={v}>{v}×</option>)}
-        </select>
-      </label>
-      <FollowControl replay />
-    </div>
-    <p className="stage-readout" role="status">
-      {!c ? "Nothing to replay yet." : complete ? `Every part is lit. ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${running ? signed(running[running.length - 1]) : "0"} for “${wq}”.`
-        : <>{beatLabel(beat)}. {view === "push" && running ? `Direct pushes so far: ${signed(pushSoFar(running, clock.t))} of ${signed(running[running.length - 1])}.` : ""}
-          {guess ? ` If it stopped after this layer it would say “${text(guess.id)}” (${pct(guess.p)}).` : ""}</>}
-    </p>
-    <p className="note">A slowed replay of this token’s measured values, in the order the model computes them. It is not a timing of the real computation.</p>
+    {!replaying && <p className="stage-readout" role="status">
+      {!c ? "Nothing to show yet." : `Every part is lit. ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${running ? signed(running[running.length - 1]) : "0"} for “${wq}”.`}
+    </p>}
+    <p className="note">Replay shows values the model already measured while writing, slowed down and in the order the model computes them. Nothing is generated again. It is not a timing of the real computation.</p>
   </section>;
 
   const part = isTarget(selected) ? selected : null;
   return <Workbench arch={arch} active={active} title={model.id === "tiny" ? "Your trained brain" : "Under the hood"} status={status}
     tools={["explore", "grab", "punch"]} selected={selected} onSelect={select} onPunch={punch} describe={describe}
     punchHelp="Click a head, an MLP or a layer to knock it out. Its real output is set to zero and your samples update. Click it again to put it back."
-    onClock={setClock} onStage={setStage} rail={<StageQuestion />} railTitle="Question and replies" transport={transport}
+    onHidden={() => session.pause()} onStage={setStage} rail={<StageQuestion />} railTitle="Question and replies" bar={<ReplayBar />} transport={transport}
     restore={{ label: "Restore model", disabled: !!reason || !changes.length, run: () => void applyChips({}) }}>
     <ReplayStatus compact />
     {part ? <>
@@ -249,7 +223,7 @@ export default function DismantleStage() {
     <LearnedControl disabled={busy || mode !== "live"} />
     <MoreExperiments disabled={busy || mode !== "live"} />
     <RealNote punch real={`${model.floors} layers, ${model.heads} attention heads and one MLP in each, and heads paired on shared keys and values. The color of each lit window is a measured direct push. Plates are measured values. Candidate bars are real probabilities. Punch and the strength controls change the running model.`}
-      drawing={`The shapes, sizes and positions. A model has no physical form. The dictionary tiles and MLP fins stand in for ${model.vocab.toLocaleString("en-US")} rows and ${model.units.toLocaleString("en-US")} neurons; they are not drawn one by one.`} />
+      drawing={`The shapes, sizes and positions. A model has no physical form. The dictionary tiles and MLP fins stand in for ${model.vocab.toLocaleString("en-US")} rows and ${model.units.toLocaleString("en-US")} neurons; they are not drawn one by one. During a replay, the amber corner brackets and their label mark the step the replay is at. They are a position, not a measurement.`} />
   </Workbench>;
 }
 
@@ -288,16 +262,22 @@ function StageQuestion() {
       <p className="stage-asked">{turn.user}</p>
       <MiniReply reply={turn.normal} k={k} side="normal" label={model.id === "tiny" ? "Your tiny model" : "Original"} />
       {turn.changed && <MiniReply reply={turn.changed} k={k} side="changed" label={turn.changed.stale ? "Changed, with earlier settings" : "Changed"} />}
-      <p className="note">Select a word to light the parts that pushed for it.</p>
+      <p className="note">Select a word to light the parts that pushed for it. Replay walks a finished reply through the model.</p>
     </> : <p className="note">{mode === "live" ? "Ask anything. Each word it writes lights the parts that pushed for it." : "Questions run once the model is ready."}</p>}
   </div>;
 }
 
 function MiniReply({ reply, k, side, label }: { reply: Reply; k: number; side: Side; label: string }) {
   const word = useStore((s) => s.word);
+  const idle = useStore((s) => !s.busy && !s.replay);
+  const sample = useStore((s) => s.turns[k]?.id);
   const segments = replySegments(reply);
+  const playable = reply.done && !reply.stale && segments.length > 0 && sample !== undefined;
   return <div className={`reply${side === "changed" ? " changed" : ""}${reply.stale ? " stale" : ""}`}>
-    <div className="reply-heading"><span className="who">{label}</span></div>
+    <div className="reply-heading"><span className="who">{label}</span>
+      {playable && <button type="button" className="linkish reply-replay" disabled={!idle} aria-label={`Replay this reply from its first token: ${label}`}
+        title={idle ? "Walk this reply through the whole model, token by token" : "Replay is ready when the model has finished writing"} onClick={() => startReplay("answer", { sample, side })}>Replay</button>}
+    </div>
     <div className="text" role="group" aria-label={`${label} reply`}>
       {segments.map((s) => reply.stale ? <span key={s.from}>{s.text}</span>
         : <button key={s.from} type="button" className={`tok${word && word.turn === k && word.side === side && s.from <= word.index && word.index < s.to ? " sel" : ""}`}

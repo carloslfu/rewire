@@ -6,11 +6,11 @@ import type { ChangeSpec, Tok } from "../src/model/types.ts";
 
 const mock = vi.hoisted(() => ({
   check: vi.fn(), load: vi.fn(), firstTurn: vi.fn(), pieces: vi.fn(), write: vi.fn(), compare: vi.fn(),
-  inspect: vi.fn(), cancel: vi.fn(), setVersion: vi.fn(), pause: vi.fn(), use: vi.fn(), loadTiny: vi.fn(),
+  inspect: vi.fn(), cancel: vi.fn(), setVersion: vi.fn(), setStageOpen: vi.fn(), pause: vi.fn(), use: vi.fn(), loadTiny: vi.fn(),
 }));
 vi.mock("../src/live/engine.ts", () => ({ EngineClient: class {
   check = mock.check; load = mock.load; firstTurn = mock.firstTurn; pieces = mock.pieces; write = mock.write; compare = mock.compare;
-  cancel = mock.cancel; setVersion = mock.setVersion; pause = mock.pause; use = mock.use; loadTiny = mock.loadTiny; inspect = mock.inspect;
+  cancel = mock.cancel; setVersion = mock.setVersion; setStageOpen = mock.setStageOpen; pause = mock.pause; use = mock.use; loadTiny = mock.loadTiny; inspect = mock.inspect;
 } }));
 const token: Tok = { id: 100, lp1: -0.2, concept: 0, cut: 1, cands: [{ id: 100, p: 1 }], pushes: new Float32Array(477) };
 const flush = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };

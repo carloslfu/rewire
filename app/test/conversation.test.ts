@@ -3,11 +3,11 @@ import type { Tok } from "../src/model/types.ts";
 
 const mock = vi.hoisted(() => ({
   check: vi.fn(), load: vi.fn(), firstTurn: vi.fn(), nextTurn: vi.fn(), pieces: vi.fn(), write: vi.fn(), compare: vi.fn(),
-  inspect: vi.fn(), cancel: vi.fn(), setVersion: vi.fn(), pause: vi.fn(), use: vi.fn(), loadTiny: vi.fn(),
+  inspect: vi.fn(), cancel: vi.fn(), setVersion: vi.fn(), setStageOpen: vi.fn(), pause: vi.fn(), use: vi.fn(), loadTiny: vi.fn(),
 }));
 vi.mock("../src/live/engine.ts", () => ({ EngineClient: class {
   check = mock.check; load = mock.load; firstTurn = mock.firstTurn; nextTurn = mock.nextTurn; pieces = mock.pieces;
-  write = mock.write; compare = mock.compare; cancel = mock.cancel; setVersion = mock.setVersion; pause = mock.pause;
+  write = mock.write; compare = mock.compare; cancel = mock.cancel; setVersion = mock.setVersion; setStageOpen = mock.setStageOpen; pause = mock.pause;
   use = mock.use; loadTiny = mock.loadTiny; inspect = mock.inspect;
 } }));
 const token: Tok = { id: 100, lp1: -.2, concept: 0, cut: 1, cands: [{ id: 100, p: 1 }], pushes: new Float32Array(477) };
@@ -538,7 +538,11 @@ it("does not continue replay after a context limit or an unexpected worker cance
 });
 
 it("replays the trained model with its 160-letter budget and no chat template", async () => {
+  const cancels = mock.cancel.mock.calls.length;
   await actions.openTiny(new Float32Array(8));
+  // Opening it still cancels whatever was running, and then says what is true: the model is ready, not "Stopped".
+  expect(mock.cancel.mock.calls.length).toBe(cancels + 1);
+  expect(store.get()).toMatchObject({ model: { id: "tiny" }, mode: "live", busy: false, announce: "Your trained model is ready. Give it some starting text." });
   await actions.send("red circle=");
   await actions.applyChips({ floors: [{ floor: 1, mult: 0 }] });
   expect(mock.write.mock.calls.at(-1)?.[0]).toMatchObject({ conv: 1, turn: 0, cap: 160, history: store.get().turns[0].normal.read });

@@ -77,6 +77,8 @@ it("cancels old writes, reloads the model and holds inspections until recovery f
   const load = client.load("https://weights/", false, "expected");
   await flush(); first.finish("load"); await load;
   client.setVersion(8);
+  client.setStageOpen(true);
+  expect(first.messages.at(-1)).toEqual({ t: "stage", id: 0, open: true });
   const writing = client.write({ conv: 0 } as WriteJob, () => {});
   const failed = expect(writing).rejects.toThrow("GPU was reset");
   await flush(); first.emit({ t: "lost" }); await failed;
@@ -87,6 +89,8 @@ it("cancels old writes, reloads the model and holds inspections until recovery f
   await flush(); expect(replacement.messages.some((m) => m.t === "inspect")).toBe(false);
   replacement.finish("load"); await flush(); replacement.finish("use"); await flush();
   expect(replacement.messages).toContainEqual({ t: "version", id: 0, version: 8 });
+  // The rebuilt worker is told again that a 3D view is open, so it keeps leaving the GPU room to draw it.
+  expect(replacement.messages).toContainEqual({ t: "stage", id: 0, open: true });
   expect(lost).toHaveBeenCalledOnce(); expect(recovered).toHaveBeenCalledOnce();
   replacement.finish("inspect", { detail: new Map(), guesses: [] });
   await expect(inspection).resolves.toHaveProperty("guesses");

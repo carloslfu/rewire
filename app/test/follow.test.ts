@@ -6,11 +6,11 @@ import type { Tok, WordRef } from "../src/model/types.ts";
 
 const mock = vi.hoisted(() => ({
   check: vi.fn(), load: vi.fn(), firstTurn: vi.fn(), nextTurn: vi.fn(), pieces: vi.fn(), write: vi.fn(), compare: vi.fn(),
-  inspect: vi.fn(), cancel: vi.fn(), setVersion: vi.fn(), pause: vi.fn(), use: vi.fn(), loadTiny: vi.fn(),
+  inspect: vi.fn(), cancel: vi.fn(), setVersion: vi.fn(), setStageOpen: vi.fn(), pause: vi.fn(), use: vi.fn(), loadTiny: vi.fn(),
 }));
 vi.mock("../src/live/engine.ts", () => ({ EngineClient: class {
   check = mock.check; load = mock.load; firstTurn = mock.firstTurn; nextTurn = mock.nextTurn; pieces = mock.pieces;
-  write = mock.write; compare = mock.compare; cancel = mock.cancel; setVersion = mock.setVersion; pause = mock.pause;
+  write = mock.write; compare = mock.compare; cancel = mock.cancel; setVersion = mock.setVersion; setStageOpen = mock.setStageOpen; pause = mock.pause;
   use = mock.use; loadTiny = mock.loadTiny; inspect = mock.inspect;
 } }));
 
@@ -327,25 +327,24 @@ it("drops late tokens and stale completions instead of moving a manual choice or
 });
 
 it("hands a 3D replay back to following even when the followed token is the one already selected", async () => {
-  const { advance, applyReplay, beatCount } = await import("../src/stage/playback.ts");
+  const { session, startReplay } = await import("../src/stage/replay-session.ts");
   await actions.send("Replay me");
-  const beats = beatCount(store.get().model), newest = word();
-  let clock = { t: beats, playing: false, speed: 2 };
-  // Replay on the newest token: the control reports a manual action and the component pauses following.
-  const played = applyReplay(clock, { kind: "play" }, beats);
-  expect(played).toEqual({ clock: { t: 0, playing: true, speed: 2 }, manual: true });
-  actions.setFollowing(false);
-  clock = advance(played.clock, 100, beats);
-  expect(clock.playing).toBe(true);
+  const newest = word();
+  // Replaying the newest token holds the selection on it, so following pauses for as long as the replay lasts.
+  expect(startReplay("token")).toBe(true);
+  session.frame(100);
+  expect(session.get()).toMatchObject({ mode: "replay", playing: true });
+  expect(store.get().follow).toBe(false);
   expect(store.get().word).toBe(newest);
 
-  // Resuming changes no token, so the revision is what tells the replay to stop and show everything.
+  // Back to live changes no token: the replay ends, and following is on again with a new revision.
   const revision = store.get().followRevision;
-  actions.setFollowing(true);
+  session.exit("live");
+  expect(session.get()).toMatchObject({ mode: "live", playing: false });
   expect(store.get().word).toBe(newest);
-  expect(store.get().followRevision).toBe(revision + 1);
-  expect(applyReplay(clock, { kind: "reveal" }, beats).clock).toEqual({ t: beats, playing: false, speed: 2 });
+  expect(store.get()).toMatchObject({ follow: true, followRevision: revision + 1 });
   // Pausing never signals the replay.
   actions.setFollowing(false);
   expect(store.get().followRevision).toBe(revision + 1);
+  expect(session.get().mode).toBe("live");
 });

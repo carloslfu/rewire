@@ -9,7 +9,7 @@ import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeome
 import { type Arch, layerChildren, partIndex } from "../arch.ts";
 import type { Pose } from "../intervene.ts";
 import { spring } from "../motion.ts";
-import { beatCount, beatOf, lit } from "../playback.ts";
+import { beatAt, beatCount, beatOf, lit } from "../playback.ts";
 import { mix, type RGB, type Theme } from "../theme.ts";
 import { box, cells, cornerScrews, deckShapes, headShapes, merge, mlpShapes, nameplate, rounded, shade, socketShapes, worldUV } from "./detail.ts";
 import { createKit, type Kit, type Quality } from "./materials.ts";
@@ -27,6 +27,8 @@ const UNSEAT = 0.8;
 /** An insert with nothing measured: dark glass. Measured values run from here to the page's colors. */
 const OFF: RGB = [42, 45, 54];
 const GONE: RGB = [15, 16, 19];
+/** The replay's position bracket. It says where the replay is and nothing about what was measured there. */
+const CURSOR: RGB = [255, 198, 92];
 /** Tints on the chassis: untouched, switched off, and frozen while teaching. */
 const WHITE: RGB = [255, 255, 255], DULL: RGB = [104, 106, 112], DIM: RGB = [172, 174, 180];
 
@@ -50,6 +52,10 @@ export class Specimen {
   private readonly tubes: THREE.Mesh[]; private readonly flow: THREE.Mesh; private readonly pulse: THREE.Mesh;
   private readonly selectBox: LineSegments2; private readonly hoverBox: LineSegments2; private readonly markBox: LineSegments2;
   private readonly tethers: THREE.LineSegments;
+  /** Corner brackets around the part of the model the replay is at. */
+  private readonly stepBox: LineSegments2;
+  private cursor: number | null = null;
+  private readonly B = new THREE.Box3(); private readonly P = new THREE.Vector3(); private readonly P2 = new THREE.Vector3(); private readonly Q2 = new THREE.Quaternion();
   private readonly arcs = new THREE.Group();
   private readonly arcMaterial: THREE.MeshBasicMaterial;
 
@@ -215,6 +221,15 @@ export class Specimen {
       return l;
     };
     this.selectBox = line(2.5, 1); this.hoverBox = line(1.5, 0.75); this.markBox = line(2.5, 1, true);
+    // Brackets, not a box: three short strokes at each corner, so they never read as a selection.
+    const strokes: number[] = [];
+    for (const x of [-0.5, 0.5]) for (const y of [-0.5, 0.5]) for (const z of [-0.5, 0.5]) {
+      strokes.push(x, y, z, x * 0.5, y, z, x, y, z, x, y * 0.36, z, x, y, z, x, y, z * 0.5);
+    }
+    this.stepBox = new LineSegments2(new LineSegmentsGeometry().setPositions(strokes), new LineMaterial({ linewidth: 3.5, transparent: true, depthTest: false, toneMapped: false }));
+    this.stepBox.material.color.setRGB(CURSOR[0] / 255, CURSOR[1] / 255, CURSOR[2] / 255, THREE.SRGBColorSpace);
+    this.stepBox.matrixAutoUpdate = false; this.stepBox.visible = false; this.stepBox.renderOrder = 6; this.stepBox.frustumCulled = false;
+    this.group.add(this.stepBox);
     const tether = new THREE.BufferGeometry();
     tether.setAttribute("position", new THREE.BufferAttribute(new Float32Array(F * (H + 2) * 6), 3).setUsage(THREE.DynamicDrawUsage));
     tether.setDrawRange(0, 0);
@@ -459,6 +474,51 @@ export class Specimen {
     this.placeMarker();
     this.recolor();
     this.layoutBars();
+  }
+
+  /**
+   * Bracket the part of the model a replay is at: the dictionary, one layer's attention heads, one
+   * layer's MLP, or the output. Null removes it. It marks a position only and never changes a color.
+   */
+  setCursor(beat: number | null) {
+    this.cursor = beat === null ? null : Math.max(0, Math.min(beatCount(this.arch.model) - 1, Math.floor(beat)));
+    this.placeCursor();
+  }
+
+  /** The step the bracket is on, or null when there is none. */
+  get cursorNow(): number | null { return this.cursor; }
+
+  /** The box the bracket is drawn around, following parts that are lifted, spread or moved. */
+  cursorBox(out: THREE.Box3): THREE.Box3 | null {
+    if (this.cursor === null) return null;
+    const a = this.arch, b = beatAt(a.model, this.cursor), parts: number[] = [];
+    if (b.kind === "embed") parts.push(partIndex(a, { kind: "embed" }));
+    else if (b.kind === "output") parts.push(partIndex(a, { kind: "norm" }), partIndex(a, { kind: "unembed" }));
+    else if (b.kind === "mlp") parts.push(partIndex(a, { kind: "mlp", floor: b.floor }));
+    else {
+      for (let h = 0; h < a.heads; h++) parts.push(partIndex(a, { kind: "head", floor: b.floor, head: h }));
+      for (let g = 0; g < a.kvHeads; g++) parts.push(partIndex(a, { kind: "kv", floor: b.floor, group: g }));
+    }
+    out.makeEmpty();
+    for (const i of parts) {
+      const [w, h, d] = a.size[i], c = this.center(i, this.P);
+      out.expandByPoint(this.P2.set(c.x - w / 2, c.y - h / 2, c.z - d / 2)).expandByPoint(this.P2.set(c.x + w / 2, c.y + h / 2, c.z + d / 2));
+    }
+    return out.expandByScalar(0.09 * this.u);
+  }
+
+  /** Where the bracket's label goes: beside its right edge, at mid height, on the front. */
+  cursorAnchor(out: THREE.Vector3): THREE.Vector3 {
+    const b = this.cursorBox(this.B);
+    return b ? out.set(b.max.x, (b.min.y + b.max.y) / 2, b.max.z) : out.set(0, 0, 0);
+  }
+
+  private placeCursor() {
+    const b = this.cursorBox(this.B);
+    this.stepBox.visible = !!b;
+    if (!b) return;
+    this.stepBox.matrix.compose(b.getCenter(this.P), this.Q2.identity(), b.getSize(this.P2));
+    this.stepBox.matrixWorldNeedsUpdate = true;
   }
 
   /** The playhead as drawn: null when the replay is complete, whole steps under reduced motion. */
@@ -757,6 +817,7 @@ export class Specimen {
     outline(this.selectBox, this.selected, 0.07);
     outline(this.hoverBox, this.hovered === this.selected ? -1 : this.hovered, 0.05);
     outline(this.markBox, this.marked, 0.11);
+    this.placeCursor();
   }
 
   /** Tethers drawn right now, for the dragged and the lifted. */

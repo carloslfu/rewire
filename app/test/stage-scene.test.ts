@@ -7,6 +7,7 @@ import { plate } from "../src/stage/adapters.ts";
 import { type Arch, buildArch, type Part, partIndex } from "../src/stage/arch.ts";
 import { poseOf } from "../src/stage/intervene.ts";
 import { beatCount } from "../src/stage/playback.ts";
+import { fadeMs, ReplayController } from "../src/stage/replay.ts";
 import { Bay, layoutPlates, plateSize } from "../src/stage/scene/bay.ts";
 import { along, VIEWS } from "../src/stage/scene/camera.ts";
 import { fasciaHeight } from "../src/stage/scene/detail.ts";
@@ -294,14 +295,14 @@ function harness(arch: Arch, options: { hidden?: boolean; width?: number; coarse
   const controls = { enabled: true, enableRotate: true, mouseButtons: { LEFT: THREE.MOUSE.ROTATE as number }, touches: { ONE: THREE.TOUCH.ROTATE as number }, target: new THREE.Vector3(), update: vi.fn(() => false), dispose: vi.fn(),
     addEventListener: vi.fn<(type: string, f: () => void) => void>() };
   const environment = { texture: new THREE.Texture(), dispose: vi.fn() };
-  const events = { select: vi.fn(), punch: vi.fn(() => true), lost: vi.fn(), clock: vi.fn(), arranged: vi.fn() };
+  const events = { select: vi.fn(), punch: vi.fn(() => true), lost: vi.fn(), hidden: vi.fn(), arranged: vi.fn() };
   const stage = new Stage({
     host: host as unknown as HTMLElement, labels: labels as unknown as HTMLElement, tip: tip as unknown as HTMLElement, arch, theme: LIGHT, reducedMotion: options.reduced ?? false, coarse: options.coarse ?? false, reserved: () => options.reserved ?? [],
-    onSelect: events.select, onPunch: events.punch, describe: () => "part", onLost: events.lost, onClock: events.clock, onArranged: events.arranged,
+    onSelect: events.select, onPunch: events.punch, describe: () => "part", onLost: events.lost, onHidden: events.hidden, onArranged: events.arranged,
     deps: { renderer: () => renderer as unknown as THREE.WebGLRenderer, controls: () => controls, environment: () => environment },
   });
   let now = 0;
-  const run = (n = 1) => { for (let i = 0; i < n; i++) { const pending = [...frames]; frames.clear(); now += 16; for (const [, f] of pending) f(now); } };
+  const run = (n = 1, ms = 16) => { for (let i = 0; i < n; i++) { const pending = [...frames]; frames.clear(); now += ms; for (const [, f] of pending) f(now); } };
   const listening = () => [...canvas.listeners.values()].reduce((n, s) => n + s.size, 0) + [...doc.listeners.values()].reduce((n, s) => n + s.size, 0);
   const inner = stage as unknown as { camera: THREE.PerspectiveCamera; scene: THREE.Scene };
   /** A pointer event on the canvas. A plain left mouse button unless said otherwise. */
@@ -361,22 +362,213 @@ it("renders only when something changed, and stops asking for frames when idle",
   phone.stage.dispose();
 });
 
-it("runs the replay clock to the end, reports it, and then goes idle", () => {
-  const arch = buildArch(TINY_INFO), h = harness(arch), beats = beatCount(TINY_INFO);
+/** A reply of `tokens` tokens that is finished and stays as it is, for the real replay controller. */
+function replayOf(tokens: number, beats: number) {
+  let at = 0;
+  return new ReplayController({ beats: () => beats, subject: () => ({ epoch: "m", reply: "r", tokens, at, ready: true }), select: (i) => { at = i; } });
+}
+
+it("lends the replay its frames: one step at most per frame, drawn only as a step lights up, idle once it ends", () => {
+  const arch = buildArch(TINY_INFO), h = harness(arch), beats = beatCount(TINY_INFO), replay = replayOf(2, beats);
+  const playhead = () => h.stage.specimen.playheadNow;
+  replay.subscribe(() => { const r = replay.get(); h.stage.setPlayhead(r.mode === "replay" ? r.step : null, fadeMs(r.speed)); });
+  h.stage.setDriver(replay);
   h.run(4);
-  h.stage.setClock({ t: 0, playing: true, speed: 4 });
-  h.run(2000);
-  const last = h.events.clock.mock.calls.at(-1)![0];
-  expect(last).toEqual({ t: beats, playing: false, speed: 4 });
-  expect(h.events.clock.mock.calls.length).toBeGreaterThan(beats);
-  expect(h.events.clock.mock.calls.map((c) => c[0].t)).toEqual([...h.events.clock.mock.calls.map((c) => c[0].t)].sort((a, b) => a - b));
   expect(h.frames.size).toBe(0);
-  // Scrubbing while paused draws one frame and emits nothing.
-  h.events.clock.mockClear();
-  h.stage.setClock({ t: 3.5, playing: false, speed: 1 });
+  replay.setSpeed("fast");
+  expect(replay.enter("answer")).toBe(true);
+  // The first step is on screen at once, and the stage is awake without anything else asking for a frame.
+  expect(playhead()).toBe(1);
+  expect(h.frames.size).toBe(1);
+  let frames = 0, most = 0, last = replay.get();
+  const drawn = h.renderer.render.mock.calls.length, seen: number[] = [];
+  while (replay.get().mode === "replay" && !replay.get().ended && frames < 5000) {
+    // Now and then a frame arrives very late, as after a stall. It still moves one step.
+    h.run(1, frames % 37 === 36 ? 60_000 : 16);
+    frames++;
+    const now = replay.get(), moved = now.token === last.token ? now.step - last.step : now.token - last.token;
+    most = Math.max(most, moved);
+    // A token is only left after it was shown whole.
+    if (now.token !== last.token) { expect(last.step).toBe(beats); expect(now.step).toBe(1); }
+    seen.push(playhead() ?? beats);
+    last = now;
+  }
+  expect(replay.get()).toMatchObject({ ended: true, playing: false, token: 1, step: beats });
+  expect(most).toBe(1);
+  // The drawn playhead never runs ahead of the step it was asked for, and reaches every step.
+  expect(Math.max(...seen)).toBe(beats);
+  for (let n = 2; n < beats; n++) expect(seen).toContain(n);
+  // Most frames between steps draw nothing: the GPU is free for the camera.
+  const draws = h.renderer.render.mock.calls.length - drawn;
+  expect(draws).toBeGreaterThan(2 * beats);
+  expect(draws).toBeLessThan(frames * 0.8);
+  // Ended: no loop, and no frames left running.
   h.run(5);
-  expect(h.events.clock).not.toHaveBeenCalled();
   expect(h.frames.size).toBe(0);
+  expect(replay.get().ended).toBe(true);
+  // A scrub while paused draws and goes idle again.
+  const before = h.renderer.render.mock.calls.length;
+  replay.seek(3);
+  expect(playhead()).toBe(3);
+  h.run(5);
+  expect(h.renderer.render.mock.calls.length).toBe(before + 1);
+  expect(h.frames.size).toBe(0);
+  h.stage.dispose();
+});
+
+it("lights one step up gradually, never past it, and at once under reduced motion", () => {
+  const h = harness(buildArch(TINY_INFO)), playhead = () => h.stage.specimen.playheadNow!;
+  h.run(4);
+  h.stage.setPlayhead(3);
+  expect(playhead()).toBe(3);
+  h.stage.setPlayhead(4, 140);
+  expect(playhead()).toBe(3);
+  const rising: number[] = [];
+  for (let i = 0; i < 12; i++) { h.run(); rising.push(playhead()); }
+  expect(rising[0]).toBeGreaterThan(3);
+  expect(rising[0]).toBeLessThan(4);
+  expect(rising).toEqual([...rising].sort((a, b) => a - b));
+  expect(rising.at(-1)).toBe(4);
+  expect(h.frames.size).toBe(0);
+  // Back a step, several steps on, or another token: shown at once.
+  h.stage.setPlayhead(3, 140);
+  expect(playhead()).toBe(3);
+  h.stage.setPlayhead(7, 140);
+  expect(playhead()).toBe(7);
+  h.stage.setPlayhead(null, 140);
+  expect(h.stage.specimen.playheadNow).toBeNull();
+  h.stage.setReducedMotion(true);
+  h.stage.setPlayhead(2);
+  h.stage.setPlayhead(3, 140);
+  expect(playhead()).toBe(3);
+  h.stage.dispose();
+});
+
+it("brackets and names the step a replay is at, as a position only, and keeps selection, guide marks, colors and camera as they were", () => {
+  const arch = buildArch(TINY_INFO), h = harness(arch), beats = beatCount(TINY_INFO), sp = h.stage.specimen;
+  const inner = sp as unknown as { stepBox: THREE.Object3D; selectBox: THREE.Object3D; markBox: THREE.Object3D; headGlow: THREE.InstancedMesh; mlpGlow: THREE.InstancedMesh };
+  const label = () => h.spans.filter((x) => x.className === "stage-label step" && !x.removed).map((x) => x.textContent);
+  const box = () => sp.cursorBox(new THREE.Box3())!;
+  const at = (part: Part) => sp.center(partIndex(arch, part), new THREE.Vector3());
+  const values = Float32Array.from({ length: arch.parts.length }, (_, i) => ((i % 5) - 2) / 2);
+  h.stage.setValues(values, "signed");
+  h.stage.setSelection({ kind: "mlp", floor: 2 });
+  h.stage.setMarked({ kind: "head", floor: 3, head: 1 });
+  h.run(60);
+  // Live: no bracket and no label.
+  expect(sp.cursorNow).toBeNull();
+  expect(inner.stepBox.visible).toBe(false);
+  expect(label()).toEqual([]);
+  const camera = h.camera.position.clone(), colors = () => [...inner.headGlow.instanceColor!.array, ...inner.mlpGlow.instanceColor!.array];
+
+  // First step: the dictionary.
+  h.stage.setPlayhead(1);
+  expect(sp.cursorNow).toBe(0);
+  expect(inner.stepBox.visible).toBe(true);
+  expect(label()).toEqual(["Read the token"]);
+  expect(box().containsPoint(at({ kind: "embed" }))).toBe(true);
+  expect(box().containsPoint(at({ kind: "mlp", floor: 0 }))).toBe(false);
+  // A layer's attention step brackets that layer's heads and the sockets they share, and nothing else.
+  const floor = 2;
+  h.stage.setPlayhead(2 + 2 * floor);
+  expect(label()).toEqual([`Layer ${floor + 1} · attention`]);
+  for (let head = 0; head < arch.heads; head++) expect(box().containsPoint(at({ kind: "head", floor, head }))).toBe(true);
+  expect(box().containsPoint(at({ kind: "mlp", floor }))).toBe(false);
+  expect(box().containsPoint(at({ kind: "head", floor: floor + 1, head: 0 }))).toBe(false);
+  expect(box().containsPoint(at({ kind: "head", floor: floor - 1, head: 0 }))).toBe(false);
+  // Its MLP step brackets the MLP alone.
+  h.stage.setPlayhead(3 + 2 * floor);
+  expect(label()).toEqual([`Layer ${floor + 1} · MLP`]);
+  expect(box().containsPoint(at({ kind: "mlp", floor }))).toBe(true);
+  expect(box().containsPoint(at({ kind: "head", floor, head: 0 }))).toBe(false);
+  // The bracket is where the replay is, whatever was measured there: the same place with other numbers or none.
+  const bracket = box().clone();
+  h.stage.setValues(values.map((v) => -v), "signed");
+  expect(box().equals(bracket)).toBe(true);
+  h.stage.setValues(null, "signed");
+  expect(box().equals(bracket)).toBe(true);
+  h.stage.setValues(values, "signed");
+  // And it lights nothing itself: every window has the color the playhead alone gives it.
+  const lit = colors();
+  sp.setCursor(null);
+  expect(colors()).toEqual(lit);
+  sp.setCursor(2 + 2 * floor);
+  expect(colors()).toEqual(lit);
+  // A step lighting up gradually is bracketed from its first frame.
+  h.stage.setPlayhead(4 + 2 * floor, 140);
+  expect(sp.playheadNow).toBe(3 + 2 * floor);
+  expect(label()).toEqual([`Layer ${floor + 2} · attention`]);
+  // The last step: the token is whole, and the bracket stays on the output for as long as the replay holds it.
+  h.stage.setPlayhead(beats);
+  expect(sp.playheadNow).toBeNull();
+  expect(sp.cursorNow).toBe(beats - 1);
+  expect(label()).toEqual(["Choose the next token"]);
+  expect(box().containsPoint(at({ kind: "unembed" }))).toBe(true);
+  // The selection and the guide mark are untouched, and the camera did not move for any of it.
+  expect(inner.selectBox.visible).toBe(true);
+  expect(inner.markBox.visible).toBe(true);
+  h.run(30);
+  expect(h.camera.position.distanceTo(camera)).toBeLessThan(1e-9);
+  // It follows the drawing when the layers are spread apart.
+  h.stage.setPlayhead(2 + 2 * floor);
+  const low = box().min.y;
+  h.takeCamera();
+  h.stage.setSpread(1);
+  h.run(400);
+  expect(box().min.y).toBeGreaterThan(low + 0.5);
+  expect(box().containsPoint(at({ kind: "head", floor, head: 0 }))).toBe(true);
+  // Back to live: gone, with its label.
+  h.stage.setPlayhead(null);
+  expect(inner.stepBox.visible).toBe(false);
+  expect(label()).toEqual([]);
+  h.stage.dispose();
+
+  // Reduced motion keeps the bracket as a still position cue.
+  const still = harness(arch, { reduced: true });
+  still.stage.setValues(values, "signed");
+  still.stage.setPlayhead(3, 140);
+  expect(still.stage.specimen.cursorNow).toBe(2);
+  expect((still.stage.specimen as unknown as { stepBox: THREE.Object3D }).stepBox.visible).toBe(true);
+  expect(still.spans.filter((x) => x.className === "stage-label step" && !x.removed).map((x) => x.textContent)).toEqual(["Layer 1 · MLP"]);
+  still.stage.dispose();
+});
+
+it("stops lending frames to a replay while hidden, off screen or lost, and says so", () => {
+  const arch = buildArch(TINY_INFO), h = harness(arch), beats = beatCount(TINY_INFO), replay = replayOf(3, beats);
+  h.events.hidden.mockClear();
+  h.stage.setDriver(replay);
+  h.run(4);
+  replay.enter("answer");
+  h.stage.setPlayhead(1);
+  h.run(30);
+  const reached = replay.get().step;
+  expect(reached).toBeGreaterThan(1);
+  // The tab goes to the background: the stage reports it, and a replay left playing still cannot move.
+  h.doc.hidden = true;
+  for (const f of h.doc.listeners.get("visibilitychange")!) (f as () => void)();
+  expect(h.events.hidden).toHaveBeenCalledTimes(1);
+  h.run(200, 1000);
+  expect(replay.get().step).toBe(reached);
+  expect(h.frames.size).toBe(0);
+  // Back in view after a long time: it goes on from where it was, one step, with no jump.
+  h.doc.hidden = false;
+  for (const f of h.doc.listeners.get("visibilitychange")!) (f as () => void)();
+  h.run(1, 600_000);
+  expect(replay.get().step).toBeLessThanOrEqual(reached + 1);
+  // Scrolled out of sight is the same as hidden.
+  h.observers[1].callback([{ isIntersecting: false }]);
+  expect(h.events.hidden).toHaveBeenCalledTimes(2);
+  const off = replay.get().step;
+  h.run(100, 1000);
+  expect(replay.get().step).toBe(off);
+  h.observers[1].callback([{ isIntersecting: true }]);
+  // A lost context reports hidden before lost, and nothing runs afterwards.
+  for (const f of h.canvas.listeners.get("webglcontextlost")!) (f as (e: unknown) => void)({ preventDefault() {} });
+  expect(h.events.hidden).toHaveBeenCalledTimes(3);
+  expect(h.events.lost).toHaveBeenCalledTimes(1);
+  const lost = replay.get().step;
+  h.run(100, 1000);
+  expect(replay.get().step).toBe(lost);
   h.stage.dispose();
 });
 
@@ -425,12 +617,12 @@ it("follows the replay through the selected layer's plates and a reduced-motion 
   // Complete replay: every measured plate is shown.
   expect(levels()).toEqual([1, 1, 1, 1, 1, 1]);
   // Before this layer's attention beat nothing of it has been computed.
-  h.stage.setClock({ t: 1 + 2 * floor, playing: false, speed: 1 });
+  h.stage.setPlayhead(1 + 2 * floor);
   expect(levels()).toEqual([0.2, 0.2, 0.2, 0.2, 0.2, 0.2]);
   // Half way through attention: the first two of its four plates, in order. The MLP has not started.
-  h.stage.setClock({ t: 1 + 2 * floor + 0.5, playing: false, speed: 1 });
+  h.stage.setPlayhead(1 + 2 * floor + 0.5);
   expect(levels()).toEqual([1, 1, 0.2, 0.2, 0.2, 0.2]);
-  h.stage.setClock({ t: 2 + 2 * floor + 0.5, playing: false, speed: 1 });
+  h.stage.setPlayhead(2 + 2 * floor + 0.5);
   expect(levels()).toEqual([1, 1, 1, 1, 1, 0.2]);
   // New numbers for the same plates keep their place in the replay.
   h.stage.setBay({ key: "layer", floor, plates: plates.map((p) => ({ ...p })) });
@@ -446,7 +638,7 @@ it("follows the replay through the selected layer's plates and a reduced-motion 
   h.stage.setReducedMotion(false);
   h.stage.setPoses(arch.parts.map((p) => poseOf({}, p, TINY_INFO)));
   expect(h.stage.specimen.settled).toBe(false);
-  h.stage.setClock({ t: beatCount(TINY_INFO), playing: false, speed: 1 });
+  h.stage.setPlayhead(null);
   expect(levels()).toEqual([1, 1, 1, 1, 1, 1]);
   h.stage.dispose();
 });
@@ -536,7 +728,7 @@ it("releases its listeners, observers, frames, DOM and GPU context on dispose", 
   h.stage.setTray([{ label: "a", weight: 0.5 }, { label: "b", weight: 0.5 }], 1, 7, { kind: "head", floor: 0, head: 0 });
   h.stage.setCandidates([{ label: "x", p: 0.9, chosen: true }]);
   h.stage.setBay({ key: "k", floor: 1, plates: [plate({ id: "a", title: "A", band: 0, rows: 2, cols: 2, data: [1, 2, 3, 4] })] });
-  h.stage.setClock({ t: 0, playing: true, speed: 1 });
+  h.stage.setPlayhead(0);
   expect(h.listening()).toBeGreaterThanOrEqual(7);
   expect(h.frames.size).toBe(1);
   expect(h.spans.length).toBeGreaterThan(arch.floors + 4);
@@ -595,7 +787,7 @@ it("refuses to start without WebGL, leaving nothing behind", () => {
   const canvas = { removed: false, className: "", setAttribute() {}, remove() { this.removed = true; } };
   const host = { ownerDocument: { createElement: () => canvas }, prepend() {} };
   expect(() => new Stage({ host: host as unknown as HTMLElement, labels: host as unknown as HTMLElement, tip: host as unknown as HTMLElement, arch: buildArch(TINY_INFO), theme: LIGHT,
-    reducedMotion: false, coarse: false, onSelect() {}, onPunch: () => false, describe: () => "", onLost() {}, onClock() {}, onArranged() {},
+    reducedMotion: false, coarse: false, onSelect() {}, onPunch: () => false, describe: () => "", onLost() {}, onArranged() {},
     deps: { renderer: () => { throw new Error("Error creating WebGL context."); } } })).toThrow(/WebGL/);
   expect(canvas.removed).toBe(true);
   expect(frames).toHaveLength(0);

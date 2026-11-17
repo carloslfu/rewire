@@ -40,3 +40,9 @@ Captured the release gate, 182 app tests and two lifecycle tests, plus live Chro
 ## [2026-11-17 15:35] decide | records/decisions/2026-11-17-follow-output
 Adopt one shared following contract, persistent paused selection, valid removal fallback and complete-token replay handoff across 2D and 3D.
 
+## [2026-11-17 16:58] capture | records/measurements/2026-11-17-replay-experience
+Captured whole-answer replay release checks, Chrome UX evidence and the fixed fast-token regression.
+
+## [2026-11-17 16:58] decide | records/decisions/2026-11-17-replay-experience
+Adopted whole-answer replay, explicit transport controls, frame-paced progression and GPU sharing.
+

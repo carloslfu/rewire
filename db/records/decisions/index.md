@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/decisions
-updated: 2026-11-17T15:35:22.113001Z
+updated: 2026-11-17T16:58:22.009185Z
 ---
 
 # records/decisions
 
+- [[records/decisions/2026-11-17-replay-experience]] — Whole-answer replay with frame-driven steps and explicit controls
 - [[records/decisions/2026-11-17-follow-output]] — Consistent following and paused selection in both visualizers
 - [[records/decisions/2026-11-17-3d-materials-navigation]] — Use detailed physical materials and direct camera controls in the 3D workbench
 - [[records/decisions/2026-11-16-3d-model-view]] — Add a 3D specimen view beside the 2D diagrams, with separate tools for looking, arranging and changing

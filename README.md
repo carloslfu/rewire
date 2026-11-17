@@ -17,19 +17,19 @@ beside the conversation on desktop. On mobile, open it with Show model. Cut laye
 heads, zero selected weights, or reduce weight precision. Original and changed replies share the same
 sampling seed. Changes persist into new questions; Restore removes them. The model loads automatically.
 Sample questions use the same live inference path as freeform chat. Unsupported devices or loading
-failures show an honest unavailable state; there is no replay fallback.
+failures show an honest unavailable state; there is no recorded fallback.
 
 The visualizer measures one selected token. **Follow output**, in both the 2D and 3D views, selects
 the newest token of the reply being written: the changed reply in Push, falling back to the original
 while the changed one is empty, and always an original token in Change from original. Choosing a
-token yourself (in a reply, with Previous and Next, by picking a candidate, or with the 3D replay
-controls) pauses it. Paused, your token stays selected across new questions, Continue and model
+token yourself (in a reply, with Previous and Next, or by picking a candidate) pauses it. Paused, your token stays selected across new questions, Continue and model
 changes, and moves only if it stops existing: to the nearest token of the same reply, then that
 sample's original reply, then the nearest remaining sample. With nothing selected, the first token
 written is selected once and kept. Only you turn following on or off, with one exception: clearing
 the samples, opening a guided example and switching between Qwen and the tiny model start a new
 experiment, which follows again. Switching between Push and Change from original, or between 2D and
-3D, keeps the setting.
+3D, keeps the setting. A 3D Replay holds the selection while it lasts: Back to live turns following
+on, and a replay that ends any other way leaves following as you had set it before.
 
 **Teach** fine-tunes the same Qwen model using editable question/answer pairs. A rank-8 LoRA adds
 32,768 trainable float32 parameters to layer 28's MLP down projection; original Qwen weights stay
@@ -143,11 +143,6 @@ What is measured and what is drawn:
   the MLP's normalization, gate, up projection, neurons, down projection and the stream out. During a
   replay the plates of the selected layer come up in that order. Hover a tile to read its number. With a head selected, arcs show its measured attention over the context. The bars on top are
   the real candidate probabilities.
-- Play replays one token's measured values in the order the architecture computes them: the token
-  read, each layer's attention then its MLP, then the choice. It is a slowed illustration with step,
-  scrub and speed controls. It does not show how long any step took. Play, Back, Step and the
-  scrubber pause Follow output. Turning it back on stops the replay and shows the newest token
-  complete, and a newly selected token always starts complete. The speed is kept.
 - Teach shows the adapter's actual A and B matrices and the size of each of its eight ranks, refreshed
   every 10 steps. Frozen layers are drawn dimmed. No activations are measured during teaching, so
   nothing else lights up.
@@ -161,9 +156,76 @@ for. A measurement that arrives after
 the token, model or changes have moved on is dropped. With the model focused, arrow keys move between
 parts, Enter looks closer, P punches, Shift with the arrows turns the model, plus and minus zoom, and
 0 resets the view. The same selection is available from two ordinary menus under the stage. With
-reduced motion set, parts move without springs and the replay advances in whole steps, including when
+reduced motion set, parts move without springs and each replay step lights at once, including when
 the preference changes while the view is open. Labels are kept inside the stage and clear of the
 toolbar; where two would touch, the less important one is left out.
+
+### Live output and Replay
+
+A strip directly under the 3D stage, in the docked view, the full view and on a phone, says which of
+two modes the model is in and holds everything that belongs to it.
+
+**Live output** is the default. The model shows the selected token complete, Follow output keeps it
+on the newest token, and Previous and Next choose another.
+
+**Replay answer** walks a finished reply back through the whole model. It starts at the reply's first
+visible token, lights that token's steps in the order the architecture computes them (the token read,
+each layer's attention then its MLP, then the choice: 58 steps for Qwen, 10 for the tiny model), holds
+the finished token with its real candidate probabilities, and moves on to the next token until the
+last one. Then it stops; it does not loop. A replay reads only values that were measured while the
+reply was written. Nothing is generated again, no number is invented, and the pace is an
+illustration, not a timing of the real computation. (Updating your samples after a model change is a
+different thing: there the model really writes the changed answers again.)
+
+- Replay answer is enabled once the selected reply is finished and the model is idle. Until then the
+  strip says what it is waiting for: a question, the end of the reply being written, or the end of a
+  sample update. Each finished reply also has its own entry: Replay beside the reply in the 3D view,
+  and Replay in 3D under the reply in the conversation, which opens the 3D view and starts there.
+  Stale replies are not offered.
+- The scope is **Whole answer** or **This token**. Replay only this token starts on the selected token
+  and stops at its end. You can switch scope during playback. Speed is kept between replays;
+  Replay answer always starts the whole answer. Slow is 400 ms a step, Steady (the default) 110 ms and Fast 50 ms: about 6 and 3 seconds for a
+  Qwen token. A finished token is held for at least 600 ms at every speed.
+- In the scene, amber corner brackets and a label (Layer 13 · attention) mark the step the replay is
+  at: the dictionary, one layer's attention heads, one layer's MLP, or the output. They are a position
+  only. They light nothing, do not depend on what was measured, leave the selection outline and the
+  guide mark as they are, and never move the camera. With reduced motion they are a still cue.
+- The strip says Replaying, Replay paused or Replay finished, and its progress line matches the
+  scope: the whole answer from its first step to its last, or this token alone from empty to full.
+- Pause and Resume hold and continue. Back a step and Next step, and the scrubber labelled
+  Steps for this token, move within the token and pause; in a whole-answer replay the step buttons
+  run on into the neighboring token. Previous and Next token, or selecting any token in a reply, pause
+  on that token and show it complete; selecting a token of the other reply or of another sample makes
+  the replay about that reply. Play then walks the chosen token from its first step and continues with
+  the chosen scope. Start over and Replay again begin at the first token of the answer, or at the first
+  step of the token in This token scope.
+- Playing moves one step at a time. A step lights up briefly and then nothing is redrawn until the
+  next one unless you are moving the camera, so turning, zooming, panning, Explore and Grab stay
+  responsive. However long a frame took, the replay moves at most one step in it: a stall or a hidden
+  tab never becomes a jump. Each step updates the stage directly; only the small readout re-renders.
+- While a whole answer plays, a selected layer is not measured again for every token going by. Pause,
+  and the token on screen is measured, with the same loading state and newest-request guard as live
+  inspection. A measurement is only ever shown for the token it was made for. Opening the inspector
+  pauses the replay for the same reason.
+- **Back to live** ends the replay and follows the newest output. A replay also ends by itself, never
+  moving the selection again, when the model starts writing (a new question, Continue, a picked
+  candidate), when the model changes (a control, Punch, Restore), when a sample is edited, removed,
+  restored or cleared, when you switch models, benches or to the 2D view, or when the model sheet is
+  closed on a phone. It pauses, and stays paused until you resume, when the tab is hidden, the stage
+  scrolls out of sight or the 3D view has to be reloaded. It never starts playing by itself.
+
+### Sharing the GPU
+
+Inference (WebGPU, in a worker) and the 3D view (WebGL, on the page) use the same GPU. With no 3D view
+open, the worker keeps two steps queued ahead of the one it is reading, as before. While a 3D view is
+open it waits for each step to finish before queuing the next, and after about 24 ms of work leaves
+its queue empty for about one frame (16 ms) before going on, for replies and comparisons alike. This
+gives the browser room to draw the model between tokens; it cannot guarantee a frame, because the
+browser and the driver decide the order, and a single token's forward pass is not split. The numbers
+are identical either way: only when a step is queued changes. Stop, a newer model version and a
+replaced job are checked before every step, including after each rest, and a comparison now stops on
+Stop as well. Replies are slower while the 3D view is open; the 2D view runs at full speed. A replay
+needs the model idle, so it never competes with generation.
 
 ## Love and evil candidates
 
@@ -274,7 +336,8 @@ semantic opposite.
 ## Layout
 
 - `app/` the page: React, Vite and TypeScript, built as static files. `app/src/stage/` is the 3D view:
-  pure modules for the architecture, replay, interventions and data, and `scene/` for Three.js (the
+  pure modules for the architecture, replay (`replay.ts` is the state machine, `replay-session.ts`
+  binds it to the page), interventions and data, and `scene/` for Three.js (the
   specimen, its generated materials and detail, the studio lighting, the camera and the stage)
 - `engine/` the WebGPU engine (TypeScript and WGSL): 4-bit weights unpacked in the kernels, math in 32-bit
   floats, a change table every kernel reads, direct pushes and an inspection pass for any word

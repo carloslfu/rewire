@@ -14,13 +14,14 @@ import type { Cand, Forced, Tok } from "../model/types.ts";
 import type { WriteJob } from "./engine.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
 import { ModelFiles } from "./files.ts";
+import { FULL, paceFor, runUnits } from "./pace.ts";
 import { LessonRuntime } from "../teach/runtime.ts";
 import type { TokenPiece } from "@rewire/engine/src/token-text.ts";
 
 declare const self: DedicatedWorkerGlobalScope;
 
 const CACHE = "rewire-weights-v1";
-const LAG = 2; // results are read this many steps behind the GPU
+const LAG = FULL.ahead; // the device check and the bench read results this many steps behind the GPU
 const STOP = new Set(STOP_TOKENS);
 
 let dev: GPUDevice | null = null;
@@ -38,6 +39,8 @@ let concepts = new Map<string, Float32Array[]>();
 let host: Omit<InspectHost, "table"> | null = null;
 let version = 0;
 let writeEpoch = 0;
+/** A 3D view is open on the page: writing and comparing leave the GPU room to draw it. */
+let stageOpen = false;
 let files: ModelFiles | null = null;
 let downloadPaused = false;
 let lessonRuntime: LessonRuntime | null = null;
@@ -77,6 +80,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
         version = m.version;
         return;
       case "cancel": writeEpoch++; return;
+      case "stage": stageOpen = m.open; return;
       case "check": return done(m.id, await check());
       case "load": return done(m.id, await load(m.base, m.phone, m.expectedHash));
       case "first": return done(m.id, need(tok).firstTurn(m.message));
@@ -101,7 +105,10 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
         const epoch = writeEpoch;
         return done(m.id, await locked(m.job.conv, () => write(m.job, m.id, epoch)));
       }
-      case "compare": return done(m.id, await locked(m.conv, () => compare(m.conv, m.changes, m.history, m.reply, m.version)));
+      case "compare": {
+        const epoch = writeEpoch;
+        return done(m.id, await locked(m.conv, () => compare(m.conv, m.changes, m.history, m.reply, m.version, epoch)));
+      }
       case "inspect": {
         const r = await locked(m.conv, () => inspect(m.conv, m.changes, m.tokens, m.target));
         const transfer = [...r.detail.values()].map((a) => a.buffer as ArrayBuffer);
@@ -412,34 +419,29 @@ async function write(job: WriteJob, id: number, epoch = writeEpoch): Promise<{ e
   const c = s.c;
   const start = job.prefix.length;
   const toks: number[] = [];
-  let submitted = 0, received = 0, ended = false, cancelled = false;
+  let ended = false;
   const stale = () => epoch !== writeEpoch || (job.version >= 0 && version > job.version);
-  const take = async () => {
-    const r = await c.result(received);
-    received++;
+  const take = async (i: number) => {
+    const r = await c.result(i);
     const t: Tok = {
       id: r.token, lp1: r.lp1, concept: r.concept, cut: r.cut, pushes: r.pushes,
-      cands: Array.from(r.ids, (cid, i) => ({ id: cid, p: r.probs[i] })) as Cand[],
+      cands: Array.from(r.ids, (cid, k) => ({ id: cid, p: r.probs[k] })) as Cand[],
     };
-    if (received === 1 && job.force !== undefined) t.picked = true;
+    if (i === 0 && job.force !== undefined) t.picked = true;
     toks.push(t.id);
-    const pieces = which === "qwen" && tok ? [t.id, ...t.cands.map((x) => x.id)].map((i): [number, TokenPiece] => [i, tok!.pieceData(i)]) : undefined;
+    const pieces = which === "qwen" && tok ? [t.id, ...t.cands.map((x) => x.id)].map((k): [number, TokenPiece] => [k, tok!.pieceData(k)]) : undefined;
     post({ t: "tok", id, tok: t, pieces }, [t.pushes.buffer as ArrayBuffer]);
     if (which === "qwen" && STOP.has(t.id)) ended = true;
+    return ended;
   };
-  for (let i = 0; i < cap && !ended; i++) {
-    if (stale()) { cancelled = true; break; }
-    c.step(i === 0 ? all[all.length - 1] : undefined, {
+  // Steps queued after the stop are waited for and dropped, so the cache stays consistent.
+  const { cancelled } = await runUnits({
+    count: cap, ring: RING, stale, pace: () => paceFor(stageOpen), take, drain: (i) => c.result(i),
+    submit: (i) => c.step(i === 0 ? all[all.length - 1] : undefined, {
       seed: job.seed, turn: job.turn, step: start + i, temperature: job.temperature,
-      force: i === 0 ? job.force : undefined, slot: submitted,
-    });
-    submitted++;
-    if (submitted - received > LAG) await take();
-    if (submitted - received >= RING) await take();
-  }
-  while (received < submitted && !ended) await take();
-  // drain results of steps submitted after the stop, then keep the cache consistent
-  while (received < submitted) { await c.result(received); received++; }
+      force: i === 0 ? job.force : undefined, slot: i,
+    }),
+  });
   const read = [all[all.length - 1], ...toks.slice(0, Math.max(0, toks.length - 1))];
   s.tokens.push(...read);
   const keep = all.length - 1 + read.length;
@@ -448,26 +450,27 @@ async function write(job: WriteJob, id: number, epoch = writeEpoch): Promise<{ e
   return { ended, cancelled };
 }
 
-async function compare(ci: number, changes: ChangeSpec, history: number[], reply: number[], v: number): Promise<Forced[] | null> {
+async function compare(ci: number, changes: ChangeSpec, history: number[], reply: number[], v: number, epoch = writeEpoch): Promise<Forced[] | null> {
   if (!reply.length) return [];
+  // A newer model version or a cancel ends the comparison between steps; the page drops what was measured.
+  const stale = () => epoch !== writeEpoch || (v >= 0 && version > v);
+  if (stale()) return null;
   contextCheck(history.length + reply.length);
   ensure(ci, changes, history.slice(0, -1), conceptFrom(history));
   const s = cur()[ci], c = s.c;
   const out: Forced[] = [];
   const inputs = [history[history.length - 1], ...reply.slice(0, -1)];
-  let submitted = 0, received = 0;
-  const take = async () => {
-    const r = await c.result(received++);
-    out.push({ id: r.token, lp1: r.lp1, concept: r.concept, pushes: r.pushes });
-  };
-  for (let i = 0; i < reply.length; i++) {
-    if (v >= 0 && version > v) break;
-    c.compareStep(inputs[i], reply[i], submitted++);
-    if (submitted - received > LAG) await take();
-  }
-  while (received < submitted) await take();
+  const { submitted } = await runUnits({
+    count: reply.length, ring: RING, stale, pace: () => paceFor(stageOpen),
+    submit: (i) => c.compareStep(inputs[i], reply[i], i),
+    take: async (i) => {
+      const r = await c.result(i);
+      out.push({ id: r.token, lp1: r.lp1, concept: r.concept, pushes: r.pushes });
+      return false;
+    },
+  });
   s.tokens.push(...inputs.slice(0, submitted));
-  return v >= 0 && version > v ? null : out;
+  return stale() ? null : out;
 }
 
 async function inspect(ci: number, changes: ChangeSpec, tokens: number[], target: number) {

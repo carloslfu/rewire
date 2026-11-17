@@ -17,6 +17,7 @@ export type ToWorker = { id: number } & (
   | { t: "pause"; paused: boolean }
   | { t: "version"; version: number }
   | { t: "cancel" }
+  | { t: "stage"; open: boolean }
   | { t: "first"; message: string }
   | { t: "next"; reply: number[]; message: string }
   | { t: "plain"; text: string }

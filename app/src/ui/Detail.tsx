@@ -1,5 +1,5 @@
 // The detail panel (section 5.2): always what the tapped part is, its real numbers, and its control.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FloorDetail } from "../model/types.ts";
 import { attentionMap, chipsWith, floorDetail, liveEngine, pathData, pick, piece, setFocus, stepAction, stepData, tokenPiece } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
@@ -42,13 +42,20 @@ function Head({ kicker, title, def, std, code }: { kicker: string; title: string
   );
 }
 
-function useDetail(c: Chosen | null): { detail: FloorDetail | null; loading: boolean } {
+export function useDetail(c: Chosen | null): { detail: FloorDetail | null; loading: boolean } {
   const [st, setSt] = useState<{ key: string; detail: FloorDetail | null; loading: boolean }>({ key: "", detail: null, loading: false });
+  // Whether the state holds anything. A reply still being written has nothing to show, and setting
+  // "nothing" again after every token of a fast burst is what React throws as an update loop.
+  const holding = useRef(false);
   const version = useStore((s) => s.version);
   const key = c ? `${version}.${c.ref.turn}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${c.reply.done}` : "";
   useEffect(() => {
-    if (!c || !c.reply.done) { setSt({ key, detail: null, loading: false }); return; }
+    if (!c || !c.reply.done) {
+      if (holding.current) { holding.current = false; setSt({ key, detail: null, loading: false }); }
+      return;
+    }
     let live = true;
+    holding.current = true;
     setSt({ key, detail: null, loading: true });
     floorDetail(c.ref).then((d) => live && setSt({ key, detail: d, loading: false }), () => live && setSt({ key, detail: null, loading: false }));
     return () => { live = false; };

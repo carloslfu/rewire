@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { QWEN_INFO, TINY_INFO } from "../src/model/info.ts";
 import { buildArch, pushLength } from "../src/stage/arch.ts";
-import { advance, applyReplay, BASE_RATE, beatAt, beatCount, beatLabel, beatOf, lit, plateLit, pushSoFar, runningPush, seek, spineFraction, stepClock } from "../src/stage/playback.ts";
+import { beatAt, beatCount, beatLabel, beatOf, lit, plateLit, pushSoFar, runningPush, seek, spineFraction } from "../src/stage/playback.ts";
 
 it("replays the architecture in the order it computes: token in, each layer's attention then MLP, token out", () => {
   for (const model of [QWEN_INFO, TINY_INFO]) {
@@ -51,30 +51,7 @@ it("adds up the measured pushes of exactly the parts that have run", () => {
   expect(pushSoFar(new Float32Array(0), 3)).toBe(0);
 });
 
-it("advances only while playing, at the chosen speed, and stops at the end", () => {
-  const n = beatCount(TINY_INFO);
-  const paused = { t: 2, playing: false, speed: 1 };
-  expect(advance(paused, 500, n)).toBe(paused);
-  expect(advance({ t: 2, playing: true, speed: 1 }, 100, n).t).toBeCloseTo(2 + 0.1 * BASE_RATE, 6);
-  expect(advance({ t: 2, playing: true, speed: 4 }, 100, n).t).toBeCloseTo(2 + 0.4 * BASE_RATE, 6);
-  // A tab returning from the background cannot skip the replay ahead.
-  expect(advance({ t: 0, playing: true, speed: 1 }, 60_000, n).t).toBeCloseTo(0.1 * BASE_RATE, 6);
-  expect(advance({ t: 1, playing: true, speed: 1 }, -50, n).t).toBe(1);
-  const end = advance({ t: n - 0.01, playing: true, speed: 4 }, 100, n);
-  expect(end).toEqual({ t: n, playing: false, speed: 4 });
-  let c = { t: 0, playing: true, speed: 2 }, frames = 0;
-  while (c.playing && frames++ < 10_000) c = advance(c, 16, n);
-  expect(c.t).toBe(n);
-  expect(frames).toBeGreaterThan(n / (BASE_RATE * 2) / 0.016 - 2);
-});
-
-it("steps and scrubs within the replay, and lights a part only from its own beat", () => {
-  expect(stepClock(0, 1, 10)).toBe(1);
-  expect(stepClock(2.4, 1, 10)).toBe(3);
-  expect(stepClock(2.4, -1, 10)).toBe(2);
-  expect(stepClock(3, -1, 10)).toBe(2);
-  expect(stepClock(10, 1, 10)).toBe(10);
-  expect(stepClock(0, -1, 10)).toBe(0);
+it("keeps the playhead inside the token, and lights a part only from its own beat", () => {
   expect(seek(-3, 10)).toBe(0);
   expect(seek(99, 10)).toBe(10);
   expect(seek(Number.NaN, 10)).toBe(0);
@@ -111,26 +88,4 @@ it("brings a layer's plates up in computation order, only during that layer's ow
   // Whole steps (reduced motion): a beat's plates show once the step past it is reached.
   expect(plateLit(floor, "attention", 0, n, Math.floor(attention + 0.7))).toBe(0);
   expect(plateLit(floor, "attention", n - 1, n, attention + 1)).toBe(1);
-});
-
-it("pauses following for every manual replay control, and reveals the whole token without losing the speed", () => {
-  const n = beatCount(TINY_INFO), complete = { t: n, playing: false, speed: 4 };
-  // Play restarts a finished replay and resumes a paused one where it was.
-  expect(applyReplay(complete, { kind: "play" }, n)).toEqual({ clock: { t: 0, playing: true, speed: 4 }, manual: true });
-  expect(applyReplay({ t: 3.5, playing: false, speed: 1 }, { kind: "play" }, n)).toEqual({ clock: { t: 3.5, playing: true, speed: 1 }, manual: true });
-  // Back, Step and the scrubber stop a running replay at their position, and are manual too.
-  const running = { t: 3.5, playing: true, speed: 2 };
-  expect(applyReplay(running, { kind: "step", direction: -1 }, n)).toEqual({ clock: { t: 3, playing: false, speed: 2 }, manual: true });
-  expect(applyReplay(running, { kind: "step", direction: 1 }, n)).toEqual({ clock: { t: 4, playing: false, speed: 2 }, manual: true });
-  expect(applyReplay(complete, { kind: "step", direction: -1 }, n)).toEqual({ clock: { t: n - 1, playing: false, speed: 4 }, manual: true });
-  expect(applyReplay(running, { kind: "seek", t: 0 }, n)).toEqual({ clock: { t: 0, playing: false, speed: 2 }, manual: true });
-  expect(applyReplay(running, { kind: "seek", t: 999 }, n).clock.t).toBe(n);
-  // Pause and Speed are not a position in the token.
-  expect(applyReplay(running, { kind: "pause" }, n)).toEqual({ clock: { t: 3.5, playing: false, speed: 2 }, manual: false });
-  expect(applyReplay(running, { kind: "speed", speed: 0.5 }, n)).toEqual({ clock: { t: 3.5, playing: true, speed: 0.5 }, manual: false });
-  // A new token or resumed following: stopped, complete, same speed, whether it was running, scrubbed to 0 or already complete.
-  for (const from of [running, { t: 0, playing: false, speed: 2 }, { t: n, playing: false, speed: 2 }]) {
-    expect(applyReplay(from, { kind: "reveal" }, n)).toEqual({ clock: { t: n, playing: false, speed: 2 }, manual: false });
-  }
-  expect(advance(applyReplay(running, { kind: "reveal" }, n).clock, 100, n).t).toBe(n);
 });

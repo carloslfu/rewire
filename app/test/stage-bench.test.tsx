@@ -15,6 +15,8 @@ let Dismantle: typeof import("../src/stage/DismantleStage.tsx").default;
 let Teach: typeof import("../src/stage/TeachStage.tsx").default;
 let Grow: typeof import("../src/stage/GrowStage.tsx").default;
 let Lab: typeof import("../src/ui/Lab.tsx");
+let Talk: typeof import("../src/ui/Conversation.tsx");
+let R: typeof import("../src/stage/replay-session.ts");
 
 beforeEach(async () => {
   vi.resetModules();
@@ -27,6 +29,8 @@ beforeEach(async () => {
   Teach = (await import("../src/stage/TeachStage.tsx")).default;
   Grow = (await import("../src/stage/GrowStage.tsx")).default;
   Lab = await import("../src/ui/Lab.tsx");
+  Talk = await import("../src/ui/Conversation.tsx");
+  R = await import("../src/stage/replay-session.ts");
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -56,7 +60,10 @@ it("explains itself and holds every model edit until the model is ready", () => 
   expect(t).toContain("Parts can be changed once the model is ready.");
   expect(t).toContain("28 layers · original model");
   expect(b.get("Restore model")).toEqual([true]);
-  expect(b.get("Play")).toEqual([true]);
+  // Replay is in plain sight before there is anything to replay, and says how to get there.
+  expect(b.get("Replay answer")).toEqual([true]);
+  expect(t).toContain("Live output");
+  expect(t).toContain("Ask a question first. Once the reply is finished you can replay it here.");
   expect(b.get("Cut layer 1")).toEqual([true]);
   // The whole architecture is selectable from ordinary menus.
   expect(html.match(/<option value="\d+">Layer (?:<!-- -->)?\d+<\/option>/g)).toHaveLength(28);
@@ -73,7 +80,7 @@ it("shows a selected part's real controls and measured value, and locks them whi
   expect(t).toContain("+1.50 direct push for");
   expect(b.get("Knock out")).toEqual([false]);
   expect(b.get("Restore this head")).toEqual([true]);
-  expect(b.get("Replay")).toEqual([false]);
+  expect(b.get("Replay answer")).toEqual([false]);
   expect(b.get("Off")).toEqual([false]);
   expect(t).toContain("Every part is lit. Direct pushes add up to +1.25");
   // The bay is honest about a measurement that has not arrived.
@@ -90,7 +97,9 @@ it("shows a selected part's real controls and measured value, and locks them whi
   html = renderToString(<Dismantle />); b = buttons(html);
   expect(b.get("Put back")).toEqual([true]);
   expect(b.get("Restore model")).toEqual([true]);
+  expect(b.get("Replay answer")).toEqual([true]);
   expect(text(html)).toContain("Wait for the reply to finish");
+  expect(text(html)).toContain("Replay is ready when this reply is finished.");
   // A stale reply is never measured.
   store.set({ busy: false, turns: [{ ...sample(), changed: { ...sample().normal, stale: true, changes: { heads: [{ floor: 1, head: 1, mult: 0 }] } } }], word: { turn: 0, side: "changed", index: 0 } });
   expect(text(renderToString(<Dismantle />))).toContain("This reply used earlier settings.");
@@ -111,16 +120,16 @@ it("offers the same Follow output control in 2D and 3D, usable and explained bef
   let flat = control(renderToString(<Lab.LabScope />)), stage = control(renderToString(<Dismantle />));
   for (const c of [flat, stage]) expect(c).toMatchObject({ label: "Follow output", pressed: "true", type: "button", disabled: false });
   expect(flat.hint).toBe("Following: waiting for the first token.");
-  expect(stage.hint).toBe(`${flat.hint} Replay animates one token and pauses following.`);
+  expect(stage.hint).toBe(flat.hint);
   expect(flat.title).toBe(stage.title);
   const following = flat.title;
-  // Paused on a chosen token: the same words in both views, and only 3D mentions its replay.
+  // Paused on a chosen token: the same words in both views.
   store.set({ turns: [sample()], word: { turn: 0, side: "normal", index: 0 }, follow: false });
   const paused = renderToString(<Dismantle />);
   flat = control(renderToString(<Lab.LabScope />)); stage = control(paused);
   for (const c of [flat, stage]) expect(c).toMatchObject({ label: "Follow output", pressed: "false", disabled: false });
   expect(flat.hint).toBe("Paused on this token. New replies will not move it.");
-  expect(stage.hint).toBe(`${flat.hint} Replay animates this one token.`);
+  expect(stage.hint).toBe(flat.hint);
   expect(flat.title).toBe(stage.title);
   expect(flat.title).not.toBe(following);
   // Paused with nothing selected says what will happen, and following with a token says it is live.
@@ -131,6 +140,160 @@ it("offers the same Follow output control in 2D and 3D, usable and explained bef
   // The copy never describes the replay as real timing, and uses no em dash.
   expect(text(paused)).toContain("It is not a timing of the real computation.");
   for (const c of [flat, stage]) expect(`${c.hint}${c.title}`).not.toContain("—");
+});
+
+it("puts Replay answer in plain sight under the stage and says why it is waiting", () => {
+  /** The primary entry, and the sentence it is described by. */
+  const entry = (html: string) => {
+    const m = /<button([^>]*class="btn primary replay-enter"[^>]*)>(.*?)<\/button>/.exec(html)!;
+    const how = new RegExp(`<p class="note replay-how" id="${/aria-describedby="([^"]+)"/.exec(m[1])![1]}">(.*?)</p>`).exec(html)!;
+    return { label: text(m[2]).trim(), type: /type="(\w+)"/.exec(m[1])![1], disabled: /\sdisabled=""/.test(m[1]), how: text(how[1]).trim() };
+  };
+  // The strip sits directly under the stage, before the scrolling controls, in the one section that names both modes.
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 } });
+  let html = renderToString(<Dismantle />);
+  expect(html.indexOf('class="stage-bar"')).toBeGreaterThan(html.indexOf('class="stage-view"'));
+  expect(html.indexOf('class="stage-bar"')).toBeLessThan(html.indexOf('class="stage-lower"'));
+  expect(html).toContain('<section class="replay-bar" aria-label="Live output and replay">');
+  expect(html).toContain('<span class="replay-mode live">Live output</span>');
+  // Nothing asked yet: the way there is spelled out.
+  expect(entry(html)).toEqual({ label: "Replay answer", type: "button", disabled: true, how: "Ask a question first. Once the reply is finished you can replay it here." });
+  expect(text(html)).toContain("Ask a question to light up the model.");
+  // The reply is being written: tokens are on screen, and Replay waits for the end.
+  const writing = { ...sample(), normal: { ...sample().normal, toks: [tok(100)], ended: false, done: false } };
+  store.set({ turns: [writing], word: { turn: 0, side: "normal", index: 0 }, busy: true });
+  expect(entry(renderToString(<Dismantle />))).toMatchObject({ disabled: true, how: "Replay is ready when this reply is finished." });
+  // The model is rewriting changed answers (the store calls that `replay`): a different thing, and Replay waits for it too.
+  store.set({ turns: [sample()], replay: { turn: 0, status: "running" } });
+  expect(entry(renderToString(<Dismantle />))).toMatchObject({ disabled: true, how: "Replay is ready when the sample update is finished." });
+  store.set({ busy: false, replay: { turn: 0, status: "stopped" } });
+  expect(entry(renderToString(<Dismantle />))).toMatchObject({ disabled: true, how: "Retry the sample update or restore the originals, then replay." });
+  // A reply written under earlier settings is never replayed.
+  store.set({ replay: null, turns: [{ ...sample(), changed: { ...sample().normal, stale: true, changes: { heads: [{ floor: 1, head: 1, mult: 0 }] } } }], word: { turn: 0, side: "changed", index: 0 } });
+  expect(entry(renderToString(<Dismantle />))).toMatchObject({ disabled: true, how: "This reply used earlier settings. Select a token in a current reply." });
+  // Finished and idle: enabled, explained, with the single-token replay as the smaller choice beside it.
+  store.set({ turns: [sample()], word: { turn: 0, side: "normal", index: 1 } });
+  html = renderToString(<Dismantle />);
+  expect(entry(html)).toEqual({ label: "Replay answer", type: "button", disabled: false,
+    how: "Walks this reply through the whole model, token by token. Replay only this token" });
+  expect(buttons(html).get("Replay only this token")).toEqual([false]);
+  expect(text(html)).toContain("Token 2 of 2 · Original reply");
+  expect(html).toMatch(/aria-label="Previous token"[^>]*>/);
+  expect(html).toMatch(/aria-label="Next token"[^>]*disabled=""/);
+  // Live has no transport, and the page never calls a replay real timing.
+  for (const label of ["Pause", "Resume", "Back to live"]) expect(buttons(html).has(label)).toBe(false);
+  expect(html).not.toContain('type="range" min="1"');
+  expect(text(html)).toContain("Nothing is generated again. It is not a timing of the real computation.");
+  expect(text(html)).not.toContain("—");
+});
+
+it("shows Replay as its own mode: what is playing, where it is, what each control does, and the way back", () => {
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [sample()], word: { turn: 0, side: "normal", index: 1 }, follow: true });
+  expect(R.startReplay("answer")).toBe(true);
+  let html = renderToString(<Dismantle />), b = buttons(html), t = text(html);
+  // The mode, the token and its place in the answer, and one obvious way out. Follow output is not offered inside a replay.
+  expect(html).toContain('<section class="replay-bar replaying" aria-label="Replay of this answer">');
+  expect(html).toContain('<span class="replay-mode on playing">Replaying</span>');
+  expect(b.get("Back to live")).toEqual([false]);
+  expect(b.has("Replay answer")).toBe(false);
+  expect(html).not.toContain("follow-toggle");
+  expect(t).toContain("Token 1 of 2 · Original reply");
+  expect(store.get()).toMatchObject({ follow: false, word: { turn: 0, side: "normal", index: 0 } });
+  // One primary control. While playing it pauses.
+  expect(html.match(/class="btn primary[^"]*"/g)).toHaveLength(1);
+  expect(b.get("Pause")).toEqual([false]);
+  // The scrubber is labelled with what it moves through, and reads its position in words.
+  const scrub = /<label class="replay-scrub" for="([^"]+)">(.*?)<\/label>/.exec(html)!;
+  expect(text(scrub[2])).toContain("Steps for this token");
+  expect(text(scrub[2])).toContain("Step 1 of 58");
+  expect(scrub[2]).toContain(`id="${scrub[1]}"`);
+  expect(scrub[2]).toMatch(/type="range" min="1" max="58" step="1"/);
+  expect(scrub[2]).toContain('aria-valuetext="Step 1 of 58: Read the token"');
+  // Whole answer: progress runs from nothing at the first step of the first token to full at the last step of the last.
+  expect(html).toMatch(/<progress class="replay-progress playing" max="115" value="0" aria-label="Replay progress through the whole answer: Token 1 of 2, step 1 of 58"/);
+  // Steps through the model are words in their own named group; tokens are the chevrons beside the token.
+  const steps = /<div class="replay-steps" role="group" aria-label="Step through the model">(.*?)<\/div>/.exec(html)![1];
+  expect([...buttons(steps).entries()]).toEqual([["Back a step", [true]], ["Next step", [false]]]);
+  expect(steps.match(/Pauses the replay\./g)).toHaveLength(2);
+  for (const [name, off] of [["Previous token", true], ["Next token", false]] as const) {
+    const button = new RegExp(`<button[^>]*aria-label="${name}"[^>]*>`).exec(html)![0];
+    expect(/\sdisabled=""/.test(button)).toBe(off);
+    expect(button).toContain("Pauses the replay.");
+  }
+  // Scope and speed are named groups with the current choice pressed.
+  expect(html).toMatch(/aria-pressed="true"[^>]*>Whole answer<\/button>/);
+  expect(html).toMatch(/aria-pressed="false"[^>]*>This token<\/button>/);
+  for (const [speed, on] of [["Slow", false], ["Steady", true], ["Fast", false]] as const) expect(html).toMatch(new RegExp(`aria-pressed="${on}"[^>]*>${speed}</button>`));
+  // The readout names the step, and a screen reader hears the state, not every step.
+  expect(t).toContain("Read the token.");
+  expect(html).toContain('<p class="sr-only" aria-live="polite">Replay playing: the whole answer.</p>');
+  expect(t).not.toContain("Every part is lit.");
+
+  // Paused part way: Resume, and the place is announced.
+  R.session.seek(42);
+  html = renderToString(<Dismantle />); b = buttons(html); t = text(html);
+  expect(b.get("Resume")).toEqual([false]);
+  expect(b.get("Start over")).toEqual([false]);
+  expect(html).toContain('<span class="replay-mode on paused">Replay paused</span>');
+  expect(html).toMatch(/<progress class="replay-progress paused" max="115" value="41"/);
+  expect(t).toContain("Layer 21 · attention. Direct pushes so far: +1.50 of +1.25.");
+  expect(html).toContain('aria-live="polite">Replay paused. Token 1 of 2, step 42 of 58, Layer 21 · attention.</p>');
+  // A token chosen by hand is shown whole, and the button says what Play will do with it.
+  R.session.toToken(1);
+  html = renderToString(<Dismantle />); t = text(html);
+  expect(buttons(html).get("Play from this token")).toEqual([false]);
+  expect(t).toContain("Token written: “…”, which the model gave 90%. Direct pushes add up to +1.25.");
+  // This token: the same bar is about the token alone. Its first step is empty and its last is full, wherever the token sits in the answer.
+  R.session.setScope("token");
+  html = renderToString(<Dismantle />);
+  expect(buttons(html).get("Play this token")).toEqual([false]);
+  expect(html).toMatch(/<progress class="replay-progress paused" max="57" value="57" aria-label="Replay progress through this token: step 58 of 58"/);
+  R.session.seek(1);
+  expect(renderToString(<Dismantle />)).toMatch(/<progress class="replay-progress paused" max="57" value="0" aria-label="Replay progress through this token: step 1 of 58"/);
+  R.session.setScope("answer");
+  R.session.seek(58);
+  // The end is an end: said in words, with Replay again, and nothing left to step into.
+  R.session.play();
+  for (let i = 0; i < 5000 && !R.session.get().ended; i++) R.session.frame(100);
+  html = renderToString(<Dismantle />); b = buttons(html); t = text(html);
+  expect(b.get("Replay again")).toEqual([false]);
+  expect(html).toContain('<span class="replay-mode on ended">Replay finished</span>');
+  expect(html).toMatch(/<progress class="replay-progress ended" max="115" value="115"/);
+  expect(b.has("Start over")).toBe(false);
+  expect(t).toContain("End of the answer. Token written:");
+  expect(buttons(html).get("Next step")).toEqual([true]);
+  expect(html).toContain('aria-live="polite">Replay finished at token 2 of 2.</p>');
+  expect(t).not.toContain("—");
+
+  // While a whole answer plays, a selected layer is not measured for each token going by, and says so.
+  R.session.play();
+  store.set({ focus: { kind: "head", floor: 20, head: 13 } });
+  expect(text(renderToString(<Dismantle />))).toContain("Pause the replay to measure this layer for the token on screen.");
+  R.session.pause();
+  expect(text(renderToString(<Dismantle />))).toContain("Measuring every step for this token…");
+  // Back to live: the live strip again, following.
+  R.session.exit("live");
+  html = renderToString(<Dismantle />);
+  expect(html).toContain('<span class="replay-mode live">Live output</span>');
+  expect(buttons(html).get("Replay answer")).toEqual([false]);
+  expect(html).toMatch(/class="follow-toggle"[^>]*aria-pressed="true"/);
+});
+
+it("offers Replay in 3D on each finished reply in the conversation, and not while the model is writing or 3D is unavailable", () => {
+  const changed = { ...sample().normal, toks: [tok(200), tok(151645)], changes: { heads: [{ floor: 20, head: 13, mult: 0 }] } };
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [{ ...sample(), changed }], fork: 0 });
+  let b = buttons(renderToString(<Talk.Conversation />));
+  expect(b.get("Replay in 3D")).toEqual([false, false]);
+  store.set({ busy: true });
+  expect(buttons(renderToString(<Talk.Conversation />)).has("Replay in 3D")).toBe(false);
+  store.set({ busy: false, replay: { turn: 0, status: "stopped" } });
+  expect(buttons(renderToString(<Talk.Conversation />)).has("Replay in 3D")).toBe(false);
+  store.set({ replay: null, stage3d: false });
+  expect(buttons(renderToString(<Talk.Conversation />)).has("Replay in 3D")).toBe(false);
+  // A stale reply is not offered; its current sibling still is.
+  store.set({ stage3d: true, turns: [{ ...sample(), changed: { ...changed, stale: true } }] });
+  b = buttons(renderToString(<Talk.Conversation />));
+  expect(b.get("Replay in 3D")).toEqual([false]);
 });
 
 it("names every camera action, says where you are, and opens no empty bay before there is something to show", () => {

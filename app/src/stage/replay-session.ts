@@ -1,0 +1,82 @@
+// The one visual replay of the page, bound to the store. It watches every state change itself, so a
+// replay can never run on into output that was removed, rewritten or measured under other settings.
+import { useSyncExternalStore } from "react";
+import type { Side } from "../model/types.ts";
+import { setFollowing } from "../state/actions.ts";
+import { type State, store } from "../state/store.ts";
+import { chosen, comparisonTarget, visibleTokens } from "../ui/word.ts";
+import { beatCount } from "./playback.ts";
+import { ReplayController, type Scope, type Snapshot, type Subject } from "./replay.ts";
+
+type Live = Pick<State, "model" | "version" | "turns" | "word" | "fork" | "busy" | "replay">;
+
+/** The selected reply as the replay sees it. Null when no token of a reply is selected. */
+export function replaySubject(s: Live): Subject | null {
+  const c = chosen(s);
+  if (!c) return null;
+  const visible = visibleTokens(c.reply), at = visible.indexOf(c.ref.index);
+  if (at < 0) return null;
+  return {
+    epoch: `${s.model.id}.${s.version}`,
+    reply: `${c.turn.id}.${c.ref.side}.${c.reply.toks.map((t) => t.id).join(",")}`,
+    tokens: visible.length, at,
+    // `busy` covers writing and comparing; `replay` is the store's name for an update of the samples after a model change.
+    ready: !s.busy && !s.replay && c.reply.done && !c.reply.stale,
+  };
+}
+
+/** Why Replay answer is not available yet, in the visitor's words. Empty when it is. */
+export function replayWait(s: Live): string {
+  if (!s.turns.length) return s.busy ? "Replay is ready when this reply is finished." : "Ask a question first. Once the reply is finished you can replay it here.";
+  if (s.replay) return s.replay.status === "running" ? "Replay is ready when the sample update is finished." : "Retry the sample update or restore the originals, then replay.";
+  if (s.busy) return "Replay is ready when this reply is finished.";
+  const c = chosen(s);
+  if (!c) return "Select a token in a reply to replay it.";
+  if (c.reply.stale) return "This reply used earlier settings. Select a token in a current reply.";
+  if (!c.reply.done) return "Replay is ready when this reply is finished.";
+  return replaySubject(s) ? "" : "Select a token in a reply to replay it.";
+}
+
+/** The view a token can be shown in: a comparison only where one was measured. */
+const viewFor = (s: State, word: NonNullable<State["word"]>): State["view"] => (word.side === "normal" && comparisonTarget({ ...s, word }) ? s.view : "push");
+
+export const session = new ReplayController({
+  beats: () => beatCount(store.get().model),
+  subject: () => replaySubject(store.get()),
+  select: (token) => {
+    const s = store.get(), c = chosen(s), index = c ? visibleTokens(c.reply)[token] : undefined;
+    if (!c || index === undefined) return;
+    const word = { ...c.ref, index };
+    store.set({ word, view: viewFor(s, word) });
+  },
+  left: (_reason, follow) => { if (follow && !store.get().follow) setFollowing(true); },
+});
+// The inspector measures the selected token as soon as it opens, so a replay never plays under it.
+store.subscribe(() => { if (session.sync() && store.get().sheet) session.pause(); });
+
+/**
+ * Start a replay of the selected reply, or of one named by its sample and side. Nothing changes
+ * unless that reply can be replayed now. The selection is held by the replay, so following pauses
+ * for as long as it lasts and comes back as it was when it ends.
+ */
+export function startReplay(scope: Scope, of?: { sample: number; side: Side }): boolean {
+  const s = store.get();
+  let word = s.word;
+  if (of) {
+    const turn = s.turns.findIndex((t) => t.id === of.sample), t = s.turns[turn];
+    const index = visibleTokens(of.side === "normal" ? t?.normal : t?.changed)[0];
+    if (index === undefined) return false;
+    word = { turn, side: of.side, index };
+  }
+  if (!word || !replaySubject({ ...s, word })?.ready) return false;
+  const following = s.follow;
+  store.set({ word, view: viewFor(s, word), follow: false });
+  if (session.enter(scope, following)) return true;
+  if (following) setFollowing(true);
+  return false;
+}
+
+export function useReplay<T>(select: (s: Snapshot) => T): T {
+  const read = () => select(session.get());
+  return useSyncExternalStore(session.subscribe, read, read);
+}

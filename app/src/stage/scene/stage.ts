@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { type Arch, type Part, partIndex } from "../arch.ts";
 import { type Box, declutter, dockInset, type Inset, placeBox, toolbarInset } from "../labels.ts";
-import { advance, beatCount, type Clock, seek } from "../playback.ts";
+import { beatAt, beatCount, beatLabel, seek } from "../playback.ts";
 import { DARK, type Theme } from "../theme.ts";
 import { Bay, type BaySpec, type PlateHit } from "./bay.ts";
 import { along, ease, frame, type Pose, type ViewName, VIEWS } from "./camera.ts";
@@ -17,6 +17,15 @@ export type Tool = "explore" | "grab" | "punch";
 export type DragMode = "turn" | "pan";
 export type { BaySpec, ViewName };
 export { frame };
+
+/**
+ * What moves the replay. The stage only lends it its frames: one call per drawn frame while the stage
+ * is visible, so a replay stands still whenever the stage is hidden, off screen or gone.
+ */
+export interface ReplayDriver {
+  readonly playing: boolean;
+  frame(dtMs: number): void;
+}
 
 export interface StageOptions {
   /** The stage creates its own canvas here, so a remount always gets a fresh WebGL context. */
@@ -33,7 +42,8 @@ export interface StageOptions {
   onPunch: (part: Part) => boolean;
   describe: (part: Part, tool: Tool) => string;
   onLost: () => void;
-  onClock: (clock: Clock) => void;
+  /** The stage stopped drawing: the tab was hidden, the stage scrolled out of sight, or its context was lost. */
+  onHidden?: () => void;
   /** Number of parts dragged away from their sockets. */
   onArranged: (count: number) => void;
   /** Areas of the view taken by the toolbar, the help text and the camera dock, in view pixels. Labels and the framing keep clear of them. */
@@ -105,8 +115,13 @@ export class Stage {
   private dragMode: DragMode = "turn";
   /** Space is held: a drag pans for as long as it is. */
   private panHeld = false;
-  private clock: Clock = { t: 0, playing: false, speed: 1 };
-  private clockMark = -1;
+  private driver: ReplayDriver | null = null;
+  /** The playhead as drawn, in steps, and where it is heading. Equal except while one step lights up. */
+  private shown: number;
+  private goal: number;
+  private fadeMs = 0;
+  /** A replay is on: the step it is at is bracketed and named in the scene. */
+  private replaying = false;
   private raf = 0; private last = 0;
   private dirty = true; private shadowDirty = true;
   private onScreen = true; private width = 0; private height = 0;
@@ -137,7 +152,7 @@ export class Stage {
     this.beats = beatCount(a.model);
     this.look = studioLook(o.theme);
     this.reduced = o.reducedMotion;
-    this.clock.t = this.beats;
+    this.shown = this.goal = this.beats;
     this.shadows = !o.coarse;
     this.canvas = o.host.ownerDocument.createElement("canvas");
     this.canvas.className = "stage-canvas";
@@ -175,7 +190,7 @@ export class Stage {
     on("pointercancel", this.pointerUp);
     on("pointerleave", this.pointerLeave);
     on("webglcontextlost", this.contextLost);
-    const doc = o.host.ownerDocument, visibility = () => this.wake();
+    const doc = o.host.ownerDocument, visibility = () => this.seenChanged();
     doc.addEventListener("visibilitychange", visibility);
     this.unlisten.push(() => doc.removeEventListener("visibilitychange", visibility));
 
@@ -189,7 +204,7 @@ export class Stage {
 
     this.resize = new ResizeObserver(() => this.measure());
     this.resize.observe(o.host);
-    this.seen = new IntersectionObserver((entries) => { this.onScreen = entries[entries.length - 1]?.isIntersecting ?? true; this.wake(); });
+    this.seen = new IntersectionObserver((entries) => { this.onScreen = entries[entries.length - 1]?.isIntersecting ?? true; this.seenChanged(); });
     this.seen.observe(o.host);
     this.staticLabels();
     this.setTheme(o.theme);
@@ -212,6 +227,12 @@ export class Stage {
     if (!this.raf && this.visible) this.raf = requestAnimationFrame(this.tick);
   }
 
+  /** The tab or the stage came into or went out of sight. Out of sight nothing is drawn and no replay moves. */
+  private seenChanged() {
+    if (this.visible) this.wake();
+    else if (!this.disposed) this.o.onHidden?.();
+  }
+
   private tick = (now: number) => {
     this.raf = 0;
     if (!this.visible) return;
@@ -219,12 +240,10 @@ export class Stage {
     this.last = now;
     let active = this.dirty;
     this.dirty = false;
-    if (this.clock.playing) {
-      this.clock = advance(this.clock, dt, this.beats);
-      this.specimen.setPlayhead(this.clock.t);
-      this.bay?.reveal(this.specimen.playheadNow);
-      const mark = Math.floor(this.clock.t * 8);
-      if (mark !== this.clockMark || !this.clock.playing) { this.clockMark = mark; this.o.onClock(this.clock); }
+    if (this.shown !== this.goal) {
+      // One step lighting up. It never runs past the step it was asked for.
+      this.shown = this.fadeMs > 0 ? Math.min(this.goal, this.shown + dt / this.fadeMs) : this.goal;
+      this.drawPlayhead();
       active = true;
     }
     if (this.flight) {
@@ -237,14 +256,20 @@ export class Stage {
     }
     if (this.controls.update()) active = true;
     if (this.specimen.step(dt / 1000)) { active = true; this.shadowDirty = true; }
-    if (!active) { this.last = 0; return; }
-    this.seatBay();
-    this.clip();
-    // The shadow map is redrawn only on frames where something that casts a shadow moved.
-    if (this.shadowDirty) { this.renderer.shadowMap.needsUpdate = this.shadows; this.shadowDirty = false; }
-    this.renderer.render(this.scene, this.camera);
-    this.placeLabels();
-    this.raf = requestAnimationFrame(this.tick);
+    if (active) {
+      this.seatBay();
+      this.clip();
+      // The shadow map is redrawn only on frames where something that casts a shadow moved.
+      if (this.shadowDirty) { this.renderer.shadowMap.needsUpdate = this.shadows; this.shadowDirty = false; }
+      this.renderer.render(this.scene, this.camera);
+      this.placeLabels();
+    }
+    // The replay moves on after the frame is drawn, one step at most, so whatever it changes is drawn
+    // whole by a later frame. Between steps nothing is redrawn unless the camera or a part is moving.
+    const playing = !!this.driver?.playing;
+    if (playing) this.driver!.frame(dt);
+    if (!active && !playing) { this.last = 0; return; }
+    if (!this.raf) this.raf = requestAnimationFrame(this.tick);
   };
 
   /** Keep the depth range tight around what is in view: close-ups stay crisp and distant surfaces do not flicker. */
@@ -259,7 +284,8 @@ export class Stage {
     const w = this.o.host.clientWidth, h = this.o.host.clientHeight;
     if (w === this.width && h === this.height) return;
     this.width = w; this.height = h;
-    if (!w || !h) return;
+    // Collapsed to nothing, as inside a closed sheet: out of sight like a hidden tab.
+    if (!w || !h) { this.o.onHidden?.(); return; }
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -438,9 +464,8 @@ export class Stage {
   setReducedMotion(reduced: boolean) {
     this.reduced = reduced;
     this.specimen.reducedMotion = reduced;
-    if (reduced) this.flight = null;
-    this.specimen.setPlayhead(this.clock.t);
-    this.bay?.reveal(this.specimen.playheadNow);
+    if (reduced) { this.flight = null; this.shown = this.goal; }
+    this.drawPlayhead();
     this.invalidate();
   }
 
@@ -473,7 +498,7 @@ export class Stage {
 
   setValues(scaled: Float32Array | null, kind: "signed" | "size") {
     this.specimen.setValues(scaled, kind);
-    this.specimen.setPlayhead(this.clock.t);
+    this.specimen.setPlayhead(this.shown);
     this.invalidate();
   }
 
@@ -576,12 +601,34 @@ export class Stage {
 
   get hasBay() { return !!this.bay; }
 
-  setClock(clock: Clock) {
-    this.clock = { ...clock, t: seek(clock.t, this.beats) };
-    if (this.clock.playing && this.clock.t >= this.beats) this.clock.t = 0;
-    this.specimen.setPlayhead(this.clock.t);
-    this.bay?.reveal(this.specimen.playheadNow);
+  /** Hand the stage a replay to move with its frames, or take it away. */
+  setDriver(driver: ReplayDriver | null) {
+    this.driver = driver;
+    if (driver?.playing) this.wake();
+  }
+
+  /**
+   * How much of the selected token is lit, in steps; null lights all of it. With `fadeMs`, moving on
+   * by one step lights that step up over that time, and its plates come up in order. Anything else
+   * (a scrub, a step back, another token, reduced motion) is shown at once.
+   */
+  setPlayhead(t: number | null, fadeMs = 0) {
+    const goal = t === null ? this.beats : seek(t, this.beats), ahead = goal - this.shown;
+    this.goal = goal; this.fadeMs = fadeMs; this.replaying = t !== null;
+    if (!(fadeMs > 0 && !this.reduced && ahead > 0 && ahead <= 1)) this.shown = goal;
+    this.drawPlayhead();
     this.invalidate();
+  }
+
+  private drawPlayhead() {
+    this.specimen.setPlayhead(this.shown);
+    this.bay?.reveal(this.specimen.playheadNow);
+    // The step being lit, from its first frame: a position in the replay, not a measurement. Live has none.
+    const step = this.replaying ? Math.max(0, Math.min(this.beats - 1, Math.ceil(this.goal) - 1)) : null;
+    if (step === this.specimen.cursorNow) return;
+    this.specimen.setCursor(step);
+    this.replaceLabels("step", step === null ? [] : [{ text: beatLabel(beatAt(this.o.arch.model, step)), className: "stage-label step", anchor: [0, 0.5], nudge: [8, 0], priority: 96,
+      at: (out) => { this.specimen.cursorAnchor(out); } }]);
   }
 
   /** Put dragged parts back and close the spread. The model and the camera's angle are left alone. */
@@ -852,6 +899,7 @@ export class Stage {
     this.lost = true;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.o.onHidden?.();
     this.o.onLost();
   };
 

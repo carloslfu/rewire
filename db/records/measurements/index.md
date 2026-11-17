@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/measurements
-updated: 2026-11-17T15:35:22.094866Z
+updated: 2026-11-17T16:58:21.987657Z
 ---
 
 # records/measurements
 
+- [[records/measurements/2026-11-17-replay-experience]] — Whole-answer replay, render pacing and fast-output verification
 - [[records/measurements/2026-11-17-follow-output]] — Follow output selection, comparison and replay verification
 - [[records/measurements/2026-11-17-3d-materials-navigation]] — Detailed 3D materials and navigation pass release and browser checks
 - [[records/measurements/2026-11-16-3d-model-view]] — 3D model view passes the release gate and live Chrome inference, training, manipulation and recovery checks

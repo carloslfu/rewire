@@ -47,6 +47,12 @@ export interface State {
   follow: boolean;
   /** Bumped each time following is resumed, so a 3D replay ends even when the followed token is unchanged. */
   followRevision: number;
+  /**
+   * A reply the visitor asked to replay in the 3D view, by sample id and side. The 3D view starts
+   * the visual replay once it is open and clears this. Not to be confused with `replay` above, which
+   * is the model writing changed answers again.
+   */
+  replayRequest: { sample: number; side: "normal" | "changed"; n: number } | null;
   /** Id of the sample whose output was written most recently. Following tracks it; null means the last sample. */
   outputSample: number | null;
   focus: Focus;
@@ -100,6 +106,7 @@ export const initial: State = {
   word: null,
   follow: true,
   followRevision: 0,
+  replayRequest: null,
   outputSample: null,
   focus: { kind: "word" },
   view: "push",

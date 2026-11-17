@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-11-17T15:35:22.068302Z
+updated: 2026-11-17T16:57:36.977008Z
 ---
 
 # records/run
 
+- [[records/run/2026/11/2026-11-17-replay-experience]] — Whole-answer replay release and Chrome verification
 - [[records/run/2026/11/2026-11-17-follow-output]] — Follow output release gate and Chrome evidence
 - [[records/run/2026/11/2026-11-17-3d-materials-navigation]] — 3D materials and navigation release gate and Chrome evidence
 - [[records/run/2026/11/2026-11-16-3d-chrome]] — Final release gate and live Chrome evidence for the interactive 3D workbench

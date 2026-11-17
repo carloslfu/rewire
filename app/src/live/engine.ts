@@ -46,6 +46,7 @@ export class EngineClient {
   private lesson: LessonWeights | null = null;
   private model: "qwen" | "tiny" = "qwen";
   private version = 0;
+  private stageOpen = false;
   private recovery: Promise<void> | null = null;
   private failed = false;
   onProgress?: (loaded: number, total: number) => void;
@@ -89,6 +90,7 @@ export class EngineClient {
     if (this.trained) await this.call({ t: "tiny", ...this.trained });
     await this.call({ t: "use", model: this.model });
     this.setVersion(this.version);
+    this.setStageOpen(this.stageOpen);
     this.onRecovered?.();
   }
 
@@ -148,6 +150,7 @@ export class EngineClient {
     if (replaced && this.trained) await this.call({ t: "tiny", ...this.trained });
     if (replaced && this.model === "tiny") await this.call({ t: "use", model: "tiny" });
     this.setVersion(this.version);
+    this.setStageOpen(this.stageOpen);
     return info;
   }
   pause(paused: boolean) {
@@ -156,6 +159,11 @@ export class EngineClient {
   setVersion(v: number) {
     this.version = v;
     this.w.postMessage({ t: "version", id: 0, version: v } as ToWorker);
+  }
+  /** Whether a 3D view is open. While one is, writing and comparing pause between steps to leave the GPU room to draw it. */
+  setStageOpen(open: boolean) {
+    this.stageOpen = open;
+    this.w.postMessage({ t: "stage", id: 0, open } as ToWorker);
   }
   firstTurn(message: string): Promise<number[]> {
     return this.call({ t: "first", message });

@@ -725,6 +725,7 @@ html:has(dialog[open]) { overflow: hidden; }
 .stage-label.bar { font-family: var(--mono); font-size: 10px; }
 .stage-label.plate { padding: 1px 5px; font-size: 10px; color: var(--stage-ink); background: rgb(14 15 18 / .74); border-radius: 3px; text-shadow: none; }
 .stage-label.current { padding: 1px 5px; color: var(--stage-ink); font-weight: 600; background: rgb(14 15 18 / .78); border-radius: 3px; text-shadow: none; }
+.stage-label.step { padding: 2px 7px; font-size: 11px; font-weight: 700; color: #1d1606; background: #ffc65c; border-radius: 4px; text-shadow: none; }
 .stage-label.message { width: 200px; white-space: normal; text-align: center; font-size: 12px; padding: 9px 11px; color: var(--stage-muted); background: rgb(20 21 25 / .92); border: 1px dashed rgb(255 255 255 / .3); border-radius: 6px; text-shadow: none; }
 .stage-top { position: absolute; top: 10px; left: 12px; right: 12px; display: grid; gap: 6px; justify-items: start; pointer-events: none; }
 .stage-toolbar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 10px; width: 100%; }
@@ -793,7 +794,7 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .stage-controls { padding: 8px 20px 4px; }
 .stage-picker { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .stage-picker label { color: var(--muted); }
-.stage-picker select, .stage-speed select, .stage-sample select { min-width: 0; max-width: 100%; padding: 5px 8px; font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; }
+.stage-picker select, .stage-sample select { min-width: 0; max-width: 100%; padding: 5px 8px; font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; }
 .stage-picker select { flex: 0 1 190px; }
 .stage-transport { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; }
 .stage-transport > .note { margin-top: 4px; font-size: 11px; }
@@ -802,14 +803,64 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .stage-transport .training-actions .num, .stage-question .training-actions .num { margin-left: auto; color: var(--muted); }
 .stage-transport .training-status { min-height: 0; margin-top: 6px; }
 .stage-transport .lesson-loss svg { height: 64px; margin-top: 8px; }
-.stage-token { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
-.stage-token .token-navigation strong { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.stage-token .token-navigation .note { margin-left: 4px; font-size: 11px; }
-.stage-play { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
-.stage-play .btn { min-height: 32px; padding: 4px 10px; font-size: 12px; }
-.stage-play input[type="range"] { flex: 1 1 110px; min-width: 90px; min-height: 28px; accent-color: var(--fg); }
-.stage-speed { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.stage-token { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.stage-token .note { font-size: 12px; }
 .stage-readout { margin-top: 6px; }
+/* Live output and Replay: one strip directly under the stage, in sight in every layout. Its height is
+   steady while a replay runs, so a step never resizes the stage above it. */
+.stage-bar { flex: none; border-bottom: 1px solid var(--line); background: var(--panel); }
+.replay-bar { display: grid; gap: 7px; padding: 9px 20px 10px; font-size: 12px; }
+.replay-bar.replaying { background: color-mix(in oklab, var(--soft) 60%, var(--panel)); box-shadow: inset 3px 0 var(--pos); }
+.replay-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.replay-mode { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 24px; padding: 2px 10px; border: 1px solid transparent; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; white-space: nowrap; }
+.replay-mode::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.replay-mode.live { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
+.replay-mode.on { color: var(--bg); background: var(--fg); }
+.replay-mode.playing::before { background: var(--pos); }
+.replay-mode.paused { color: var(--fg); background: none; border-color: var(--fg); }
+.replay-mode.paused::before { width: 3px; height: 8px; border-radius: 0; background: none; border-inline: 2.5px solid currentColor; box-sizing: content-box; }
+.replay-mode.ended { color: var(--muted); background: var(--soft); border-color: var(--line); }
+.replay-mode.ended::before { content: "✓"; width: auto; height: auto; background: none; font-size: 11px; line-height: 1; }
+.replay-head .token-navigation { flex: 1 1 190px; min-width: 0; }
+.replay-head .token-navigation strong { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.replay-head .token-navigation .note { min-width: 0; margin-left: 4px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.replay-empty { flex: 1 1 190px; margin: 0; font-size: 12px; }
+.replay-bar .btn { min-height: 34px; padding: 5px 12px; font-size: 13px; }
+.replay-bar .token-navigation .btn { min-height: 28px; padding: 0 6px; font-size: 22px; }
+.replay-enter, .replay-exit { flex: none; margin-left: auto; }
+.replay-follow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.replay-follow .follow-hint { flex: 1 1 200px; }
+.replay-how { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; margin: 0; font-size: 11px; line-height: 1.45; }
+.replay-how .linkish { font-size: 12px; min-height: 22px; }
+/* Docked, the strip takes its height from the scrolling controls below it, not from the stage. */
+.lab-scope .stage-bench:has(.stage-bar) .stage-lower { max-height: 34%; }
+.lab-scope .stage-bench:has(.replay-bar.replaying) .stage-lower { max-height: 24%; }
+.replay-progress { display: block; appearance: none; width: 100%; height: 3px; border: 0; border-radius: 2px; background: var(--line); overflow: hidden; }
+.replay-progress::-webkit-progress-bar { background: var(--line); }
+.replay-progress::-webkit-progress-value { background: var(--pos); }
+.replay-progress::-moz-progress-bar { background: var(--pos); }
+.replay-progress.paused::-webkit-progress-value, .replay-progress.ended::-webkit-progress-value { background: var(--muted); }
+.replay-progress.paused::-moz-progress-bar, .replay-progress.ended::-moz-progress-bar { background: var(--muted); }
+.replay-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.replay-bar .replay-main { min-width: 112px; }
+.replay-steps { display: inline-flex; gap: 4px; }
+.replay-bar .replay-step { padding: 5px 9px; font-size: 12px; white-space: nowrap; }
+.replay-scrub { display: flex; flex: 1 1 210px; flex-wrap: wrap; align-items: center; gap: 0 8px; min-width: 0; margin-left: 4px; color: var(--muted); }
+.replay-scrub-name { flex-basis: 100%; font-size: 11px; line-height: 1.2; }
+.replay-scrub input { flex: 1 1 90px; min-width: 70px; min-height: 26px; accent-color: var(--fg); }
+.replay-count { flex: none; font-size: 11px; white-space: nowrap; }
+.replay-readout { min-height: 2.9em; margin: 0; line-height: 1.45; }
+.replay-options { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--muted); }
+.replay-option { display: inline-flex; align-items: center; gap: 6px; }
+.replay-options .seg button { font-size: 12px; }
+.replay-restart { margin-left: auto; font-size: 12px; }
+.reply-replay { min-height: 24px; font-size: 12px; color: var(--muted); }
+.reply-heading .reply-replay { margin-left: auto; }
+@media (pointer: coarse) {
+  .replay-bar .btn, .replay-bar .seg button, .replay-bar .token-navigation .btn, .replay-how .linkish, .reply-replay { min-height: 44px; }
+  .replay-bar .token-navigation .btn { width: 44px; }
+  .replay-scrub input { min-height: 44px; }
+}
 .stage-side { padding: 0 20px 18px; }
 .stage-side > * + * { border-top: 1px solid var(--line); }
 .stage-side .scope-part { padding: 12px 0 4px; border-top: 0; }
@@ -848,15 +899,17 @@ html:has(.stage-bench.expanded) { overflow: hidden; }
 .stage-bench.expanded { position: fixed; inset: 0; z-index: 40; height: auto; background: var(--bg); }
 .stage-bench.expanded .stage-head { padding: 14px 28px 4px; }
 .stage-bench.expanded .stage-status { padding: 0 28px 10px; font-size: 12px; }
-.stage-bench.expanded .stage-main { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr) minmax(280px, 380px); grid-template-rows: minmax(0, 1fr) auto; border-top: 1px solid var(--line); }
+.stage-bench.expanded .stage-main { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr) minmax(280px, 380px); grid-template-rows: minmax(0, 1fr) auto auto; border-top: 1px solid var(--line); }
 .stage-bench.expanded .stage-rail { grid-column: 1; grid-row: 1 / -1; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; border-right: 1px solid var(--line); background: var(--panel); }
 .stage-bench.expanded .stage-view { grid-column: 2; grid-row: 1; border-block: 0; }
 .stage-bench.expanded .stage-bottom { left: 16px; right: 16px; bottom: 14px; }
 .stage-bench.expanded .stage-lower { display: contents; }
-.stage-bench.expanded .stage-controls { grid-column: 2; grid-row: 2; padding: 10px 24px 14px; border-top: 1px solid var(--line); background: var(--panel); }
+.stage-bench.expanded .stage-bar { grid-column: 2; grid-row: 2; border-top: 1px solid var(--line); border-bottom: 0; }
+.stage-bench.expanded .replay-bar { padding: 10px 24px 11px; }
+.stage-bench.expanded .stage-controls { grid-column: 2; grid-row: 3; padding: 10px 24px 14px; border-top: 1px solid var(--line); background: var(--panel); }
 .stage-bench.expanded .stage-side { grid-column: 3; grid-row: 1 / -1; overflow-y: auto; overscroll-behavior: contain; padding: 8px 24px 24px; border-left: 1px solid var(--line); background: var(--panel); }
 .stage-bench.expanded:not(:has(.stage-rail)) .stage-main { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); }
-.stage-bench.expanded:not(:has(.stage-rail)) .stage-view, .stage-bench.expanded:not(:has(.stage-rail)) .stage-controls { grid-column: 1; }
+.stage-bench.expanded:not(:has(.stage-rail)) .stage-view, .stage-bench.expanded:not(:has(.stage-rail)) .stage-bar, .stage-bench.expanded:not(:has(.stage-rail)) .stage-controls { grid-column: 1; }
 .stage-bench.expanded:not(:has(.stage-rail)) .stage-side { grid-column: 2; }
 @media (max-width: 1180px) {
   .stage-bench.expanded .stage-main { grid-template-columns: minmax(230px, 280px) minmax(0, 1fr) minmax(250px, 310px); }
@@ -880,15 +933,29 @@ html:has(.stage-bench.expanded) { overflow: hidden; }
   .stage-hint { font-size: 11px; }
   .stage-top { top: 8px; left: 8px; right: 8px; }
   .stage-toolbar .seg button, .stage-resets .btn { min-height: 40px; }
-  .stage-picker select, .stage-speed select, .stage-sample select { min-height: 44px; }
-  .stage-play .btn, .stage-part-actions .btn { min-height: 44px; }
+  .stage-picker select, .stage-sample select { min-height: 44px; }
+  .stage-part-actions .btn { min-height: 44px; }
+  .mobile-model .replay-bar { padding-inline: max(16px, env(safe-area-inset-left)); font-size: 13px; }
+  .replay-bar .btn, .replay-bar .seg button, .replay-bar .token-navigation .btn, .replay-how .linkish, .reply-replay { min-height: 44px; }
+  .replay-bar .token-navigation .btn { width: 44px; }
+  .replay-scrub input { min-height: 44px; }
+  .replay-how, .replay-scrub-name, .replay-count, .replay-head .token-navigation .note { font-size: 12px; }
+  .replay-readout { min-height: 4.35em; }
   .stage-label.message { width: 160px; }
 }
 @media (max-width: 380px) {
   .stage-resets .btn { padding-inline: 7px; }
-  .stage-token .token-navigation { flex-wrap: wrap; width: 100%; }
-  .stage-token .token-navigation strong { flex-shrink: 0; }
-  .stage-token .token-navigation .note { flex-basis: 100%; margin-left: 0; }
+  .replay-head .token-navigation .note { flex-basis: 100%; margin-left: 0; white-space: normal; }
+}
+@media (max-width: 480px) {
+  .replay-head .token-navigation, .replay-empty { order: 3; flex-basis: 100%; flex-wrap: wrap; }
+  .replay-bar .replay-main { flex: 1 1 100%; }
+  .replay-steps { flex: 1 1 100%; }
+  .replay-steps .replay-step { flex: 1; }
+  .replay-scrub { flex-basis: 100%; margin-left: 0; }
+  .replay-options { gap: 8px 12px; }
+  .replay-option { flex: 1 1 100%; justify-content: space-between; }
+  .replay-restart { margin-left: 0; }
 }
 #chat-scope > .stage-state, #lesson-scope > .stage-state, #training-scope > .stage-state { position: static; min-height: 240px; }
 .mobile-model .stage-side .scope-part { max-height: none; overflow: visible; padding: 12px 0 4px; }

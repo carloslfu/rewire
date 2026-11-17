@@ -321,6 +321,24 @@ export function setFollowing(follow: boolean) {
   settleSelection();
 }
 
+/**
+ * Ask the 3D view to replay one finished reply from its first token. Opens the 3D view if needed.
+ * This is the visual replay of values already measured; nothing is generated again.
+ */
+let replayRequests = 0;
+export function askReplay(sample: number, side: Side) {
+  const s = store.get();
+  if (!s.stage3d || s.busy || s.replay) return;
+  store.set({ scopeView: "3d", replayRequest: { sample, side, n: ++replayRequests } });
+}
+
+/** A 3D view opened or closed. While one is open the engine leaves the GPU room to draw it. */
+let stagesOpen = 0;
+export function stageShown(open: boolean) {
+  stagesOpen = Math.max(0, stagesOpen + (open ? 1 : -1));
+  engine?.setStageOpen(stagesOpen > 0);
+}
+
 // ---------------------------------------------------------------- talking
 
 export async function send(message: string) {
@@ -496,7 +514,9 @@ export async function openTiny(params: Float32Array) {
   setDims(TINY_INFO);
   const s = store.get();
   store.set({ model: TINY_INFO, tiny: false, mode: "live", step: null, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, ...FRESH_SELECTION,
-    focus: { kind: "word" }, qwenMode: s.model.id === "qwen" ? s.mode : s.qwenMode, busy: false, replay: null, full: false, error: null, sheet: false });
+    focus: { kind: "word" }, qwenMode: s.model.id === "qwen" ? s.mode : s.qwenMode, busy: false, replay: null, full: false, error: null, sheet: false,
+    // Replaces the "Stopped" left by the cancel above: nothing of this model was stopped.
+    announce: S.tinyReady });
   engine.setVersion(store.get().version);
   setHash(null);
 }
@@ -737,6 +757,7 @@ async function runPendingExperiment() {
 /** One reset cancels current writes; the rebuilt worker re-reads their tokens when Continue is used. */
 function connectEngine(client: EngineClient) {
   let before: ReturnType<typeof store.get> | null = null;
+  client.setStageOpen(stagesOpen > 0);
   client.onProgress = (loaded, total) => {
     const d = store.get().device;
     if (d.kind !== "downloading") return;
