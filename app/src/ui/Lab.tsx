@@ -1,12 +1,13 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { Focus } from "../model/types.ts";
-import { applyChips, chipsWith, piece, setFocus, setFollowing, stepData } from "../state/actions.ts";
+import { applyChips, chipsWith, piece, setFocus, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { chips as describeChips, withMult, multOf, geometryLabel } from "./describe.ts";
 import { signed } from "./color.ts";
 import { Knob } from "./Knob.tsx";
 import { Tower } from "./Tower.tsx";
 import { chosen, headIndex, memIndex, towerValues } from "./word.ts";
+import { FollowControl } from "./FollowControl.tsx";
 import { ReplayStatus } from "./ReplayStatus.tsx";
 import { HeadExampleHint, NeuronControl } from "./Examples.tsx";
 import { ViewToggle } from "../stage/ViewToggle.tsx";
@@ -28,7 +29,6 @@ function FlatScope() {
   const mode = useStore((s) => s.mode);
   const chips = useStore((s) => s.chips);
   const model = useStore((s) => s.model);
-  const follow = useStore((s) => s.follow);
   const view = useStore((s) => s.view);
   const focus = useStore((s) => s.focus);
   const [controlsModel, setControlsModel] = useState<string | null>(null);
@@ -76,7 +76,7 @@ function FlatScope() {
       <p className="scope-instruction">Select a cell to change it.</p></div>
       <div className="scope-status">
         <span>{model.floors} layers · {changes.length ? `${changes.length} active ${changes.length === 1 ? "change" : "changes"}` : "Original model"}</span>
-        <button className="linkish" aria-pressed={follow} onClick={() => setFollowing(!follow)}>Follow output</button>
+        <FollowControl />
       </div>
       <ReplayStatus compact />
       <Tower embedded onSelect={select} />

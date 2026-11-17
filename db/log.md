@@ -34,3 +34,9 @@ Recorded final release gate and built-app visual, navigation, inference, trainin
 ## [2026-11-17 13:41] decide | records/decisions/2026-11-17-3d-materials-navigation
 Adopt detailed materials, studio lighting and direct camera controls; preserve real intervention semantics.
 
+## [2026-11-17 15:35] capture | records/measurements/2026-11-17-follow-output
+Captured the release gate, 182 app tests and two lifecycle tests, plus live Chrome selection, comparison, replay, mobile keyboard and trained-tiny-model checks. Full store validation has zero errors and warnings.
+
+## [2026-11-17 15:35] decide | records/decisions/2026-11-17-follow-output
+Adopt one shared following contract, persistent paused selection, valid removal fallback and complete-token replay handoff across 2D and 3D.
+

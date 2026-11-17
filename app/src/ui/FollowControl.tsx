@@ -1,0 +1,21 @@
+// Follow output: one control, with the same words, in the 2D and 3D views.
+import { useId } from "react";
+import { setFollowing } from "../state/actions.ts";
+import { useStore } from "../state/store.ts";
+import { S } from "../strings.ts";
+import { chosen } from "./word.ts";
+
+/**
+ * The toggle and its one-line hint, as siblings for the row they sit in. The control is usable before
+ * any output: following then waits for the first token. `replay` adds what the 3D Replay does instead.
+ */
+export function FollowControl({ replay = false }: { replay?: boolean }) {
+  const follow = useStore((s) => s.follow);
+  const selected = useStore((s) => !!chosen(s));
+  const hint = useId();
+  return <>
+    <button type="button" className="follow-toggle" aria-pressed={follow} aria-describedby={hint} title={S.followTitle(follow)}
+      onClick={() => setFollowing(!follow)}>{S.follow}</button>
+    <p className="note follow-hint" id={hint}>{S.followHint(follow, selected, replay)}</p>
+  </>;
+}

@@ -91,6 +91,16 @@ export const S = {
   viewDiff: "Change from original",
   diffNote: "Each cell shows how its contribution changed for this original token: modified minus original. Later turns also include the effect of earlier regenerated answers.",
   diffNone: "Change a layer, attention head or MLP to compare with the original.",
+
+  // follow output (the same control and words in the 2D and 3D views)
+  follow: "Follow output",
+  followTitle: (on: boolean) => on ? "Following generated tokens. Choose a token yourself to pause."
+    : "Return to the newest generated token and keep following as more are written.",
+  /** One line under the control. `replay` is the 3D view, where Replay is a separate thing. */
+  followHint: (on: boolean, selected: boolean, replay: boolean) =>
+    (on ? (selected ? "Following: the newest token is selected as it is written." : "Following: waiting for the first token.")
+      : selected ? "Paused on this token. New replies will not move it." : "Paused: the first token written will be selected and kept.")
+    + (replay ? (on ? " Replay animates one token and pauses following." : " Replay animates this one token.") : ""),
   wordsIn: "Words in",
   wordsOut: "Words out",
   floorN: (n: number) => `Layer ${n}`,

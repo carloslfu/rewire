@@ -37,8 +37,18 @@ export interface State {
   replay: { turn: number; status: "running" | "stopped" | "error" } | null;
   /** The word whose numbers are shown. */
   word: WordRef | null;
-  /** The tower follows the word being written until the visitor taps one. */
+  /**
+   * Follow output. On: the newest token of the sample being written is selected automatically. Off
+   * (paused): the visitor's token stays selected across new questions, Continue and model changes.
+   * Only the visitor changes it: the Follow output control turns it on or off, and choosing a token
+   * or moving the 3D replay pauses it. Clearing the samples, opening a guided step and switching
+   * models start a new experiment, which follows again.
+   */
   follow: boolean;
+  /** Bumped each time following is resumed, so a 3D replay ends even when the followed token is unchanged. */
+  followRevision: number;
+  /** Id of the sample whose output was written most recently. Following tracks it; null means the last sample. */
+  outputSample: number | null;
   focus: Focus;
   /** Tower lighting: each part's push, or changed minus normal on the same words. */
   view: "push" | "difference";
@@ -89,6 +99,8 @@ export const initial: State = {
   replay: null,
   word: null,
   follow: true,
+  followRevision: 0,
+  outputSample: null,
   focus: { kind: "word" },
   view: "push",
   scopeView: "2d",

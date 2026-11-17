@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo, useRef, useState } from "react";
 import { initialLesson, type LessonWeights } from "@rewire/engine/src/lora.ts";
-import { applyChips, liveEngine, stopReply } from "../state/actions.ts";
+import { applyChips, liveEngine, settleSelection, stopReply } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { DeviceBar } from "../ui/Panels.tsx";
 import { Modal } from "../ui/Modal.tsx";
@@ -92,6 +92,7 @@ export default function TeachView() {
       setTotalSteps((continueLesson?totalSteps:0)+result.steps);setRound((continueLesson?round:0)+1);
       store.set(s=>({lessonRevision:s.lessonRevision+1,
         turns:s.turns.map(t=>t.changed?.changes.lesson?{...t,changed:{...t.changed,stale:true,compare:undefined}}:t)}));
+      settleSelection();
       if(stop.current){setStatus(`Stopped after ${result.steps} steps. Your learned weights are kept. Run the checks when you are ready.`);return;}
       const complete=await compare(cases,true);
       setStatus(`${result.steps} steps in ${result.seconds.toFixed(1)} seconds. ${complete?"Checks complete. See what changed below.":"Checks stopped; your learned weights are kept."}`);

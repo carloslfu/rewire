@@ -4,7 +4,7 @@ import type { EngineClient } from "../live/engine.ts";
 import type { Cand, ChangeSpec, FloorDetail, Focus, Reply, Side, Tok, Turn, WordRef } from "../model/types.ts";
 import { loadPath, type PathData, type StepData, stepChanges } from "../path/steps.ts";
 import { S } from "../strings.ts";
-import { comparisonTarget, latestWord, originalWord, setDims } from "../ui/word.ts";
+import { chosen, comparisonTarget, latestWord, setDims, settledSelection } from "../ui/word.ts";
 import { encode, letter } from "@rewire/tiny/src/data.ts";
 import { TINY, type TinyConfig } from "@rewire/tiny/src/config.ts";
 import { QWEN_INFO, TINY_INFO } from "../model/info.ts";
@@ -98,15 +98,28 @@ function patchReply(turn: number, side: Side, f: (r: Reply) => Reply) {
 
 function pushTok(turn: number, side: Side, tok: Tok) {
   patchReply(turn, side, (r) => ({ ...r, toks: [...r.toks, tok] }));
-  const s = store.get();
-  // Follow changed output in Push; comparisons always keep an original token as their reference.
-  const t = s.turns[turn];
-  const isStop = tok.id === 151645 || tok.id === 151643;
-  const followsSide = s.view === "difference" ? side === "normal" : side === "changed" || !t.changed || t.changed.done;
-  if (s.follow && !isStop && followsSide) {
-    const r = side === "normal" ? t.normal : t.changed!;
-    store.set({ word: { turn, side, index: r.toks.length - 1 } });
-  }
+  // Following moves to the new token. Paused, only a missing selection is filled, by the first visible token.
+  settleSelection();
+}
+
+// ---------------------------------------------------------------- selection
+//
+// Every action that adds, replaces or removes output ends here, so the selected token is decided in
+// one place (settledSelection) from the state as it is now, never from a value captured before a wait.
+
+/** A new experiment: nothing selected, following again. Used by Clear, guided steps and model switches. */
+const FRESH_SELECTION = { word: null, follow: true, outputSample: null, view: "push" } as const;
+
+/** Settle the selected token and view on what exists now. The follow preference is never changed here. */
+export function settleSelection(near?: number) {
+  const s = store.get(), next = settledSelection(s, near);
+  if (next.word !== s.word || next.view !== s.view) store.set(next);
+}
+
+/** The sample about to be written becomes the one that following tracks. */
+function beginOutput(sample: number) {
+  store.set({ outputSample: sample });
+  settleSelection();
 }
 
 // ---------------------------------------------------------------- the path
@@ -129,8 +142,8 @@ export async function openStep(n: number | null) {
   const s = store.get();
   const st = stepData(n);
   store.set({
-    step: n, stepTried: false, pathOpen: false, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, word: null, follow: true,
-    focus: { kind: "word" }, view: "push", tiny: false, busy: false, replay: null, full: false, sheet: false, error: null,
+    step: n, stepTried: false, pathOpen: false, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, ...FRESH_SELECTION,
+    focus: { kind: "word" }, tiny: false, busy: false, replay: null, full: false, sheet: false, error: null,
     draft: st?.guide ? st.message ?? "" : "",
   });
   engine?.setVersion(store.get().version);
@@ -177,7 +190,7 @@ export async function stepAction(stop?: number) {
   if (c.kind === "guesses" || c.kind === "madeup") {
     const last = (s.turns[turn]?.normal.toks.map((t, i) => [151643, 151645].includes(t.id) ? -1 : i).filter((i) => i >= 0).at(-1)) ?? -1;
     if (last < 0) return;
-    store.set({ word: { turn, side: "normal", index: Math.min(c.index, last) }, focus: c.kind === "guesses" ? { kind: "words-out" } : { kind: "word" }, stepTried: true, sheet: true, inspectView: "word" });
+    store.set({ word: { turn, side: "normal", index: Math.min(c.index, last) }, follow: false, focus: c.kind === "guesses" ? { kind: "words-out" } : { kind: "word" }, stepTried: true, sheet: true, inspectView: "word" });
     return;
   }
   if (c.kind === "floors") {
@@ -206,37 +219,37 @@ export async function applyChips(spec: ChangeSpec) {
   engine?.setVersion(version);
   claim("changed");
   if (isNeutral(spec)) {
-    const word = s.word?.side === "changed" ? originalWord(s) : s.word;
     // The exact original replies already exist. Restoring them needs no simulated or duplicate output.
-    store.set({ chips: {}, version, fork: -1, view: "push", word, replay: null, error: null, full: false,
+    store.set({ chips: {}, version, fork: -1, replay: null, error: null, full: false,
       announce: "Original answers restored.", turns: s.turns.map((t) => ({ ...t, changed: undefined })) });
+    // A selected changed token moves to its sample's original reply, and the view returns to Push.
+    settleSelection();
     store.set({ busy: busy() });
     return;
   }
   const turns = s.turns.map((t): Turn => ({ ...t, changed: emptyReply(spec, [], "live") }));
   const hasTurns = turns.length > 0;
-  const word = s.view === "difference" && hasTurns ? originalWord({ turns, word: { turn: 0, side: "normal", index: 0 } }) : null;
-  store.set({ chips: spec, version, turns, fork: hasTurns ? 0 : -1, busy: hasTurns, follow: true, word,
+  store.set({ chips: spec, version, turns, fork: hasTurns ? 0 : -1, busy: hasTurns,
     replay: hasTurns ? { turn: 0, status: "running" } : null, error: null, full: false });
+  // Every changed reply was replaced. A paused selection in one moves to its sample's original reply.
+  if (hasTurns) beginOutput(turns[0].id);
   const active = () => navigation === visit && store.get().version === version && store.get().replay?.status === "running";
   try {
     if (s.model.id === "qwen" && spec.swaps?.length) await ensurePieces(spec.swaps.flat());
     for (let k = 0; k < turns.length; k++) {
       if (!active()) return;
       store.set({ replay: { turn: k, status: "running" } });
+      beginOutput(turns[k].id);
       const read = turns[k].normal.read;
       if (!active()) return;
       if (s.model.id === "qwen") await ensurePieces(read);
       if (!active()) return;
       patchReply(k, "changed", (r) => ({ ...r, read }));
-      if (store.get().follow && store.get().view === "difference") {
-        store.set({ word: originalWord({ turns, word: { turn: k, side: "normal", index: 0 } }) });
-      }
       const completed = await writeChangedLive(k, [], undefined, Math.max(s.model.replyCap, turns[k].normal.toks.length));
       if (!active()) return;
       if (!completed) { stopReply(); return; }
     }
-    if (active()) store.set({ replay: null, busy: false, announce: "Sample comparisons updated." });
+    if (active()) { store.set({ replay: null, busy: false, announce: "Sample comparisons updated." }); settleSelection(); }
   } catch (e) {
     if (active()) endWithError(e);
   }
@@ -291,15 +304,21 @@ export async function retryComparison() {
   await compareTurn(s.word?.turn ?? s.turns.length - 1, s.version);
 }
 
+/** Switching the view keeps the follow preference and moves the selection to the reply that view measures. */
 export function setTowerView(view: "push" | "difference") {
   const s = store.get();
-  if (view === "push") { store.set({ view }); return; }
-  const word = comparisonTarget(s);
-  if (word) store.set({ view, word, follow: false });
+  if (view === "push") { store.set({ view }); settleSelection(); return; }
+  // Following compares the newest original token when it has been measured, otherwise the one nearest the selection.
+  const newest = s.follow ? latestWord({ ...s, view }) : null;
+  const word = newest && chosen({ ...s, word: newest })?.forced ? newest : comparisonTarget(s);
+  if (word) store.set({ view, word });
 }
 
+/** Resuming always returns to the newest output, and tells the 3D replay to show that token complete. */
 export function setFollowing(follow: boolean) {
-  store.set(follow ? { follow, word: latestWord(store.get()) } : { follow });
+  if (!follow) { store.set({ follow }); return; }
+  store.set((s) => ({ follow, followRevision: s.followRevision + 1 }));
+  settleSelection();
 }
 
 // ---------------------------------------------------------------- talking
@@ -320,11 +339,14 @@ export async function send(message: string) {
     await ensurePieces(readN);
     if (visit !== navigation) return;
     const fork = forked ? (s.fork >= 0 ? s.fork : k) : -1;
+    const id = ++sampleSeq;
     store.set({
-      turns: [...s.turns, { id: ++sampleSeq, user: text, seed: s.seed, temperature: s.temperature, normal: emptyReply({}, readN, "live"), changed: forked ? emptyReply(s.chips, readN, "live") : undefined }],
-      fork, busy: true, word: null, follow: true,
+      turns: [...s.turns, { id, user: text, seed: s.seed, temperature: s.temperature, normal: emptyReply({}, readN, "live"), changed: forked ? emptyReply(s.chips, readN, "live") : undefined }],
+      fork, busy: true,
     });
+    beginOutput(id);
     await Promise.all([writeNormal(k), forked ? writeChangedLive(k) : Promise.resolve()]);
+    if (visit === navigation) settleSelection();
   } catch (e) {
     if (visit === navigation) endWithError(e);
   }
@@ -339,6 +361,7 @@ function endWithError(e: unknown) {
     busy: false, full: msg.includes("context-full") ? true : s.full, announce: msg.includes("context-full") ? S.contextFull : msg,
     error: msg.includes("context-full") ? null : msg,
   }));
+  settleSelection();
 }
 
 /** Clear the sample list while keeping the chosen guide and model changes. */
@@ -347,7 +370,7 @@ export function clearSamples() {
   engine?.cancel();
   claim("normal");
   claim("changed");
-  store.set((s) => ({ turns: [], removed: [], draft: "", fork: -1, word: null, view: "push", full: false, busy: false, replay: null, follow: true, sheet: false, error: null, version: s.version + 1 }));
+  store.set((s) => ({ turns: [], removed: [], draft: "", fork: -1, ...FRESH_SELECTION, full: false, busy: false, replay: null, sheet: false, error: null, version: s.version + 1 }));
   engine?.setVersion(store.get().version);
 }
 
@@ -373,10 +396,12 @@ export async function editSample(id: number, message: string) {
       changed: changed ? emptyReply(s.chips, read, "live") : undefined };
     const version = s.version + 1;
     engine.setVersion(version);
-    store.set({ turns: s.turns.map((t, i) => i === k ? sample : t), version,
-      word: null, view: "push", sheet: false, follow: true });
+    store.set({ turns: s.turns.map((t, i) => i === k ? sample : t), version, sheet: false });
+    // Its old replies are gone: a paused selection in them moves to another sample.
+    beginOutput(sample.id);
     await Promise.all([writeNormal(k), changed ? writeChangedLive(k) : Promise.resolve()]);
     if (visit !== navigation) return false;
+    settleSelection();
     store.set({ announce: "Sample updated. Other samples are unchanged." });
     return true;
   } catch (e) {
@@ -393,8 +418,11 @@ export function removeSample(id: number) {
   const turns = s.turns.filter((_, i) => i !== index), version = s.version + 1;
   engine?.setVersion(version);
   store.set({ turns, removed: [...s.removed, { sample: s.turns[index], index }], version, word,
+    outputSample: s.outputSample === id ? null : s.outputSample,
     fork: turns.some((t) => t.changed) ? 0 : -1, sheet: word ? s.sheet : false,
-    view: word ? s.view : "push", full: false, error: null, announce: "Sample removed. Undo is available." });
+    full: false, error: null, announce: "Sample removed. Undo is available." });
+  // A selection that was in the removed sample moves to the sample now beside it.
+  settleSelection(Math.min(index, turns.length - 1));
 }
 
 /** Undo preserves cached originals; refresh only this sample if the model changed while it was removed. */
@@ -411,10 +439,12 @@ export async function undoRemoveSample() {
   engine.setVersion(version);
   store.set({ turns, removed: s.removed.slice(0, -1), word, version, fork: active ? 0 : -1,
     busy: refresh, full: false, error: null, announce: "Sample restored." });
-  if (refresh) {
-    try { await writeChangedLive(index, [], undefined, Math.max(s.model.replyCap, sample.normal.toks.length)); }
-    catch (e) { if (store.get().version === version) endWithError(e); }
-  }
+  if (!refresh) { settleSelection(); return; }
+  beginOutput(sample.id);
+  try {
+    await writeChangedLive(index, [], undefined, Math.max(s.model.replyCap, sample.normal.toks.length));
+    if (store.get().version === version) settleSelection();
+  } catch (e) { if (store.get().version === version) endWithError(e); }
 }
 
 export function stopReply() {
@@ -425,6 +455,7 @@ export function stopReply() {
     normal: { ...t.normal, done: true }, changed: t.changed && { ...t.changed, done: true, comparing: false,
       compareError: t.changed.comparing ? "The comparison was interrupted. Try again." : t.changed.compareError } })),
     announce: s.replay ? "Sample update stopped. Retry or restore the originals before testing another question." : "Stopped. You can continue the reply or test another question." }));
+  settleSelection();
 }
 
 /** The tiny model continues the text you type (letters, no chat template). Each message starts fresh. */
@@ -435,11 +466,15 @@ async function sendTiny(message: string) {
   const forked = !isNeutral(s.chips);
   claim("normal");
   claim("changed");
+  const id = ++sampleSeq;
   store.set({
-    turns: [{ id: ++sampleSeq, user: message, seed: s.seed, temperature: s.temperature, normal: emptyReply({}, read, "live"), changed: forked ? emptyReply(s.chips, read, "live") : undefined }],
-    fork: forked ? 0 : -1, busy: true, word: null,
+    turns: [{ id, user: message, seed: s.seed, temperature: s.temperature, normal: emptyReply({}, read, "live"), changed: forked ? emptyReply(s.chips, read, "live") : undefined }],
+    fork: forked ? 0 : -1, busy: true,
   });
+  // The previous sample was replaced, so nothing stays selected until this reply's first letter.
+  beginOutput(id);
   await Promise.all([writeNormal(0, [], undefined, TINY_INFO.replyCap), forked ? writeChangedLive(0, [], undefined, TINY_INFO.replyCap) : Promise.resolve()]);
+  settleSelection();
 }
 
 let tinyParams: Float32Array | null = null;
@@ -460,8 +495,8 @@ export async function openTiny(params: Float32Array) {
   claim("changed");
   setDims(TINY_INFO);
   const s = store.get();
-  store.set({ model: TINY_INFO, tiny: false, mode: "live", step: null, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, word: null,
-    focus: { kind: "word" }, view: "push", qwenMode: s.model.id === "qwen" ? s.mode : s.qwenMode, busy: false, replay: null, full: false, error: null, sheet: false });
+  store.set({ model: TINY_INFO, tiny: false, mode: "live", step: null, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, ...FRESH_SELECTION,
+    focus: { kind: "word" }, qwenMode: s.model.id === "qwen" ? s.mode : s.qwenMode, busy: false, replay: null, full: false, error: null, sheet: false });
   engine.setVersion(store.get().version);
   setHash(null);
 }
@@ -473,7 +508,7 @@ export async function backToQwen(n: number | null = null) {
   await engine?.use("qwen");
   setDims(QWEN_INFO);
   const s = store.get();
-  store.set({ model: QWEN_INFO, mode: s.qwenMode ?? s.mode, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, word: null, focus: { kind: "word" }, busy: false, full: false, error: null });
+  store.set({ model: QWEN_INFO, mode: s.qwenMode ?? s.mode, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, ...FRESH_SELECTION, focus: { kind: "word" }, busy: false, full: false, error: null });
   await openStep(n);
 }
 
@@ -521,7 +556,9 @@ export async function continueReply(k = store.get().turns.length - 1) {
   if (!s.turns[k] || s.mode !== "live" || s.busy || s.replay) return;
   const visit = navigation;
   try {
+    beginOutput(s.turns[k].id);
     await continueInner(s, k);
+    if (visit === navigation) settleSelection();
   } catch (e) {
     if (visit === navigation) endWithError(e);
   }
@@ -544,8 +581,10 @@ async function continueInner(s: ReturnType<typeof store.get>, k: number) {
 /** Forcing a word: the reply is rewritten from that word on. Not a change to the model, so no chip. */
 export async function pick(w: WordRef, candId: number) {
   const visit = navigation;
-  try { await pickInner(w, candId, visit); }
-  catch (e) { if (visit === navigation) endWithError(e); }
+  try {
+    await pickInner(w, candId, visit);
+    if (visit === navigation) settleSelection();
+  } catch (e) { if (visit === navigation) endWithError(e); }
 }
 
 async function pickInner(w: WordRef, candId: number, visit: number) {
@@ -556,6 +595,8 @@ async function pickInner(w: WordRef, candId: number, visit: number) {
   const original = r.original ?? r;
   const keep = r.toks.slice(0, w.index);
   if (!engine) return;
+  // Picking is a choice of this token: it stays selected, paused, and shows the picked word once written.
+  store.set({ word: w, follow: false, outputSample: t.id });
   patchReply(w.turn, w.side, (x) => ({ ...x, original, toks: keep, done: false, ended: false, pickedAt: w.index, compare: undefined }));
   const mark = (tok: Tok) => tok;
   const cap = REPLY_CAP - 0;
@@ -569,6 +610,7 @@ export function undoPick(turn: number, side: Side) {
   if (store.get().busy || store.get().replay) return;
   claim(side);
   patchReply(turn, side, (r) => (r.original ? { ...r.original } : r));
+  settleSelection();
 }
 
 // ---------------------------------------------------------------- inspection

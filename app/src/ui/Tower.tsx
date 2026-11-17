@@ -2,13 +2,13 @@
 // MLP, colored by its direct push toward that word. Every cell is a button: tap to see it.
 import { useId, useMemo, useRef, useState } from "react";
 import type { Focus } from "../model/types.ts";
-import { piece, retryComparison, setFocus, setTowerView, stepData } from "../state/actions.ts";
+import { chooseWord, piece, retryComparison, setFocus, setTowerView, stepData } from "../state/actions.ts";
 import { guideAddress, guideTarget } from "../path/steps.ts";
-import { store, useStore } from "../state/store.ts";
+import { useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { diverging, signed } from "./color.ts";
 import { geometryLabel, multOf } from "./describe.ts";
-import { chosen, comparisonTarget, FLOORS, HEADS, hardestFloors, headIndex, maxAbs, memIndex, towerValues } from "./word.ts";
+import { chosen, comparisonTarget, FLOORS, HEADS, hardestFloors, headIndex, maxAbs, memIndex, towerValues, visibleTokens } from "./word.ts";
 
 export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: boolean; embedded?: boolean; onSelect?: (focus: Focus) => void }) {
   const [enlarged, setEnlarged] = useState(false);
@@ -46,11 +46,11 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
   const diffHintId = useId();
   const canRetry = !!changedReply && !awaitingReplay && !changedReply.stale && !changedReply.comparing && !generating && !hasDiff;
 
-  const visibleTokens = c?.reply.toks.map((t, i) => [151643, 151645].includes(t.id) ? -1 : i).filter((i) => i >= 0) ?? [];
-  const tokenAt = c ? visibleTokens.indexOf(c.ref.index) : -1;
+  const visible = visibleTokens(c?.reply);
+  const tokenAt = c ? visible.indexOf(c.ref.index) : -1;
   const moveToken = (direction: number) => {
-    const index = visibleTokens[tokenAt + direction];
-    if (c && index !== undefined) store.set({ word: { ...c.ref, index }, follow: false });
+    const index = visible[tokenAt + direction];
+    if (c && index !== undefined) chooseWord({ ...c.ref, index });
   };
 
   const isOn = (f: Focus) => JSON.stringify(f) === JSON.stringify(focus);
@@ -129,7 +129,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
             <div className="token-navigation" role="group" aria-label="Selected token">
               <button className="btn quiet" aria-label="Previous token" disabled={tokenAt <= 0} onClick={() => moveToken(-1)}>‹</button>
               <h3 title={wq}><button className="linkish" aria-label={`Inspect token: ${wq}`} onClick={() => onSelect({ kind: "word" })}>“{wq}”</button></h3>
-              <button className="btn quiet" aria-label="Next token" disabled={tokenAt < 0 || tokenAt >= visibleTokens.length - 1} onClick={() => moveToken(1)}>›</button>
+              <button className="btn quiet" aria-label="Next token" disabled={tokenAt < 0 || tokenAt >= visible.length - 1} onClick={() => moveToken(1)}>›</button>
             </div>
             <p className="note">{c.ref.side === "normal" ? "Original" : "Changed"} reply · token {c.ref.index + 1}</p>
           </> : <h3>{replay ? "Updating samples…" : busy ? "Writing the reply…" : "Ask anything to light up the model"}</h3>}

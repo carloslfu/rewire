@@ -9,21 +9,21 @@ import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { pct, signed } from "../ui/color.ts";
 import { chips as describeChips } from "../ui/describe.ts";
+import { FollowControl } from "../ui/FollowControl.tsx";
 import { LearnedControl, MoreExperiments, PartControls } from "../ui/Lab.tsx";
 import { Chips, DeviceBar } from "../ui/Panels.tsx";
 import { ReplayStatus } from "../ui/ReplayStatus.tsx";
 import { replySegments } from "../ui/reply-text.ts";
-import { chosen, comparisonTarget, towerValues } from "../ui/word.ts";
+import { chosen, comparisonTarget, isStop, towerValues, visibleTokens } from "../ui/word.ts";
 import { attentionRow, layerPlates, pushValues, tray } from "./adapters.ts";
 import { buildArch, groupHeads, type Part, partIndex, partName } from "./arch.ts";
 import { blocked, focusOf, isTarget, partChanged, partOf, poseOf, punched, restored, restoreLabel, strengthOf } from "./intervene.ts";
 import { Latest, measure, type Measured, measurementKey } from "./latest.ts";
-import { beatAt, beatCount, beatLabel, type Clock, pushSoFar, runningPush, seek, SPEEDS, stepClock } from "./playback.ts";
+import { applyReplay, beatAt, beatCount, beatLabel, type Clock, pushSoFar, type ReplayAction, runningPush, SPEEDS } from "./playback.ts";
 import type { BaySpec, Stage, Tool } from "./scene/stage.ts";
 import { RealNote, Workbench } from "./Workbench.tsx";
 
 const TRAY = 16;
-const STOPS = [151643, 151645];
 const text = (id: number) => { const t = piece(id); return t.trim() || JSON.stringify(t); };
 
 export default function DismantleStage() {
@@ -38,6 +38,7 @@ export default function DismantleStage() {
   const replay = useStore((s) => s.replay);
   const teachingBusy = useStore((s) => s.teachingBusy);
   const follow = useStore((s) => s.follow);
+  const followRevision = useStore((s) => s.followRevision);
   const focus = useStore((s) => s.focus);
   const version = useStore((s) => s.version);
   const active = useStore((s) => !s.tiny && !s.teach);
@@ -129,25 +130,26 @@ export default function DismantleStage() {
   const wordKey = c ? `${c.ref.turn}.${c.ref.side}.${c.ref.index}.${c.tok.id}` : "";
   const speed = useRef(1);
   const run = (next: Clock) => { speed.current = next.speed; setClock(next); stage?.setClock(next); };
-  // A new token shows complete. Replaying it is a choice.
-  useEffect(() => {
-    const done = { t: beats, playing: false, speed: speed.current };
-    setClock(done);
-    stage?.setClock(done);
-  }, [wordKey, stage, beats]);
-  const play = () => {
-    if (!c) return;
-    if (follow) setFollowing(false);
-    run({ ...clock, t: clock.t >= beats ? 0 : clock.t, playing: true });
+  // Play, Back, Step and the scrubber place the visitor inside this one token, so they pause following.
+  const act = (action: ReplayAction) => {
+    const next = applyReplay(clock, action, beats);
+    if (next.manual && follow) setFollowing(false);
+    run(next.clock);
   };
+  // A new token shows complete, and so does resuming Follow output, even on the token already selected:
+  // any replay in progress stops. Replaying a token is a choice.
+  useEffect(() => {
+    run(applyReplay({ t: beats, playing: false, speed: speed.current }, { kind: "reveal" }, beats).clock);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wordKey, stage, beats, followRevision]);
   const complete = clock.t >= beats;
   const beat = beatAt(model, Math.min(beats - 1, Math.floor(clock.t)));
   const guess = !complete && beat.kind === "mlp" ? c?.tok.guesses?.[beat.floor]?.[0] : undefined;
 
   // ------------------------------------------------------------ tokens
-  const visible = c?.reply.toks.map((t, i) => (STOPS.includes(t.id) ? -1 : i)).filter((i) => i >= 0) ?? [];
+  const visible = visibleTokens(c?.reply);
   const at = c ? visible.indexOf(c.ref.index) : -1;
-  const move = (d: number) => { const index = visible[at + d]; if (c && index !== undefined) store.set({ word: { ...c.ref, index }, follow: false }); };
+  const move = (d: number) => { const index = visible[at + d]; if (c && index !== undefined) chooseWord({ ...c.ref, index }); };
   const hasDiff = !!comparisonTarget({ turns, word, fork });
   const turn = word ? turns[word.turn] : turns.at(-1);
   const canRetry = !!turn?.changed && !replay && !turn.changed.stale && !turn.changed.comparing && turn.normal.done && turn.changed.done && !hasDiff;
@@ -194,17 +196,17 @@ export default function DismantleStage() {
     </div>
     {canRetry && <p className="note">No comparison for this token yet. <button type="button" className="linkish" disabled={mode !== "live" || busy} onClick={() => void retryComparison()}>Retry comparison</button></p>}
     <div className="stage-play" role="group" aria-label="Replay controls">
-      <button type="button" className="btn" disabled={!c} onClick={() => (clock.playing ? run({ ...clock, playing: false }) : play())}>{clock.playing ? "Pause" : c && complete ? "Replay" : "Play"}</button>
-      <button type="button" className="btn quiet" disabled={!c} aria-label="Step back" onClick={() => run({ ...clock, playing: false, t: stepClock(clock.t, -1, beats) })}>Back</button>
-      <button type="button" className="btn quiet" disabled={!c || complete} aria-label="Step forward" onClick={() => run({ ...clock, playing: false, t: stepClock(clock.t, 1, beats) })}>Step</button>
+      <button type="button" className="btn" disabled={!c} onClick={() => act({ kind: clock.playing ? "pause" : "play" })}>{clock.playing ? "Pause" : c && complete ? "Replay" : "Play"}</button>
+      <button type="button" className="btn quiet" disabled={!c} aria-label="Step back" onClick={() => act({ kind: "step", direction: -1 })}>Back</button>
+      <button type="button" className="btn quiet" disabled={!c || complete} aria-label="Step forward" onClick={() => act({ kind: "step", direction: 1 })}>Step</button>
       <input type="range" aria-label="Position in the replay" min={0} max={beats} step={0.25} value={clock.t} disabled={!c}
-        onChange={(e) => { if (follow) setFollowing(false); run({ ...clock, playing: false, t: seek(Number(e.target.value), beats) }); }} />
+        onChange={(e) => act({ kind: "seek", t: Number(e.target.value) })} />
       <label className="stage-speed">Speed
-        <select value={clock.speed} onChange={(e) => run({ ...clock, speed: Number(e.target.value) })}>
+        <select value={clock.speed} onChange={(e) => act({ kind: "speed", speed: Number(e.target.value) })}>
           {SPEEDS.map((v) => <option key={v} value={v}>{v}×</option>)}
         </select>
       </label>
-      <button type="button" className="linkish" aria-pressed={follow} onClick={() => setFollowing(!follow)}>{follow ? "✓ " : ""}Follow output</button>
+      <FollowControl replay />
     </div>
     <p className="stage-readout" role="status">
       {!c ? "Nothing to replay yet." : complete ? `Every part is lit. ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${running ? signed(running[running.length - 1]) : "0"} for “${wq}”.`
@@ -266,7 +268,7 @@ function StageQuestion() {
     store.set({ draft: "" });
     void send(draft);
   };
-  const first = (r: Reply) => r.toks.findIndex((t) => !STOPS.includes(t.id));
+  const first = (r: Reply) => r.toks.findIndex((t) => !isStop(t.id));
   return <div className="stage-question">
     <form className="composer main-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <textarea rows={2} value={draft} aria-label={model.id === "tiny" ? "Start a sentence" : "Question"} placeholder={model.id === "tiny" ? S.placeholderTiny : S.placeholderLive}

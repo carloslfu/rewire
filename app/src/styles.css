@@ -404,9 +404,16 @@ html:has(dialog[open]) { overflow: hidden; }
 .scope-title h2 { font-size: 21px; }
 .scope-title .btn { font-size: 12px; padding: 4px; min-height: 28px; }
 .scope-instruction { font-size: 12px; color: var(--muted); margin: 5px 0 8px; }
-.scope-status { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; font-size: 11px; color: var(--muted); }
-.scope-status .linkish { font-size: inherit; white-space: nowrap; min-height: 24px; }
-.scope-status .linkish[aria-pressed=true]::before { content: "✓ "; }
+.scope-status { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 12px; margin-bottom: 10px; font-size: 11px; color: var(--muted); }
+/* Follow output, the same in the 2D and 3D views: a filled pill and a check when on, an outline when paused. */
+.follow-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.follow-toggle::before { content: ""; flex: none; width: 1em; text-align: center; }
+.follow-toggle[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.follow-toggle[aria-pressed="true"]::before { content: "✓"; }
+.follow-toggle[aria-pressed="false"]::before { height: 1em; box-sizing: border-box; border: 1.5px solid currentColor; border-radius: 50%; }
+.follow-toggle:hover { border-color: var(--fg); }
+.follow-hint { flex-basis: 100%; margin: 0; font-size: 11px; }
+@media (pointer: coarse) { .follow-toggle { min-height: 44px; padding-inline: 14px; } }
 .lab-controls { padding: 14px 0; border-top: 1px solid var(--line); font-size: 13px; }
 .lab-controls > h3 { font-size: 13px; font-weight: 600; }
 .intervention-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
@@ -551,7 +558,7 @@ html:has(dialog[open]) { overflow: hidden; }
   .mobile-model .scope-intro { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
   .mobile-model .scope-intro .scope-title { order: 2; flex-shrink: 0; float: none; margin: 0; }
   .mobile-model .scope-instruction { margin: 0; }
-  .scope-status { font-size: 12px; }
+  .scope-status, .follow-hint { font-size: 12px; }
   .tower-color-key { font-size: 12px; }
   .tower-token .note { font-size: 12px; }
   .tower-color-key { align-items: center; }
@@ -565,7 +572,7 @@ html:has(dialog[open]) { overflow: hidden; }
   .lab-controls > h3 { font-size: 15px; }
   .lab-controls .btn { font-size: 13px; }
   .modal .btn, .modal .linkish, .modal .seg button, .modal summary,
-  .scope-status .linkish, .scope-title .btn, .token-navigation .btn, .token-navigation h3 .linkish { min-height: 44px; }
+  .follow-toggle, .scope-title .btn, .token-navigation .btn, .token-navigation h3 .linkish { min-height: 44px; }
   .token-navigation .btn { min-width: 36px; }
   .scope-part-footer .linkish { font-size: 13px; }
   .detail, .modal-intro, .whatsreal { overflow-wrap: anywhere; }
@@ -802,7 +809,6 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .stage-play .btn { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 .stage-play input[type="range"] { flex: 1 1 110px; min-width: 90px; min-height: 28px; accent-color: var(--fg); }
 .stage-speed { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
-.stage-play .linkish { font-size: 12px; white-space: nowrap; }
 .stage-readout { margin-top: 6px; }
 .stage-side { padding: 0 20px 18px; }
 .stage-side > * + * { border-top: 1px solid var(--line); }

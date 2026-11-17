@@ -19,6 +19,18 @@ sampling seed. Changes persist into new questions; Restore removes them. The mod
 Sample questions use the same live inference path as freeform chat. Unsupported devices or loading
 failures show an honest unavailable state; there is no replay fallback.
 
+The visualizer measures one selected token. **Follow output**, in both the 2D and 3D views, selects
+the newest token of the reply being written: the changed reply in Push, falling back to the original
+while the changed one is empty, and always an original token in Change from original. Choosing a
+token yourself (in a reply, with Previous and Next, by picking a candidate, or with the 3D replay
+controls) pauses it. Paused, your token stays selected across new questions, Continue and model
+changes, and moves only if it stops existing: to the nearest token of the same reply, then that
+sample's original reply, then the nearest remaining sample. With nothing selected, the first token
+written is selected once and kept. Only you turn following on or off, with one exception: clearing
+the samples, opening a guided example and switching between Qwen and the tiny model start a new
+experiment, which follows again. Switching between Push and Change from original, or between 2D and
+3D, keeps the setting.
+
 **Teach** fine-tunes the same Qwen model using editable question/answer pairs. A rank-8 LoRA adds
 32,768 trainable float32 parameters to layer 28's MLP down projection; original Qwen weights stay
 frozen. It uses full-vocabulary cross entropy, answer-only targets including the end marker, and Adam
@@ -133,7 +145,9 @@ What is measured and what is drawn:
   the real candidate probabilities.
 - Play replays one token's measured values in the order the architecture computes them: the token
   read, each layer's attention then its MLP, then the choice. It is a slowed illustration with step,
-  scrub and speed controls. It does not show how long any step took.
+  scrub and speed controls. It does not show how long any step took. Play, Back, Step and the
+  scrubber pause Follow output. Turning it back on stops the replay and shows the newest token
+  complete, and a newly selected token always starts complete. The speed is kept.
 - Teach shows the adapter's actual A and B matrices and the size of each of its eight ranks, refreshed
   every 10 steps. Frozen layers are drawn dimmed. No activations are measured during teaching, so
   nothing else lights up.

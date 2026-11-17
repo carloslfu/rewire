@@ -96,6 +96,43 @@ it("shows a selected part's real controls and measured value, and locks them whi
   expect(text(renderToString(<Dismantle />))).toContain("This reply used earlier settings.");
 });
 
+it("offers the same Follow output control in 2D and 3D, usable and explained before and after output", () => {
+  /** The toggle, the hint it is described by, and whether it is disabled. */
+  const control = (html: string) => {
+    const all = [...html.matchAll(/<button([^>]*class="follow-toggle"[^>]*)>(.*?)<\/button>/g)];
+    expect(all).toHaveLength(1);
+    const attrs = all[0][1], id = /aria-describedby="([^"]+)"/.exec(attrs)![1];
+    const hint = new RegExp(`<p class="note follow-hint" id="${id}">(.*?)</p>`).exec(html);
+    return { label: all[0][2], pressed: /aria-pressed="(\w+)"/.exec(attrs)![1], type: /type="(\w+)"/.exec(attrs)![1], title: /title="([^"]+)"/.exec(attrs)![1],
+      disabled: /\sdisabled=""/.test(attrs), hint: hint ? text(hint[1]).trim() : null };
+  };
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 } });
+  // No output yet: enabled, on, and waiting rather than failed.
+  let flat = control(renderToString(<Lab.LabScope />)), stage = control(renderToString(<Dismantle />));
+  for (const c of [flat, stage]) expect(c).toMatchObject({ label: "Follow output", pressed: "true", type: "button", disabled: false });
+  expect(flat.hint).toBe("Following: waiting for the first token.");
+  expect(stage.hint).toBe(`${flat.hint} Replay animates one token and pauses following.`);
+  expect(flat.title).toBe(stage.title);
+  const following = flat.title;
+  // Paused on a chosen token: the same words in both views, and only 3D mentions its replay.
+  store.set({ turns: [sample()], word: { turn: 0, side: "normal", index: 0 }, follow: false });
+  const paused = renderToString(<Dismantle />);
+  flat = control(renderToString(<Lab.LabScope />)); stage = control(paused);
+  for (const c of [flat, stage]) expect(c).toMatchObject({ label: "Follow output", pressed: "false", disabled: false });
+  expect(flat.hint).toBe("Paused on this token. New replies will not move it.");
+  expect(stage.hint).toBe(`${flat.hint} Replay animates this one token.`);
+  expect(flat.title).toBe(stage.title);
+  expect(flat.title).not.toBe(following);
+  // Paused with nothing selected says what will happen, and following with a token says it is live.
+  store.set({ turns: [], word: null });
+  expect(control(renderToString(<Lab.LabScope />)).hint).toBe("Paused: the first token written will be selected and kept.");
+  store.set({ turns: [sample()], word: { turn: 0, side: "normal", index: 1 }, follow: true });
+  expect(control(renderToString(<Lab.LabScope />)).hint).toBe("Following: the newest token is selected as it is written.");
+  // The copy never describes the replay as real timing, and uses no em dash.
+  expect(text(paused)).toContain("It is not a timing of the real computation.");
+  for (const c of [flat, stage]) expect(`${c.hint}${c.title}`).not.toContain("—");
+});
+
 it("names every camera action, says where you are, and opens no empty bay before there is something to show", () => {
   store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, focus: { kind: "head", floor: 20, head: 13 } });
   const html = renderToString(<Dismantle />), t = text(html);

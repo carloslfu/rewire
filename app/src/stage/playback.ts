@@ -94,6 +94,31 @@ export function seek(t: number, beats: number): number {
   return Number.isFinite(t) ? Math.max(0, Math.min(beats, t)) : 0;
 }
 
+/** Everything the replay controls can ask for. `reveal` shows the token complete. */
+export type ReplayAction =
+  | { kind: "play" }
+  | { kind: "pause" }
+  | { kind: "step"; direction: 1 | -1 }
+  | { kind: "seek"; t: number }
+  | { kind: "speed"; speed: number }
+  | { kind: "reveal" };
+
+/**
+ * The clock after one replay control. Play, step and scrub place the visitor inside one token, so
+ * they are `manual`: the caller pauses following. Revealing stops the replay with every part lit; it
+ * is what a new token and resumed following do. The speed is a preference and survives all of them.
+ */
+export function applyReplay(c: Clock, action: ReplayAction, beats: number): { clock: Clock; manual: boolean } {
+  switch (action.kind) {
+    case "play": return { clock: { ...c, t: c.t >= beats ? 0 : c.t, playing: true }, manual: true };
+    case "pause": return { clock: { ...c, playing: false }, manual: false };
+    case "step": return { clock: { ...c, playing: false, t: stepClock(c.t, action.direction, beats) }, manual: true };
+    case "seek": return { clock: { ...c, playing: false, t: seek(action.t, beats) }, manual: true };
+    case "speed": return { clock: { ...c, speed: action.speed }, manual: false };
+    case "reveal": return { clock: { ...c, t: beats, playing: false }, manual: false };
+  }
+}
+
 /** Height of the replay marker on the spine, as a fraction of the tower from the dictionary to the output. */
 export function spineFraction(model: Pick<ModelInfo, "floors">, t: number | null): number {
   const n = beatCount(model);
