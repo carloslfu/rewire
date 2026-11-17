@@ -617,6 +617,13 @@ export function selectWord(w: WordRef | null, focus?: Focus) {
   store.set({ word: w, view, follow: false, focus: focus ?? { kind: "word" }, sheet: true, inspectView: "word" });
 }
 
+/** Choose the measured token in place, without opening the inspector. */
+export function chooseWord(w: WordRef) {
+  const s = store.get();
+  const view = w.side === "normal" && comparisonTarget({ ...s, word: w }) ? s.view : "push";
+  store.set({ word: w, view, follow: false });
+}
+
 export function setFocus(focus: Focus) {
   store.set((s) => ({ focus, sheet: true, inspectView: s.inspectView === "model" && !matchMedia("(max-width: 1000px)").matches ? "model" : "word" }));
 }

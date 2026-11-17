@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { decode, encode, VOCAB } from "@rewire/tiny/src/data.ts";
 import { layout, TINY } from "@rewire/tiny/src/config.ts";
 import { mutateWeights, secretLanguage } from "@rewire/tiny/src/lab.ts";
@@ -11,6 +11,9 @@ import { WeightScope } from "./WeightScope.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { useNarrow } from "../ui/useNarrow.ts";
 import type { TinyIn, TinyOut } from "./train.worker.ts";
+import type { Damage } from "../stage/GrowStage.tsx";
+
+const GrowStage = lazy(() => import("../stage/GrowStage.tsx"));
 
 const STEPS = 1200, BATCH = 16, LR = 3e-3;
 const language = secretLanguage();
@@ -19,6 +22,7 @@ type TestResult = Extract<TinyOut, { t: "tested" }>["results"];
 
 export default function TinyView() {
   const active = useStore((s) => s.tiny);
+  const view3d = useStore((s) => s.scopeView === "3d" && s.stage3d);
   const [text, setText] = useState(language.text);
   const [prompt, setPrompt] = useState(language.tests[0].prompt);
   const [running, setRunning] = useState(false);
@@ -29,6 +33,7 @@ export default function TinyView() {
   const [reference, setReference] = useState<Float32Array | null>(null);
   const [intact, setIntact] = useState<Float32Array | null>(null);
   const [mutation, setMutation] = useState("");
+  const [damage, setDamage] = useState<Damage | null>(null);
   const [status, setStatus] = useState("");
   const [result, setResult] = useState<{ prompt: string; text: string; model: string } | null>(null);
   const [baseline, setBaseline] = useState<{ prompt: string; text: string } | null>(null);
@@ -96,7 +101,7 @@ export default function TinyView() {
     setSamples([]);
     runBase.current = cumulative.current;
     knownCorpus.current = resume ? knownCorpus.current + "\n" + text : text;
-    setRunning(true); setStatus("Starting…"); setTests(null); setResult(null); setBaseline(null); setMutation("");
+    setRunning(true); setStatus("Starting…"); setTests(null); setResult(null); setBaseline(null); setMutation(""); setDamage(null);
     setIntact(null);
     worker().postMessage({ t: "start", text, params: resume ? params!.slice() : undefined, prompt, steps: STEPS, batch: BATCH, lr: LR, seed: 1 + runBase.current } satisfies TinyIn);
   };
@@ -107,18 +112,27 @@ export default function TinyView() {
     worker().postMessage(label && intact ? { t: "probe", params: weights.slice(), baseline: intact.slice(), prompt } satisfies TinyIn
       : { t: "sample", params: weights.slice(), prompt, length: 80, seed: 42 } satisfies TinyIn);
   };
-  const mutate = (kind: "noise" | "erase") => {
+  // The whole model, or one layer when the 3D view punches it. Either way the result starts from the intact copy.
+  const mutate = (kind: "noise" | "erase", floor?: number) => {
     if (!intact || disabled) return;
-    const next = mutateWeights(intact, cfg, { kind, amount: strength, seed: mutationSeed.current++ });
-    const label = kind === "erase" ? `Erased approximately ${Math.round(strength * 100)}% of matrix weights` : `Noise at ${Math.round(strength * 100)}% of each matrix’s RMS`;
-    setParams(next); setMutation(label); setTests(null); test(next, label);
+    const next = mutateWeights(intact, cfg, { kind, amount: strength, seed: mutationSeed.current++, floor });
+    const where = floor === undefined ? "" : `Layer ${floor + 1}: `;
+    const label = where + (kind === "erase" ? `${where ? "erased" : "Erased"} approximately ${Math.round(strength * 100)}% of matrix weights` : `${where ? "noise" : "Noise"} at ${Math.round(strength * 100)}% of each matrix’s RMS`);
+    setParams(next); setMutation(label); setDamage({ kind, floor }); setTests(null); test(next, label);
   };
   const restore = () => {
     if (!intact || disabled) return;
-    setParams(intact); setMutation(""); setTests(null); test(intact, "");
+    setParams(intact); setMutation(""); setDamage(null); setTests(null); test(intact, "");
   };
   const last = samples[samples.length - 1];
   const validText = encode(text).length >= 65;
+  // Training state stays in this component; the flat map and the 3D model are two views of it.
+  const visualizer = view3d ? <Suspense fallback={<p className="stage-state" role="status">Opening the 3D model…</p>}>
+    <GrowStage params={params} reference={reference} intact={intact} step={step} running={running} active={active}
+      controls={{ disabled, unavailable, validText, status, loss: losses.length ? losses[losses.length - 1] : null, mutation, damage, strength, setStrength,
+        teach, stop: () => { w.current?.postMessage({ t: "stop" } satisfies TinyIn); setStatus("Finishing the current step…"); }, mutate, restore,
+        prompt, setPrompt, test: () => test(), result, baseline }} /></Suspense>
+    : <WeightScope params={params} reference={reference} step={step} running={running} mutated={!!mutation} />;
   const testCases = cases.split("\n").flatMap((line) => {
     const parts = line.split(" = ");
     return parts.length === 2 && parts[0] && parts[1] ? [{ prompt: `${parts[0]} = `, answer: parts[1] }] : [];
@@ -161,8 +175,8 @@ export default function TinyView() {
       {params && <section className="training-handoff"><button className="btn" disabled={disabled} onClick={() => { setWorking(true); void openTiny(params).catch((e) => setStatus(String(e))).finally(() => setWorking(false)); }}>Open this model in the full lab</button><p className="note">Inspect attention, disable heads, and follow each letter through all four layers.</p></section>}
       <details className="training-details"><summary>What is actually being trained?</summary><p className="note">A separate {layout(cfg).total.toLocaleString()}-parameter transformer, starting from random weights. Adam updates every trainable parameter using next-letter prediction. This does not fine-tune Qwen. Keep learning preserves the current weights and starts a new optimizer. It trains on 64-letter windows and works best with short ASCII patterns.</p>{params && !disabled && <SlowMotion params={params} corpus={text} worker={worker} />}</details>
     </main>
-    {!narrow && <aside className="lab-scope" id="training-scope" aria-label="Live training visualizer"><WeightScope params={params} reference={reference} step={step} running={running} mutated={!!mutation} /></aside>}
-    {narrow && <Modal open={scope && active} onClose={() => setScope(false)} title="Live weights" className="mobile-model"><div id="training-scope"><WeightScope params={params} reference={reference} step={step} running={running} mutated={!!mutation} /></div></Modal>}
+    {!narrow && <aside className={`lab-scope${view3d ? " stage-scope" : ""}`} id="training-scope" aria-label="Live training visualizer">{visualizer}</aside>}
+    {narrow && <Modal open={scope && active} onClose={() => setScope(false)} title="Live weights" className="mobile-model"><div id="training-scope" className={view3d ? "stage-scope" : undefined}>{visualizer}</div></Modal>}
   </div>;
 }
 function LossChart({ losses }: { losses: number[] }) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { Focus } from "../model/types.ts";
 import { applyChips, chipsWith, piece, setFocus, setFollowing, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
@@ -9,17 +9,25 @@ import { Tower } from "./Tower.tsx";
 import { chosen, headIndex, memIndex, towerValues } from "./word.ts";
 import { ReplayStatus } from "./ReplayStatus.tsx";
 import { HeadExampleHint, NeuronControl } from "./Examples.tsx";
+import { ViewToggle } from "../stage/ViewToggle.tsx";
 
 type Part = Extract<Focus, { kind: "head" | "memory" | "floor" }>;
 
+// Three.js and the 3D bench load only when the visitor opens the 3D view.
+const DismantleStage = lazy(() => import("../stage/DismantleStage.tsx"));
+
 export function LabScope() {
+  const view3d = useStore((s) => s.scopeView === "3d" && s.stage3d);
+  return view3d ? <Suspense fallback={<p className="stage-state" role="status">Opening the 3D model…</p>}><DismantleStage /></Suspense> : <FlatScope />;
+}
+
+function FlatScope() {
   const trigger = useRef<HTMLElement | null>(null);
   const overview = useRef<HTMLDivElement | null>(null);
   const busy = useStore((s) => s.busy);
   const mode = useStore((s) => s.mode);
   const chips = useStore((s) => s.chips);
   const model = useStore((s) => s.model);
-  const lessonRevision = useStore((s) => s.lessonRevision);
   const follow = useStore((s) => s.follow);
   const view = useStore((s) => s.view);
   const focus = useStore((s) => s.focus);
@@ -51,10 +59,8 @@ export function LabScope() {
     reveal();
     return () => { cancelAnimationFrame(frame); resize.disconnect(); };
   }, [selectedRow, selectedColumn, view]);
-  const zero = stepData(2)?.control;
   const disabled = busy || mode !== "live";
   const changes = describeChips(chips);
-  const setLayer = (floor: number) => void chipsWith((s) => withMult(s, "floor", floor, 0, multOf(s, "floor", floor) === 0 ? 1 : 0));
   const select = (focus: Focus) => {
     if (focus.kind === "head" || focus.kind === "memory" || focus.kind === "floor") {
       trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -65,7 +71,7 @@ export function LabScope() {
   return <div className="scope-bench">
     <div className="scope-overview" ref={overview}>
       <div className="scope-intro"><div className="scope-title"><h2>{model.id === "tiny" ? "Your trained brain" : "Under the hood"}</h2>
-        <button className="btn quiet" disabled={disabled || !changes.length} onClick={() => void applyChips({})}>Restore all</button>
+        <div className="scope-title-actions"><ViewToggle /><button className="btn quiet" disabled={disabled || !changes.length} onClick={() => void applyChips({})}>Restore all</button></div>
       </div>
       <p className="scope-instruction">Select a cell to change it.</p></div>
       <div className="scope-status">
@@ -74,22 +80,8 @@ export function LabScope() {
       </div>
       <ReplayStatus compact />
       <Tower embedded onSelect={select} />
-      {model.id === "qwen" && lessonRevision > 0 && <div className="learned-control">
-        <div><strong>Learned weights</strong><p>Inside layer 28’s MLP</p></div>
-        <div className="seg" role="group" aria-label="Use learned weights"><button disabled={disabled} aria-pressed={!chips.lesson} onClick={() => void chipsWith(s => ({ ...s, lesson: undefined }))}>Off</button><button disabled={disabled} aria-pressed={chips.lesson === lessonRevision} onClick={() => void chipsWith(s => ({ ...s, lesson: lessonRevision }))}>On</button></div>
-      </div>}
-      <section className="lab-controls" aria-label="More experiments">
-        <h3>More experiments</h3>
-        <div className="intervention-buttons" role="group" aria-label="Model interventions">
-          <button className="btn" aria-pressed={multOf(chips, "floor", 0) === 0} disabled={disabled} onClick={() => setLayer(0)}>Cut layer 1</button>
-          <button className="btn" aria-pressed={multOf(chips, "floor", Math.floor(model.floors / 2)) === 0} disabled={disabled} onClick={() => setLayer(Math.floor(model.floors / 2))}>Cut layer {Math.floor(model.floors / 2) + 1}</button>
-          {model.id === "qwen" && <button className="btn" disabled={disabled} aria-pressed={chips.bits === 2} onClick={() => void chipsWith((s) => ({ ...s, bits: s.bits === 2 ? 4 : 2 }))}>Crush precision</button>}
-          {model.id === "qwen" && zero?.kind === "zeroed" && <button className="btn" disabled={disabled} aria-pressed={!!chips.zeroed?.length} onClick={() => void chipsWith((s) => ({ ...s, zeroed: s.zeroed?.length ? [] : zero.weights }))}>Zero {zero.weights.length} weights</button>}
-          <button className="btn" disabled={disabled} onClick={() => setFocus({ kind: "head", floor: Math.min(16, model.floors - 1), head: 0 })}>Rotate an attention head</button>
-          {model.id === "qwen" && <button className="btn" onClick={() => setFocus({ kind: "bits" })}>Weight precision: {chips.bits ?? 4} bits</button>}
-        </div>
-        <p className="note">Model changes apply to every sample. Each question is tested independently, with its original answer alongside. Restoring the model brings back the original answers.</p>
-      </section>
+      <LearnedControl disabled={disabled} />
+      <MoreExperiments disabled={disabled} />
       {mode !== "live" && <p className="note">Controls become available when the model is ready.</p>}
     </div>
     {part && <PartControls key={`${model.id}.${part.kind}.${part.floor}.${part.kind === "head" ? part.head : ""}`} part={part} disabled={disabled} onClose={() => {
@@ -100,7 +92,38 @@ export function LabScope() {
   </div>;
 }
 
-function PartControls({ part, disabled, onClose }: { part: Part; disabled: boolean; onClose: () => void }) {
+/** The switch for the adapter trained in Teach, once one exists. */
+export function LearnedControl({ disabled }: { disabled: boolean }) {
+  const chips = useStore((s) => s.chips);
+  const model = useStore((s) => s.model);
+  const lessonRevision = useStore((s) => s.lessonRevision);
+  if (model.id !== "qwen" || lessonRevision <= 0) return null;
+  return <div className="learned-control">
+    <div><strong>Learned weights</strong><p>Inside layer 28’s MLP</p></div>
+    <div className="seg" role="group" aria-label="Use learned weights"><button disabled={disabled} aria-pressed={!chips.lesson} onClick={() => void chipsWith(s => ({ ...s, lesson: undefined }))}>Off</button><button disabled={disabled} aria-pressed={chips.lesson === lessonRevision} onClick={() => void chipsWith(s => ({ ...s, lesson: lessonRevision }))}>On</button></div>
+  </div>;
+}
+
+export function MoreExperiments({ disabled }: { disabled: boolean }) {
+  const chips = useStore((s) => s.chips);
+  const model = useStore((s) => s.model);
+  const zero = stepData(2)?.control;
+  const setLayer = (floor: number) => void chipsWith((s) => withMult(s, "floor", floor, 0, multOf(s, "floor", floor) === 0 ? 1 : 0));
+  return <section className="lab-controls" aria-label="More experiments">
+    <h3>More experiments</h3>
+    <div className="intervention-buttons" role="group" aria-label="Model interventions">
+      <button className="btn" aria-pressed={multOf(chips, "floor", 0) === 0} disabled={disabled} onClick={() => setLayer(0)}>Cut layer 1</button>
+      <button className="btn" aria-pressed={multOf(chips, "floor", Math.floor(model.floors / 2)) === 0} disabled={disabled} onClick={() => setLayer(Math.floor(model.floors / 2))}>Cut layer {Math.floor(model.floors / 2) + 1}</button>
+      {model.id === "qwen" && <button className="btn" disabled={disabled} aria-pressed={chips.bits === 2} onClick={() => void chipsWith((s) => ({ ...s, bits: s.bits === 2 ? 4 : 2 }))}>Crush precision</button>}
+      {model.id === "qwen" && zero?.kind === "zeroed" && <button className="btn" disabled={disabled} aria-pressed={!!chips.zeroed?.length} onClick={() => void chipsWith((s) => ({ ...s, zeroed: s.zeroed?.length ? [] : zero.weights }))}>Zero {zero.weights.length} weights</button>}
+      <button className="btn" disabled={disabled} onClick={() => setFocus({ kind: "head", floor: Math.min(16, model.floors - 1), head: 0 })}>Rotate an attention head</button>
+      {model.id === "qwen" && <button className="btn" onClick={() => setFocus({ kind: "bits" })}>Weight precision: {chips.bits ?? 4} bits</button>}
+    </div>
+    <p className="note">Model changes apply to every sample. Each question is tested independently, with its original answer alongside. Restoring the model brings back the original answers.</p>
+  </section>;
+}
+
+export function PartControls({ part, disabled, onClose }: { part: Part; disabled: boolean; onClose: () => void }) {
   const chips = useStore((s) => s.chips);
   const c = chosen(useStore((s) => s));
   const view = useStore((s) => s.view);

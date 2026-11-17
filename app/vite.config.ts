@@ -55,6 +55,7 @@ export default defineConfig(({ command }) => ({
   base: command === "build" ? "/rewire/" : "/",
   plugins: [react(), localWeights()],
   worker: { format: "es" },
-  build: { target: "es2022", sourcemap: true },
+  // Three.js arrives in its own chunk, fetched only when a visitor opens the 3D view.
+  build: { target: "es2022", sourcemap: true, chunkSizeWarningLimit: 700 },
   server: { port: 5178 },
 }));

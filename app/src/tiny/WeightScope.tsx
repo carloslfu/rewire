@@ -3,6 +3,7 @@ import { layout, TINY } from "@rewire/tiny/src/config.ts";
 import { VOCAB } from "@rewire/tiny/src/data.ts";
 import { weightStats } from "@rewire/tiny/src/lab.ts";
 import { Strip } from "../ui/Strip.tsx";
+import { ViewToggle } from "../stage/ViewToggle.tsx";
 
 const tensors = layout({ ...TINY, vocab: VOCAB }).tensors;
 
@@ -21,7 +22,7 @@ export function WeightScope({ params, reference, step, running, mutated }: {
     return v;
   }, [params, reference, tensor, difference]);
   return <div className="weight-scope">
-    <div className="scope-title"><div><p className="eyebrow">Live weights</p><h2>{mutated ? "Under the knife" : running ? "A brain taking shape" : params ? "Your specimen" : "Waiting for its first lesson"}</h2></div><span className="num">{step.toLocaleString()} steps</span></div>
+    <div className="scope-title"><div><p className="eyebrow">Live weights</p><h2>{mutated ? "Under the knife" : running ? "A brain taking shape" : params ? "Your specimen" : "Waiting for its first lesson"}</h2></div><div className="scope-title-actions"><ViewToggle /><span className="num">{step.toLocaleString()} steps</span></div></div>
     <p className="note">4 transformer layers · {layout({ ...TINY, vocab: VOCAB }).total.toLocaleString()} trainable numbers</p>
     <div className="scope-settings"><label htmlFor="weight-matrix">Matrix</label><select id="weight-matrix" value={selected} onChange={(e) => setSelected(e.target.value)}>
       {tensors.filter((t) => t.shape.length === 2).map((t) => <option value={t.name} key={t.name}>{t.name === "dict" ? "Letter embeddings" : `Layer ${Number(t.name[1]) + 1} · ${t.name.split(".")[1]}`}</option>)}

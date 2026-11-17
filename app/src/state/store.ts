@@ -42,6 +42,10 @@ export interface State {
   focus: Focus;
   /** Tower lighting: each part's push, or changed minus normal on the same words. */
   view: "push" | "difference";
+  /** Which instrument the benches show: the flat diagrams or the 3D model. Kept for the visit only. */
+  scopeView: "2d" | "3d";
+  /** False once this browser has failed to draw the 3D model; the benches then stay in 2D. */
+  stage3d: boolean;
   temperature: number;
   seed: number;
   /** Editable text prepared by an example or typed by the visitor. */
@@ -87,6 +91,8 @@ export const initial: State = {
   follow: true,
   focus: { kind: "word" },
   view: "push",
+  scopeView: "2d",
+  stage3d: true,
   temperature: 0.7,
   seed: 11,
   draft: "",
@@ -126,7 +132,9 @@ export class Store {
 export const store = new Store(initial);
 
 export function useStore<T>(sel: (s: State) => T): T {
-  return useSyncExternalStore(store.subscribe, () => sel(store.get()));
+  const read = () => sel(store.get());
+  // The same snapshot serves rendering to a string, which the component tests use.
+  return useSyncExternalStore(store.subscribe, read, read);
 }
 
 /** Replace one turn immutably. */

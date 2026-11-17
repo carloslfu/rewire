@@ -18,6 +18,9 @@ jax-js (@jax-js/jax 0.1.25), which trains the tiny model
 React and React DOM 19
   Copyright (c) Meta Platforms, Inc. and affiliates. License: MIT
 
+three.js 0.187.0, which draws the 3D model view
+  Copyright (c) 2010-2026 three.js authors. License: MIT
+
 Built-in training texts
   Alice's Adventures in Wonderland (Lewis Carroll), Pride and Prejudice (Jane Austen) and Shakespeare's
   Sonnets, from Project Gutenberg eBooks #11, #1342 and #1041. Public domain in the United States; the
@@ -26,3 +29,5 @@ Built-in training texts
 Lessons, not code
   Transformer Explainer (Georgia Tech Polo Club) showed that a guided path and flow drawings help people
   most; Rewire learned from it and does not use its code.
+  LLM Visualization (Brendan Bycroft) showed the value of walking through a model's real architecture in
+  three dimensions; Rewire's 3D view is its own design and does not use its code.

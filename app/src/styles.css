@@ -682,3 +682,147 @@ html:has(dialog[open]) { overflow: hidden; }
   .top { flex-wrap: wrap; gap: 0; }
   .top-actions { width: 100%; justify-content: space-between; margin-left: 0; }
 }
+
+/* ---- The 3D model: one large stage framed by plain controls. Three.js draws only the canvas. ---- */
+.scope-title-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.view-toggle { flex-shrink: 0; }
+.view-toggle button { min-width: 38px; }
+.training-lab .lab-scope.stage-scope { padding: 0; overflow: hidden; }
+.stage-bench { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; background: var(--panel); }
+.stage-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px 4px; }
+.stage-title { min-width: 0; }
+.stage-title h2 { font-size: 21px; }
+.stage-title .eyebrow { margin-bottom: 2px; }
+.stage-head-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.stage-head-actions .btn, .stage-status .btn { font-size: 12px; min-height: 30px; padding: 4px 8px; }
+.stage-status { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 0 20px 8px; font-size: 11px; color: var(--muted); min-height: 30px; }
+.stage-status .btn { flex-shrink: 0; margin-left: auto; }
+.stage-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.stage-view { position: relative; flex: 1 1 0; min-height: 240px; overflow: hidden; border-block: 1px solid var(--line); background: var(--bg); touch-action: none; }
+.stage-view:focus-visible { outline-offset: -3px; }
+.stage-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.stage-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+/* Labels are positioned by the stage, which keeps them inside the view and apart from each other. */
+.stage-label { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11px; line-height: 1.25; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stage-label.layer { font-size: 10px; color: var(--faint); }
+.stage-label.caption { font-weight: 600; color: var(--fg); }
+.stage-label.token { font-family: var(--mono); font-size: 10px; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+.stage-label.bar { font-family: var(--mono); font-size: 10px; }
+.stage-label.plate { padding: 1px 5px; font-size: 10px; color: var(--fg); background: color-mix(in oklab, var(--panel) 82%, transparent); border-radius: 3px; }
+.stage-label.current { padding: 1px 5px; color: var(--fg); font-weight: 600; background: color-mix(in oklab, var(--panel) 86%, transparent); border-radius: 3px; }
+.stage-label.message { width: 200px; white-space: normal; text-align: center; font-size: 12px; padding: 9px 11px; color: var(--muted); background: var(--panel); border: 1px dashed var(--line); border-radius: 6px; }
+.stage-top { position: absolute; top: 10px; left: 12px; right: 12px; display: grid; gap: 6px; justify-items: start; pointer-events: none; }
+.stage-toolbar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 10px; width: 100%; }
+.stage-toolbar > * { pointer-events: auto; }
+.stage-toolbar .seg button { min-height: 32px; }
+.stage-resets { display: flex; gap: 6px; }
+.stage-resets .btn { font-size: 12px; min-height: 32px; padding: 4px 10px; }
+.stage-hint { max-width: min(100%, 380px); padding: 5px 8px; font-size: 12px; line-height: 1.4; color: var(--muted); background: color-mix(in oklab, var(--panel) 88%, transparent); border-radius: 6px; }
+.stage-hint strong { color: var(--fg); font-weight: 600; }
+.stage-tip { position: absolute; left: 0; top: 0; z-index: 2; max-width: 260px; padding: 6px 9px; font-size: 12px; line-height: 1.4; white-space: pre-line; color: var(--bg); background: var(--fg); border-radius: 6px; pointer-events: none; }
+.stage-state { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; font-size: 13px; color: var(--muted); background: color-mix(in oklab, var(--bg) 90%, transparent); }
+.stage-state .row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.lab-scope > .stage-state { position: static; height: 100%; }
+.stage-lower { flex: 0 1 auto; max-height: 44%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.stage-controls { padding: 8px 20px 4px; }
+.stage-picker { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.stage-picker label { color: var(--muted); }
+.stage-picker select, .stage-speed select, .stage-sample select { min-width: 0; max-width: 100%; padding: 5px 8px; font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; }
+.stage-picker select { flex: 0 1 190px; }
+.stage-transport { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; }
+.stage-transport > .note { margin-top: 4px; font-size: 11px; }
+.stage-transport > .seg { margin-top: 8px; }
+.stage-transport .training-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.stage-transport .training-actions .num { margin-left: auto; color: var(--muted); }
+.stage-transport .training-status { min-height: 0; margin-top: 6px; }
+.stage-transport .lesson-loss svg { height: 64px; margin-top: 8px; }
+.stage-token { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.stage-token .token-navigation strong { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.stage-token .token-navigation .note { margin-left: 4px; font-size: 11px; }
+.stage-play { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
+.stage-play .btn { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+.stage-play input[type="range"] { flex: 1 1 110px; min-width: 90px; min-height: 28px; accent-color: var(--fg); }
+.stage-speed { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.stage-play .linkish { font-size: 12px; white-space: nowrap; }
+.stage-readout { margin-top: 6px; }
+.stage-side { padding: 0 20px 18px; }
+.stage-side > * + * { border-top: 1px solid var(--line); }
+.stage-side .scope-part { padding: 12px 0 4px; border-top: 0; }
+.stage-side .replay-status { margin: 0; padding: 10px 0; border-bottom: 0; }
+.stage-side .learned-control { margin: 0; border-bottom: 0; }
+.stage-info { padding: 12px 0; }
+.stage-info h3 { font-size: 14px; }
+.stage-info > .note, .stage-side > .note { margin-top: 6px; font-size: 12px; }
+.stage-side > .note { padding: 8px 0 10px; border-top: 0; }
+.stage-info .weight-metrics { margin: 12px 0; padding: 12px 0; }
+.stage-info .weight-metrics dd { font-size: 14px; }
+.stage-info .damage-strength { margin: 10px 0; }
+.stage-part-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0 4px; }
+.stage-part-actions .btn { font-size: 12px; min-height: 32px; padding: 5px 10px; }
+.stage-side .stage-part-actions { border-top: 0; }
+.stage-real { padding: 10px 0 0; font-size: 12px; }
+.stage-real summary { color: var(--muted); }
+.stage-real p { margin-top: 8px; }
+.stage-question { display: grid; gap: 12px; align-content: start; }
+.stage-question h3 { font-size: 15px; }
+.stage-question .reply .text { font-size: 16px; line-height: 1.55; letter-spacing: 0; }
+.stage-question .chips { margin: 0; }
+.stage-question .devicebar { margin-top: 0; }
+.stage-question .probe-input { margin: 0; }
+.stage-question .sample { font: 13px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; padding: 10px; background: var(--soft); border-left: 2px solid var(--line); }
+.stage-asked { font-weight: 500; overflow-wrap: anywhere; }
+.stage-sample { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.stage-sample select { flex: 1; }
+.stage-examples { display: grid; gap: 8px; margin: 0; padding-left: 20px; font-size: 13px; }
+.stage-examples li > span { display: block; overflow-wrap: anywhere; }
+
+/* Full view: the same stage with the whole window, question on the left, the selected part on the right. */
+html:has(.stage-bench.expanded) { overflow: hidden; }
+/* The scope panel is sticky, so it is its own stacking context: lift the panel itself above the page header. */
+.lab-scope.stage-raised, .lab-scope:has(.stage-bench.expanded) { z-index: 40; }
+.stage-bench.expanded { position: fixed; inset: 0; z-index: 40; height: auto; background: var(--bg); }
+.stage-bench.expanded .stage-head { padding: 14px 28px 4px; }
+.stage-bench.expanded .stage-status { padding: 0 28px 10px; font-size: 12px; }
+.stage-bench.expanded .stage-main { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr) minmax(280px, 380px); grid-template-rows: minmax(0, 1fr) auto; border-top: 1px solid var(--line); }
+.stage-bench.expanded .stage-rail { grid-column: 1; grid-row: 1 / -1; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; border-right: 1px solid var(--line); background: var(--panel); }
+.stage-bench.expanded .stage-view { grid-column: 2; grid-row: 1; border-block: 0; }
+.stage-bench.expanded .stage-lower { display: contents; }
+.stage-bench.expanded .stage-controls { grid-column: 2; grid-row: 2; padding: 10px 24px 14px; border-top: 1px solid var(--line); background: var(--panel); }
+.stage-bench.expanded .stage-side { grid-column: 3; grid-row: 1 / -1; overflow-y: auto; overscroll-behavior: contain; padding: 8px 24px 24px; border-left: 1px solid var(--line); background: var(--panel); }
+.stage-bench.expanded:not(:has(.stage-rail)) .stage-main { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); }
+.stage-bench.expanded:not(:has(.stage-rail)) .stage-view, .stage-bench.expanded:not(:has(.stage-rail)) .stage-controls { grid-column: 1; }
+.stage-bench.expanded:not(:has(.stage-rail)) .stage-side { grid-column: 2; }
+@media (max-width: 1180px) {
+  .stage-bench.expanded .stage-main { grid-template-columns: minmax(230px, 280px) minmax(0, 1fr) minmax(250px, 310px); }
+}
+
+/* Phone: the model sheet scrolls as one page, with the stage at a fixed comfortable height. */
+@media (max-width: 900px), (max-width: 1100px) and (max-height: 500px) {
+  .mobile-model #training-scope.stage-scope, .mobile-model #lesson-scope.stage-scope { padding: 0; }
+  .mobile-model .stage-bench { height: 100%; overflow-y: auto; overscroll-behavior: contain; }
+  .mobile-model .stage-head { padding: 10px max(16px, env(safe-area-inset-right)) 2px max(16px, env(safe-area-inset-left)); }
+  .mobile-model .stage-title h2 { font-size: 18px; }
+  .mobile-model .stage-status { padding-inline: max(16px, env(safe-area-inset-left)); font-size: 12px; }
+  .mobile-model .stage-main { flex: none; }
+  .mobile-model .stage-view { flex: none; height: clamp(280px, 54dvh, 520px); }
+  .mobile-model .stage-lower { max-height: none; overflow: visible; }
+  .mobile-model .stage-controls, .mobile-model .stage-side { padding-inline: max(16px, env(safe-area-inset-left)); }
+  .mobile-model .stage-side { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+  .mobile-model .stage-rail { order: 3; padding: 4px max(16px, env(safe-area-inset-left)) 18px; border-top: 1px solid var(--line); }
+  .mobile-model .stage-rail details > summary { font-size: 14px; }
+  .mobile-model .stage-rail details[open] > summary { margin-bottom: 12px; }
+  .stage-hint { font-size: 11px; }
+  .stage-top { top: 8px; left: 8px; right: 8px; }
+  .stage-toolbar .seg button, .stage-resets .btn { min-height: 40px; }
+  .stage-picker select, .stage-speed select, .stage-sample select { min-height: 44px; }
+  .stage-play .btn, .stage-part-actions .btn { min-height: 44px; }
+  .stage-label.message { width: 160px; }
+}
+@media (max-width: 380px) {
+  .stage-resets .btn { padding-inline: 7px; }
+  .stage-token .token-navigation { flex-wrap: wrap; width: 100%; }
+  .stage-token .token-navigation strong { flex-shrink: 0; }
+  .stage-token .token-navigation .note { flex-basis: 100%; margin-left: 0; }
+}
+#chat-scope > .stage-state, #lesson-scope > .stage-state, #training-scope > .stage-state { position: static; min-height: 240px; }
+.mobile-model .stage-side .scope-part { max-height: none; overflow: visible; padding: 12px 0 4px; }

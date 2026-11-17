@@ -2,11 +2,13 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-11-04T19:10:47.995460Z
+updated: 2026-11-17T03:27:39.924203Z
 ---
 
 # records/run
 
+- [[records/run/2026/11/2026-11-16-3d-chrome]] — Final release gate and live Chrome evidence for the interactive 3D workbench
+- [[records/run/2026/11/2026-11-16-3d-model-view]] — 3D model view release gate, new suite listing and bundle sizes
 - [[records/run/2026/11/2026-11-04-unicode-decoding]] — Unicode token rendering release checks and Chrome observations
 - [[records/run/2026/10/2026-10-28-independent-samples]] — Independent sample lifecycle, browser observations and release build
 - [[records/run/2026/10/2026-10-28-evil-questions]] — Screen 12 questions and recheck two at evil strength 0.2

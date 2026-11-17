@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useMemo, useRef, useState } from "react";
 import { initialLesson, type LessonWeights } from "@rewire/engine/src/lora.ts";
 import { applyChips, liveEngine, stopReply } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
@@ -8,6 +8,9 @@ import { Strip } from "../ui/Strip.tsx";
 import { useNarrow } from "../ui/useNarrow.ts";
 import { generalChecks, lessonChecks, promptKey, starters, validateExamples, type Example, type LessonCheck } from "./lessons.ts";
 import type { LessonResult, ProbeResult } from "./types.ts";
+import { ViewToggle } from "../stage/ViewToggle.tsx";
+
+const TeachStage = lazy(() => import("../stage/TeachStage.tsx"));
 
 interface TestRow extends LessonCheck { before?:ProbeResult; after?:ProbeResult; seen:boolean }
 interface Entry extends Example { id:number }
@@ -19,6 +22,7 @@ const kindLabel={taught:"From your examples",challenge:"Your separate test",gene
 export default function TeachView() {
   const active=useStore(s=>s.teach),busy=useStore(s=>s.teachingBusy),device=useStore(s=>s.device);
   const revision=useStore(s=>s.lessonRevision),narrow=useNarrow();
+  const view3d=useStore(s=>s.scopeView==="3d"&&s.stage3d);
   const nextId=useRef(12);
   const [entries,setEntries]=useState<Entry[]>(starters[0].examples.map((e,id)=>({...e,id})));
   const [prompt,setPrompt]=useState(starters[0].tests[0].prompt);
@@ -112,7 +116,11 @@ export default function TeachView() {
     requestAnimationFrame(()=>{const fields=editor.current?.querySelectorAll<HTMLTextAreaElement>("textarea");if(fields?.length)fields[Math.min(index*2,fields.length-2)]?.focus();});};
   const add=()=>{const id=nextId.current++;setError("");setEntries(es=>[...es,{id,prompt:"",answer:""}]);
     requestAnimationFrame(()=>{const fields=editor.current?.querySelectorAll<HTMLTextAreaElement>("textarea");fields?.[fields.length-2]?.focus();});};
-  const visualizer=<LessonScope weights={weights} step={step} running={busy&&phase==="training"} losses={losses} run={run} />;
+  // The lesson's state lives here, so switching between the flat map and the 3D model keeps it.
+  const visualizer=view3d?<Suspense fallback={<p className="stage-state" role="status">Opening the 3D model…</p>}>
+    <TeachStage weights={weights} reference={reference} step={step} running={busy&&phase==="training"} losses={losses} run={run} examples={examples} active={active}
+      controls={{busy,phase,ready,validation,status,error,revision,train:c=>void train(c),halt,dismantle:()=>void dismantle()}} /></Suspense>
+    :<LessonScope weights={weights} step={step} running={busy&&phase==="training"} losses={losses} run={run} />;
   return <div className="lab-layout training-lab teach-lab">
     <main className="workspace training-workspace" id="teaching">
       <div className="lab-heading"><p className="eyebrow">Teach the same model · Qwen3-0.6B</p>
@@ -182,8 +190,8 @@ export default function TeachView() {
         <p className="note">This is a limited form of fine-tuning. It can memorize, generalize, forget, or fail. A lower training error does not prove it learned the rule. Weights and examples last for this visit.</p>
         <button className="linkish" disabled={busy} onClick={()=>store.set({teach:false,tiny:true})}>Want to train every weight from scratch? Open Grow</button></section>
     </main>
-    {!narrow&&<aside className="lab-scope" id="lesson-scope" aria-label="Live learned weights">{visualizer}</aside>}
-    {narrow&&<Modal open={scope&&active} onClose={()=>setScope(false)} title="Learned weights" className="mobile-model"><div id="lesson-scope">{visualizer}</div></Modal>}
+    {!narrow&&<aside className={`lab-scope${view3d?" stage-scope":""}`} id="lesson-scope" aria-label="Live learned weights">{visualizer}</aside>}
+    {narrow&&<Modal open={scope&&active} onClose={()=>setScope(false)} title="Learned weights" className="mobile-model"><div id="lesson-scope" className={view3d?"stage-scope":undefined}>{visualizer}</div></Modal>}
   </div>;
 }
 
@@ -197,7 +205,7 @@ function LessonScope({weights,step,running,losses,run}:{weights:LessonWeights|nu
   },[weights]);
   const maxLoss=Math.max(1,...losses.map(p=>p.loss));
   return <div className="weight-scope lesson-scope">
-    <div className="scope-title"><div><p className="eyebrow">Same Qwen · live training</p><h2>{running?"A lesson taking shape":weights?"What you taught it":"Where learning happens"}</h2></div><span className="num">{step} steps</span></div>
+    <div className="scope-title"><div><p className="eyebrow">Same Qwen · live training</p><h2>{running?"A lesson taking shape":weights?"What you taught it":"Where learning happens"}</h2></div><div className="scope-title-actions"><ViewToggle /><span className="num">{step} steps</span></div></div>
     <div className="lesson-location"><span>Layers 1–27 <small>Frozen</small></span><span>Layer 28 · MLP <small>Learned addition: B × A</small></span><span>Next token <small>Same vocabulary</small></span></div>
     <p className="note">32,768 trainable parameters. The learned addition runs inside the final MLP.</p>
     <div className="scope-settings"><label htmlFor="lesson-matrix">Inspect</label><select id="lesson-matrix" value={matrix} onChange={e=>setMatrix(e.target.value as "a"|"b")}><option value="b">Matrix B · 1,024 × 8</option><option value="a">Matrix A · 8 × 3,072</option></select></div>

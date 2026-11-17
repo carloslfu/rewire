@@ -58,6 +58,69 @@ fine-tune Qwen. The tiny model trains on 64-letter windows and works best with s
 Every reply and inspection is computed locally. Neither model is a reliable
 source of facts. The visualizer reports measured contributions, not a complete causal explanation.
 
+## The model in 3D
+
+Every bench has a **2D / 3D** switch above its visualizer. 2D is the flat diagram described above and
+stays the default. 3D draws the same model as a specimen you can turn, zoom and take apart: one deck
+per layer, its attention heads seated in pairs on the keys and values they share, its MLP, and the two
+points where their output joins the residual stream, with the dictionary below and the output above.
+**Full view** gives the stage the whole window, with the question and replies (or the training
+controls) on the left and the selected part's controls on the right. The page behind it is inert until
+the full view is closed. Three.js loads only when the 3D
+view is opened. If the browser cannot create a WebGL context, the benches stay in 2D.
+
+Three tools keep looking, arranging and changing apart:
+
+- **Explore** turns and zooms the model and selects a part. Its existing controls open beside the stage.
+- **Grab** drags heads, MLPs and whole decks. This rearranges the drawing only. Reset layout puts
+  everything back and never touches the model.
+- **Punch** changes the model. In Dismantle it sets the clicked head, MLP or layer to zero through the
+  same change the Off control writes, once per click, and your samples update. Punching it again puts
+  it back, and Restore model removes every change. In Grow it scrambles that layer's real weights at
+  the chosen strength, starting from the intact copy. Teach has no Punch; it hands the taught model to
+  Dismantle.
+
+A selected part has its own restore button, and it undoes only what belongs to that part. Restore this
+head clears the head's strength and direction change. Restore this MLP clears its strength and the
+additions to its neurons. Restore this layer and its parts clears the layer's strength, the weights
+zeroed in it, a concept pushed at it, and the changes on every head and the MLP on its deck. Other
+layers, weight precision, dictionary swaps, hidden words and learned weights are never touched by
+these; they have their own controls, and Restore model removes everything.
+
+What is measured and what is drawn:
+
+- The number of layers, heads and key/value groups, and which heads share a group, come from the
+  model's configuration. The shapes, sizes and positions are a drawing. A model has no physical form.
+  The dictionary tiles and MLP fins stand in for 151,669 rows and 3,072 neurons and are not drawn one
+  by one.
+- In Dismantle, colors are the selected token's direct pushes, the same numbers as the 2D tower.
+  Selecting a layer opens the tower above it and stands that layer's measured values there as plates,
+  in computation order, from the same inspection pass the detail panel uses: the stream in, its
+  normalization, the query, key and value projections, the normalized and position-rotated queries and
+  keys, the scores, attention, mixed values, the combined heads and the addition to the stream, then
+  the MLP's normalization, gate, up projection, neurons, down projection and the stream out. During a
+  replay the plates of the selected layer come up in that order. Hover a tile to read its number. With a head selected, arcs show its measured attention over the context. The bars on top are
+  the real candidate probabilities.
+- Play replays one token's measured values in the order the architecture computes them: the token
+  read, each layer's attention then its MLP, then the choice. It is a slowed illustration with step,
+  scrub and speed controls. It does not show how long any step took.
+- Teach shows the adapter's actual A and B matrices and the size of each of its eight ranks, refreshed
+  every 10 steps. Frozen layers are drawn pale. No activations are measured during teaching, so
+  nothing else lights up.
+- Grow colors each part by its own slice of the 800,256 parameters: a head owns its rows of the query
+  matrix and its columns of the output matrix, and a pair's base owns their shared key and value rows.
+  Selecting a layer shows its real weight matrices or their change since the start.
+
+Large tensors are reduced for display by keeping, in each block of neighboring cells, the one with the
+largest magnitude. The readout names the cell that value was read from and the cells the tile stands
+for. A measurement that arrives after
+the token, model or changes have moved on is dropped. With the model focused, arrow keys move between
+parts, Enter looks closer, P punches, Shift with the arrows turns the model, plus and minus zoom, and
+0 resets the view. The same selection is available from two ordinary menus under the stage. With
+reduced motion set, parts move without springs and the replay advances in whole steps, including when
+the preference changes while the view is open. Labels are kept inside the stage and clear of the
+toolbar; where two would touch, the less important one is left out.
+
 ## Love and evil candidates
 
 Choose an example above the chat: **France’s capital**, **Love and attachment**, or
@@ -166,7 +229,8 @@ semantic opposite.
 
 ## Layout
 
-- `app/` the page: React, Vite and TypeScript, built as static files
+- `app/` the page: React, Vite and TypeScript, built as static files. `app/src/stage/` is the 3D view:
+  pure modules for the architecture, replay, interventions and data, and `scene/` for Three.js
 - `engine/` the WebGPU engine (TypeScript and WGSL): 4-bit weights unpacked in the kernels, math in 32-bit
   floats, a change table every kernel reads, direct pushes and an inspection pass for any word
 - `tiny/` the tiny model in jax-js (about 0.8 million numbers), handed to the engine's 32-bit path
@@ -250,6 +314,9 @@ devices receive an unavailable message rather than a simulated answer.
 - [Transformer Explainer](https://poloclub.github.io/transformer-explainer/) for the lessons on guided paths
   and flow drawings.
 - Tokenizers.js from Transformers.js reads Qwen's tokenizer.
+- [three.js](https://threejs.org/) draws the 3D view.
+- [LLM Visualization](https://bbycroft.net/llm) by Brendan Bycroft for showing how much an architectural
+  walk-through in 3D can explain.
 
 Notices for every dependency and text are in [app/public/licenses.txt](app/public/licenses.txt).
 

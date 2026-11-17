@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/measurements
-updated: 2026-11-04T19:10:48.013170Z
+updated: 2026-11-17T03:27:39.985793Z
 ---
 
 # records/measurements
 
+- [[records/measurements/2026-11-16-3d-model-view]] — 3D model view passes the release gate and live Chrome inference, training, manipulation and recovery checks
 - [[records/measurements/2026-11-04-unicode-decoding]] — Unicode replies preserve split characters and inspectable token identities
 - [[records/measurements/2026-10-28-independent-samples]] — Independent questions preserve neighboring answers and reproduce all three demonstrations
 - [[records/measurements/2026-10-28-evil-questions]] — World and power questions show clearer changes at strength 0.2

@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/decisions
-updated: 2026-11-04T19:10:48.029528Z
+updated: 2026-11-17T03:27:40.015659Z
 ---
 
 # records/decisions
 
+- [[records/decisions/2026-11-16-3d-model-view]] — Add a 3D specimen view beside the 2D diagrams, with separate tools for looking, arranging and changing
 - [[records/decisions/2026-11-04-lossless-token-display]] — Preserve token bytes and group characters for display
 - [[records/decisions/2026-10-28-independent-samples]] — Use independent editable samples with a shared composer and manual model controls
 - [[records/decisions/2026-10-28-evil-example-question]] — Lead the evil example with the world question at strength 0.2
