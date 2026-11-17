@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { encodeTable, type ChangeSpec } from "../src/changes.ts";
-import type { ModelConfig } from "../src/config.ts";
+import { MAX_HIDDEN, MAX_SWAPS, MAX_ZEROED, type ModelConfig } from "../src/config.ts";
 import { download, getDevice, upload } from "../src/gpu.ts";
 import { Model, type Weights } from "../src/model.ts";
 import { sample } from "../src/sampler.ts";
@@ -81,6 +81,10 @@ describe("engine against the CPU reference (synthetic model)", () => {
     ["bits 2", { bits: 2 }],
     ["zeroed", { zeroed: [{ floor: 0, tensor: "down", row: 5, col: 9 }, { floor: 1, tensor: "o", row: 7, col: 40 }, { floor: 1, tensor: "gate", row: 3, col: 2 }] }],
     ["concept", { concept: { id: "test", floor: 1, strength: 1.5 } }],
+    // The change table at its limits: every listed entry is applied by the kernels, to the last slot.
+    ["sixteen swaps, the table's limit", { swaps: Array.from({ length: MAX_SWAPS }, (_, i): [number, number] => [i === 0 ? 17 : i === 1 ? 250 : 100 + i, 300 + i]) }],
+    ["sixteen hidden words, the table's limit", { hidden: Array.from({ length: MAX_HIDDEN }, (_, i) => ({ key: 1 + (i % 8), from: i < 8 ? 2 + i : 10 })) }],
+    ["eight zeroed weights, the table's limit", { zeroed: Array.from({ length: MAX_ZEROED }, (_, i) => ({ floor: i % 2, tensor: (["down", "o", "gate", "up"] as const)[i % 4], row: 3 + i, col: 5 + 2 * i })) }],
   ];
   for (const [name, spec] of specs) {
     it(`matches with ${name}`, async () => {

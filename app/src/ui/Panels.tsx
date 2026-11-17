@@ -5,7 +5,8 @@ import { applyChips, chipsWith, checkDevice, openStep, pauseDownload, send, setF
 import { store, useStore } from "../state/store.ts";
 import { type StepData, stepCopy } from "../path/steps.ts";
 import { S } from "../strings.ts";
-import { chips as chipDefs, multOf, withMult } from "./describe.ts";
+import { chips as chipDefs, multOf, sharedRead, withMult } from "./describe.ts";
+import { useEditBlocked } from "./useEditBlocked.ts";
 import { Knob } from "./Knob.tsx";
 import { Modal } from "./Modal.tsx";
 import { GuidedStep, SuggestedQuestions } from "./Examples.tsx";
@@ -148,8 +149,9 @@ function StepControlView({ st, disabled }: { st: StepData; disabled: boolean }) 
 export function Chips() {
   const spec = useStore((s) => s.chips);
   const turns = useStore((s) => s.turns);
-  const busy = useStore((s) => s.busy);
-  const defs = chipDefs(spec, turns[0]?.normal.read);
+  const busy = !!useEditBlocked();
+  // These chips stand for every sample, so a hidden word is named only where all samples have the same word.
+  const defs = chipDefs(spec, sharedRead(turns.map((t) => t.normal.read)));
   if (!defs.length) return null;
   return (
     <div className="chips" aria-label="Changes">
@@ -195,7 +197,7 @@ export function Composer() {
       </form>
       {full && <p className="note">Shorten the question or try another sample. Your other samples are unchanged.</p>}
       {replay && replay.status !== "running" && <p className="note">Retry the sample update or restore the originals before testing another question.</p>}
-      {model.id === "qwen" && <DeviceBar />}
+      <DeviceBar />
       {mode === "live" && <p className="composer-note">{model.id === "tiny" ? "Your trained model · continues text one letter at a time" : "Runs on your device · your messages stay here"}</p>}
     </div>
   );
@@ -207,6 +209,14 @@ export function DeviceBar() {
   const d = useStore((s) => s.device);
   const stored = useStore((s) => s.modelStored);
   const bench = useStore((s) => s.bench);
+  const tiny = useStore((s) => s.model.id === "tiny");
+  const live = useStore((s) => s.mode === "live");
+  // This line is Qwen's, and both models run in one worker. Beside a tiny model that is running it says
+  // nothing: not Qwen's download, and not a Qwen failure the tiny model was handed to a fresh worker to
+  // get away from (that error is still here, with Try again, on the way back to Qwen). Beside a tiny
+  // model that cannot run it says everything: the failure, and then each step of the retry that was
+  // asked for, with its progress and Pause, until the model is back.
+  if (tiny && live) return null;
   if (bench) return <pre className="devicebar" id="bench" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(bench, null, 1)}</pre>;
   const mb = (n: number) => Math.round(n / 1e6);
   switch (d.kind) {

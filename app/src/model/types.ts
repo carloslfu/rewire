@@ -67,6 +67,13 @@ export interface Reply {
   original?: Reply;
   /** Index of the picked word. */
   pickedAt?: number;
+  /**
+   * Which writing of this reply this is: a number no other writing has had. A pick replaces tokens
+   * already written and so gets a new one. Continue only adds tokens and keeps it, and Undo brings
+   * back the reply it restores with the number that reply had. Anything measured for a token is
+   * keyed on it, so it is never shown for the same token after other preceding tokens.
+   */
+  rev?: number;
 
 }
 

@@ -48,7 +48,10 @@ export class EngineClient {
   private version = 0;
   private stageOpen = false;
   private recovery: Promise<void> | null = null;
+  /** The worker stopped and cannot answer. Anything posted to it would wait forever. */
   private failed = false;
+  /** The worker was replaced for the tiny model alone: it does not hold Qwen until `load` runs again. */
+  private unloaded = false;
   onProgress?: (loaded: number, total: number) => void;
   /** Lossless token bytes and standalone labels that arrive with written words. */
   onPieces?: (pieces: [number, TokenPiece][]) => void;
@@ -86,6 +89,7 @@ export class EngineClient {
     this.w.terminate();
     this.startWorker();
     if (this.loaded) await this.call({ t: "load", ...this.loaded });
+    this.unloaded = false;
     if (this.lesson) await this.call({t:"lesson-install",weights:this.lesson});
     if (this.trained) await this.call({ t: "tiny", ...this.trained });
     await this.call({ t: "use", model: this.model });
@@ -130,7 +134,7 @@ export class EngineClient {
 
   private async ready<T>(msg: DistOmit<ToWorker, "id">, onTok?: (t: Tok) => void): Promise<T> {
     await this.recovery;
-    if (this.failed) throw new Error("The model could not recover. Retry loading the model.");
+    if (this.failed || (this.unloaded && this.model === "qwen")) throw new Error("The model could not recover. Retry loading the model.");
     return this.call(msg, onTok);
   }
 
@@ -146,9 +150,12 @@ export class EngineClient {
     if (replaced) { this.w.terminate(); this.startWorker(); this.failed = false; }
     this.loaded = { base, phone, expectedHash };
     const info = await this.call<{ manifestHash: string; contextCap: number; stored: boolean }>({ t: "load", ...this.loaded });
+    // A worker that was replaced for the tiny model alone may still be pointed at it.
+    const repoint = this.unloaded;
+    this.unloaded = false;
     if (this.lesson) await this.call({t:"lesson-install",weights:this.lesson});
     if (replaced && this.trained) await this.call({ t: "tiny", ...this.trained });
-    if (replaced && this.model === "tiny") await this.call({ t: "use", model: "tiny" });
+    if (replaced ? this.model === "tiny" : repoint) await this.call({ t: "use", model: this.model });
     this.setVersion(this.version);
     this.setStageOpen(this.stageOpen);
     return info;
@@ -180,7 +187,7 @@ export class EngineClient {
   }
   async trainLesson(examples:Example[],steps:number,lr:number,onProgress:(p:LessonUpdate)=>void,continueLesson=false):Promise<LessonResult> {
     await this.recovery;
-    if(this.failed)throw new Error("Reload the model before teaching it.");
+    if(this.failed||this.unloaded)throw new Error("Reload the model before teaching it.");
     return this.call({t:"lesson-train",examples,steps,lr,continueLesson},undefined,[],onProgress);
   }
   stopLesson() { this.w.postMessage({t:"lesson-stop",id:0} satisfies ToWorker); }
@@ -198,9 +205,14 @@ export class EngineClient {
   inspect(conv: ConvId, changes: ChangeSpec, tokens: number[], target: number): Promise<{ detail: FloorDetail; guesses: Cand[][] }> {
     return this.ready({ t: "inspect", conv, changes, tokens, target });
   }
-  /** Hands the trained tiny model to the engine (its 32-bit path). */
-  async loadTiny(params: Float32Array, config: TinyConfig): Promise<{ floors: number; heads: number }> {
+  /**
+   * Hands the trained tiny model to the engine (its 32-bit path). The tiny model needs nothing of
+   * Qwen's, so a worker that stopped is replaced here instead of being posted to: a message to a dead
+   * worker is never answered. Qwen stays unavailable in the new worker until it is loaded again.
+   */
+  async loadTiny(params: Float32Array, config: TinyConfig): Promise<{ floors: number; heads: number; contextCap?: number }> {
     await this.recovery;
+    if (this.failed) { this.w.terminate(); this.startWorker(); this.failed = false; this.unloaded = this.loaded !== null; }
     this.trained = { params: params.slice(), config };
     return this.call({ t: "tiny", params, config });
   }

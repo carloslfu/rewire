@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/decisions
-updated: 2026-11-17T17:23:56.696371Z
+updated: 2026-11-17T18:58:51.098007Z
 ---
 
 # records/decisions
 
+- [[records/decisions/2026-11-17-computation-identity-and-checkpoint-lineage]] — Measurements and restoration stay attached to their computation
 - [[records/decisions/2026-11-17-output-reveal-probabilities]] — Reveal measured model probabilities only at the replay output step
 - [[records/decisions/2026-11-17-replay-experience]] — Whole-answer replay with frame-driven steps and explicit controls
 - [[records/decisions/2026-11-17-follow-output]] — Consistent following and paused selection in both visualizers

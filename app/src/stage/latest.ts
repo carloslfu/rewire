@@ -32,7 +32,11 @@ export async function measure<T>(gate: Latest, key: string, job: () => Promise<T
   deliver(value === null ? { state: "unavailable", key } : { state: "ready", key, value });
 }
 
-/** Identity of a measurement: any change to the model, its changes, the sample or the token makes a new key. */
-export function measurementKey(p: { model: string; version: number; turn: number; side: string; index: number; token: number; length: number }): string {
-  return `${p.model}.${p.version}.${p.turn}.${p.side}.${p.index}.${p.token}.${p.length}`;
+/**
+ * Identity of a measurement: any change to the model, its changes, the sample or the token makes a new
+ * key. `mark` names the rewrite of the reply (see replyMark), so a token that comes back with the same
+ * id at the same position after a pick is still a different measurement.
+ */
+export function measurementKey(p: { model: string; version: number; turn: number; side: string; index: number; token: number; length: number; mark?: string }): string {
+  return `${p.model}.${p.version}.${p.turn}.${p.side}.${p.index}.${p.token}.${p.length}.${p.mark ?? ""}`;
 }

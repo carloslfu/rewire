@@ -58,6 +58,17 @@ export function runningPush(model: Shape, pushes: ArrayLike<number>): Float32Arr
   return out;
 }
 
+/**
+ * How many of one token's direct pushes are numbers, out of how many the model has. A sum is stated
+ * only when all of them are: a push that is missing or not a number makes the total unknown, not zero.
+ */
+export function pushCoverage(model: Shape, pushes: ArrayLike<number> | null | undefined): { measured: number; of: number; complete: boolean } {
+  const of = 1 + model.floors * (model.heads + 1);
+  let measured = 0;
+  if (pushes) for (let i = 0; i < of; i++) if (Number.isFinite(pushes[i])) measured++;
+  return { measured, of, complete: measured === of };
+}
+
 /** The running sum at time t, counting only completed beats. */
 export function pushSoFar(running: Float32Array, t: number | null): number {
   if (!running.length) return 0;

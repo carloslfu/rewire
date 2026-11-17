@@ -162,3 +162,41 @@ it("rechecks a failed worker before retrying automatic initialization", async ()
   loaded.finish("load", { manifestHash: "expected", contextCap: 1024, stored: true });
   await expect(loading).resolves.toHaveProperty("stored", true);
 });
+
+it("hands the tiny model to a fresh worker when the old one has stopped, instead of posting to a worker that never answers", async () => {
+  const client = new EngineClient(), failure = vi.fn(), first = MockWorker.workers[0];
+  client.onFailure = failure;
+  const load = client.load("https://weights/", false); await flush(); first.finish("load", { manifestHash: "h", contextCap: 1024, stored: true }); await load;
+  first.onerror!({ message: "Worker stopped" });
+  expect(failure).toHaveBeenCalledWith("Worker stopped");
+  // The tiny model needs nothing of Qwen's: it gets a worker that is alive, and the dead one is let go.
+  const handing = client.loadTiny(new Float32Array([1, 2]), { ...TINY, vocab: 97 }); await flush();
+  const fresh = MockWorker.workers[1];
+  expect(first.terminate).toHaveBeenCalledOnce();
+  expect(first.messages.some((m) => m.t === "tiny")).toBe(false);
+  expect(fresh.messages[0]).toMatchObject({ t: "tiny" });
+  fresh.finish("tiny", { floors: 4, heads: 4, contextCap: 512 });
+  await expect(handing).resolves.toEqual({ floors: 4, heads: 4, contextCap: 512 });
+  const use = client.use("tiny"); await flush(); fresh.finish("use"); await use;
+  // It writes and is inspected there.
+  const inspection = client.inspect(0, {}, [1, 2], 3); await flush();
+  fresh.finish("inspect", { detail: new Map(), guesses: [] });
+  await expect(inspection).resolves.toHaveProperty("guesses");
+
+  // Qwen is not in that worker. Asking for it fails at once and by name, and never reaches the worker.
+  await expect(client.use("qwen")).rejects.toThrow("could not recover");
+  await expect(client.inspect(0, {}, [1], 2)).rejects.toThrow("could not recover");
+  await expect(client.trainLesson([{ prompt: "Q", answer: "A" }], 80, 0.001, () => {})).rejects.toThrow("Reload the model");
+  expect(fresh.messages.filter((m) => m.t === "use")).toHaveLength(1);
+  // Try again loads it into the same worker, beside the tiny model, and Qwen works again.
+  const retry = client.load("https://weights/", false); await flush();
+  expect(MockWorker.workers).toHaveLength(2);
+  fresh.finish("load", { manifestHash: "h", contextCap: 1024, stored: true }); await flush();
+  // The worker was still pointed at the tiny model; the page asked for Qwen, so it is pointed back.
+  expect(fresh.messages.at(-1)).toMatchObject({ t: "use", model: "qwen" });
+  fresh.finish("use");
+  await expect(retry).resolves.toHaveProperty("contextCap", 1024);
+  const again = client.inspect(0, {}, [1], 2); await flush();
+  fresh.finish("inspect", { detail: new Map(), guesses: [] });
+  await expect(again).resolves.toHaveProperty("guesses");
+});

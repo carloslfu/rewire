@@ -5,12 +5,15 @@ import type { FloorDetail } from "../model/types.ts";
 import { chipsWith } from "../state/actions.ts";
 import { useStore } from "../state/store.ts";
 import { geometryKey } from "./describe.ts";
+import { useEditBlocked } from "./useEditBlocked.ts";
 import type { Chosen } from "./word.ts";
 
 export function HeadGeometry({ floor, head, detail, loading, chosen }: { floor: number; head: number; detail: FloorDetail | null; loading: boolean; chosen: Chosen | null }) {
   const id = useId();
   const model = useStore((s) => s.model);
-  const live = useStore((s) => s.mode === "live");
+  const ready = useStore((s) => s.mode === "live");
+  // A transform is a change like any other: it waits for a reply being written to finish.
+  const live = !useEditBlocked();
   const chips = useStore((s) => s.chips);
   const current = chips.geometry?.find((g) => g.floor === floor && g.head === head);
   const kind = current?.kind ?? "none";
@@ -49,7 +52,7 @@ export function HeadGeometry({ floor, head, detail, loading, chosen }: { floor: 
         <option value="remove">Remove overlap</option><option value="shuffle">Scramble coordinates</option>
       </select>
     </label>
-    {!live && <p className="note">The model must be ready before a transformation can run.</p>}
+    {!live && <p className="note">{ready ? "Wait for the reply to finish, then change the transform." : "The model must be ready before a transformation can run."}</p>}
     {current && <>
       <label className="geometry-scope"><input type="checkbox" disabled={!live} checked={all} onChange={(e) => {
         if (e.target.checked) commit(current, true);

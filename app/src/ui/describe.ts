@@ -16,7 +16,16 @@ function conceptLabel(id: string) {
   return id;
 }
 
-export function chips(spec: ChangeSpec, readTokens?: number[]): ChipDef[] {
+/**
+ * The prompt tokens every sample has in common, by position. Samples share the system prompt and the
+ * template around the question and differ inside it, so only these can name a position for all of them.
+ */
+export function sharedRead(reads: number[][]): (number | undefined)[] {
+  const [first, ...rest] = reads;
+  return first ? first.map((id, i) => (rest.every((r) => r[i] === id) ? id : undefined)) : [];
+}
+
+export function chips(spec: ChangeSpec, readTokens?: (number | undefined)[]): ChipDef[] {
   const out: ChipDef[] = [];
   const copy = () => structuredClone(spec);
   if (spec.lesson) out.push({ key: "lesson", label: "Learned weights in layer 28 MLP", without: () => ({ ...copy(), lesson: undefined }) });
@@ -57,8 +66,10 @@ export function chips(spec: ChangeSpec, readTokens?: number[]): ChipDef[] {
       without: () => ({ ...copy(), swaps: spec.swaps!.filter((_, j) => j !== i) }) });
   }
   for (const [i, h] of (spec.hidden ?? []).entries()) {
-    const w = readTokens?.[h.key] !== undefined ? word(readTokens[h.key]) : `position ${h.key}`;
-    const label = h.key === 0 ? `the start marker hidden${h.from > 1 ? ` from word ${h.from + 1} on` : ""}` : S.chip.hidden(w);
+    // A hide is by position. It is named by its word only where that word is known for the reply or
+    // samples being described; otherwise by the position, which is what is actually hidden.
+    const id = readTokens?.[h.key];
+    const label = h.key === 0 ? `the start marker hidden${h.from > 1 ? ` from word ${h.from + 1} on` : ""}` : id !== undefined ? S.chip.hidden(word(id)) : S.chip.hiddenAt(h.key);
     out.push({ key: `x${h.key}.${h.from}`, label, without: () => ({ ...copy(), hidden: spec.hidden!.filter((_, j) => j !== i) }) });
   }
   if (spec.concept && spec.concept.strength !== 0) {
@@ -75,7 +86,7 @@ export function chips(spec: ChangeSpec, readTokens?: number[]): ChipDef[] {
   return out;
 }
 
-export function describe(spec: ChangeSpec, readTokens?: number[]): string {
+export function describe(spec: ChangeSpec, readTokens?: (number | undefined)[]): string {
   const c = chips(spec, readTokens).map((x) => x.label);
   if (!c.length) return "no changes";
   if (c.length === 1) return c[0];

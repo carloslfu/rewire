@@ -1,10 +1,10 @@
 // Live inference, interventions and independent sample lifecycle. No prerecorded output path.
-import { isNeutral } from "@rewire/engine/src/changes.ts";
+import { isNeutral, specLimit } from "@rewire/engine/src/changes.ts";
 import type { EngineClient } from "../live/engine.ts";
 import type { Cand, ChangeSpec, FloorDetail, Focus, Reply, Side, Tok, Turn, WordRef } from "../model/types.ts";
 import { loadPath, type PathData, type StepData, stepChanges } from "../path/steps.ts";
 import { S } from "../strings.ts";
-import { chosen, comparisonTarget, latestWord, setDims, settledSelection } from "../ui/word.ts";
+import { chosen, comparison, comparisonTarget, contextFull, latestWord, setDims, settledSelection } from "../ui/word.ts";
 import { encode, letter } from "@rewire/tiny/src/data.ts";
 import { TINY, type TinyConfig } from "@rewire/tiny/src/config.ts";
 import { QWEN_INFO, TINY_INFO } from "../model/info.ts";
@@ -80,8 +80,11 @@ function busy() {
   return t.some((x) => !x.normal.done || (x.changed && (!x.changed.done || x.changed.comparing)));
 }
 
+/** Counts writings of replies. Every new reply and every rewrite of one from a picked piece takes the next number. */
+let writings = 0;
+
 function emptyReply(changes: ChangeSpec, read: number[], source: Reply["source"]): Reply {
-  return { read, toks: [], ended: false, done: false, changes, source };
+  return { read, toks: [], ended: false, done: false, changes, source, rev: ++writings };
 }
 
 function patchReply(turn: number, side: Side, f: (r: Reply) => Reply) {
@@ -109,6 +112,14 @@ function pushTok(turn: number, side: Side, tok: Tok) {
 
 /** A new experiment: nothing selected, following again. Used by Clear, guided steps and model switches. */
 const FRESH_SELECTION = { word: null, follow: true, outputSample: null, view: "push" } as const;
+
+/**
+ * The visitor chose a token or a candidate themselves: following is paused, and the choice is
+ * recorded so that a 3D replay ending later does not turn following back on over it.
+ */
+function paused() {
+  return { follow: false, pauseRevision: store.get().pauseRevision + 1 } as const;
+}
 
 /** Settle the selected token and view on what exists now. The follow preference is never changed here. */
 export function settleSelection(near?: number) {
@@ -190,7 +201,7 @@ export async function stepAction(stop?: number) {
   if (c.kind === "guesses" || c.kind === "madeup") {
     const last = (s.turns[turn]?.normal.toks.map((t, i) => [151643, 151645].includes(t.id) ? -1 : i).filter((i) => i >= 0).at(-1)) ?? -1;
     if (last < 0) return;
-    store.set({ word: { turn, side: "normal", index: Math.min(c.index, last) }, follow: false, focus: c.kind === "guesses" ? { kind: "words-out" } : { kind: "word" }, stepTried: true, sheet: true, inspectView: "word" });
+    store.set({ word: { turn, side: "normal", index: Math.min(c.index, last) }, ...paused(), focus: c.kind === "guesses" ? { kind: "words-out" } : { kind: "word" }, stepTried: true, sheet: true, inspectView: "word" });
     return;
   }
   if (c.kind === "floors") {
@@ -213,6 +224,9 @@ export function chipsWith(f: (c: ChangeSpec) => ChangeSpec) {
 export async function applyChips(spec: ChangeSpec) {
   const s = store.get();
   if (s.mode !== "live" || !engine || (s.busy && !s.replay)) return;
+  // A change the model has no room for is refused before anything is shown as active.
+  const limit = specLimit(spec);
+  if (limit) { store.set({ error: limit, announce: limit }); return; }
   spec = structuredClone(spec);
   const version = s.version + 1;
   const visit = navigation;
@@ -507,7 +521,7 @@ export async function openTiny(params: Float32Array) {
     connectEngine(engine);
   }
   const cfg: TinyConfig = { ...TINY, vocab: TINY_INFO.vocab };
-  await engine.loadTiny(params.slice(), cfg);
+  const loaded = await engine.loadTiny(params.slice(), cfg);
   await engine.use("tiny");
   claim("normal");
   claim("changed");
@@ -515,20 +529,47 @@ export async function openTiny(params: Float32Array) {
   const s = store.get();
   store.set({ model: TINY_INFO, tiny: false, mode: "live", step: null, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, ...FRESH_SELECTION,
     focus: { kind: "word" }, qwenMode: s.model.id === "qwen" ? s.mode : s.qwenMode, busy: false, replay: null, full: false, error: null, sheet: false,
+    contextCaps: { ...s.contextCaps, tiny: loaded?.contextCap },
     // Replaces the "Stopped" left by the cancel above: nothing of this model was stopped.
     announce: S.tinyReady });
   engine.setVersion(store.get().version);
   setHash(null);
 }
 
+/**
+ * What can be said of Qwen right now, in the device line's own words. It is called ready only when it
+ * is: after a worker failure or while it is still loading, the announcement says that instead.
+ */
+function qwenStatus(mode: ReturnType<typeof store.get>["mode"], d: DeviceState): string {
+  const mb = (n: number) => Math.round(n / 1e6);
+  switch (d.kind) {
+    case "ready": return mode === "live" ? S.ready : S.qwenNotLoaded;
+    case "checking": return S.checking;
+    case "no-webgpu": return S.noWebgpu;
+    case "downloading": return S.downloading(mb(d.loaded), mb(d.total));
+    case "loading": return S.loadingModel;
+    case "recovering": return S.recovering;
+    case "error": return `${S.loadError(d.message)} ${S.retryToLoad}`;
+  }
+}
+
 export async function backToQwen(n: number | null = null) {
   stopReply();
   claim("normal");
   claim("changed");
-  await engine?.use("qwen");
+  // A worker that stopped, or one started for the tiny model alone, cannot switch to Qwen. Qwen is
+  // still shown, with its own unavailable state and Try again, so Dismantle and Teach stay reachable.
+  let refused: string | null = null;
+  try { await engine?.use("qwen"); } catch (e) { refused = String((e as Error)?.message ?? e); }
   setDims(QWEN_INFO);
   const s = store.get();
-  store.set({ model: QWEN_INFO, mode: s.qwenMode ?? s.mode, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, ...FRESH_SELECTION, focus: { kind: "word" }, busy: false, full: false, error: null });
+  // Qwen is live only if it was, and the worker took the switch. Otherwise the device line says why and offers Try again.
+  const was = s.qwenMode ?? s.mode, mode = refused ? "unavailable" : was;
+  const device: DeviceState = refused && s.device.kind === "ready" ? { kind: "error", message: refused } : s.device;
+  // The tiny model's text is gone with it. Nothing of Qwen's was stopped and there is no reply to
+  // continue, so the "Stopped" from the cancel above is replaced by what is true of Qwen now.
+  store.set({ model: QWEN_INFO, mode, qwenMode: mode, device, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, ...FRESH_SELECTION, focus: { kind: "word" }, busy: false, full: false, error: null,
+    announce: qwenStatus(mode, device) });
   await openStep(n);
 }
 
@@ -570,13 +611,28 @@ async function writeChangedLive(k: number, prefix: Tok[] = [], force?: number, c
   return active();
 }
 
+/** The tokens of prompt and reply the model on screen can hold, once it has said so. */
+export function contextCap(s: Pick<ReturnType<typeof store.get>, "model" | "contextCaps">): number | undefined {
+  return s.contextCaps?.[s.model.id];
+}
+
+/** Whether a reply can be written further: it stopped at a cap, is current, and its context still has room. */
+function continuable(r: Reply | undefined, s: ReturnType<typeof store.get>): r is Reply {
+  return !!r && !r.ended && !r.stale && !contextFull(r, contextCap(s));
+}
+
 /** Continue just the selected sample, on both sides. */
 export async function continueReply(k = store.get().turns.length - 1) {
-  const s = store.get();
-  if (!s.turns[k] || s.mode !== "live" || s.busy || s.replay) return;
+  const s = store.get(), t = s.turns[k];
+  if (!t || s.mode !== "live" || s.busy || s.replay) return;
+  if (!continuable(t.normal, s) && !continuable(t.changed, s)) {
+    // Nothing is left to write. A reply that fills the context says so instead of doing nothing.
+    if (contextFull(t.normal, contextCap(s)) || (t.changed && contextFull(t.changed, contextCap(s)))) store.set({ announce: S.contextFull });
+    return;
+  }
   const visit = navigation;
   try {
-    beginOutput(s.turns[k].id);
+    beginOutput(t.id);
     await continueInner(s, k);
     if (visit === navigation) settleSelection();
   } catch (e) {
@@ -587,11 +643,11 @@ export async function continueReply(k = store.get().turns.length - 1) {
 async function continueInner(s: ReturnType<typeof store.get>, k: number) {
   const t = s.turns[k];
   const jobs: Promise<unknown>[] = [];
-  if (!t.normal.ended) {
+  if (continuable(t.normal, s)) {
     patchReply(k, "normal", (r) => ({ ...r, done: false }));
     jobs.push(writeNormal(k, t.normal.toks, undefined, REPLY_CAP));
   }
-  if (t.changed && !t.changed.ended && !t.changed.stale) {
+  if (continuable(t.changed, s)) {
     patchReply(k, "changed", (r) => ({ ...r, done: false, compare: undefined }));
     jobs.push(writeChangedLive(k, t.changed.toks, undefined, REPLY_CAP));
   }
@@ -616,49 +672,80 @@ async function pickInner(w: WordRef, candId: number, visit: number) {
   const keep = r.toks.slice(0, w.index);
   if (!engine) return;
   // Picking is a choice of this token: it stays selected, paused, and shows the picked word once written.
-  store.set({ word: w, follow: false, outputSample: t.id });
-  patchReply(w.turn, w.side, (x) => ({ ...x, original, toks: keep, done: false, ended: false, pickedAt: w.index, compare: undefined }));
-  const mark = (tok: Tok) => tok;
-  const cap = REPLY_CAP - 0;
-  if (w.side === "normal") await writeNormal(w.turn, keep, candId, cap - keep.length);
-  else await writeChangedLive(w.turn, keep, candId, cap - keep.length);
+  store.set({ word: w, ...paused(), outputSample: t.id });
+  const rev = ++writings;
+  patchReply(w.turn, w.side, (x) => ({ ...x, original, toks: keep, done: false, ended: false, pickedAt: w.index, compare: undefined, rev }));
+  // The reply is rewritten from the picked piece to the length it had, or to the model's usual cap
+  // if that is longer. A piece late in a long or continued reply is rewritten like any other.
+  const rest = Math.max(s.model.replyCap, r.toks.length) - keep.length;
+  if (w.side === "normal") await writeNormal(w.turn, keep, candId, rest);
+  else await writeChangedLive(w.turn, keep, candId, rest);
   if (visit !== navigation) return;
-  patchReply(w.turn, w.side, (x) => ({ ...x, toks: x.toks.map((tk, i) => (i === w.index ? mark({ ...tk, picked: true }) : tk)) }));
+  patchReply(w.turn, w.side, (x) => ({ ...x, toks: x.toks.map((tk, i) => (i === w.index ? { ...tk, picked: true } : tk)) }));
 }
 
 export function undoPick(turn: number, side: Side) {
   if (store.get().busy || store.get().replay) return;
   claim(side);
   patchReply(turn, side, (r) => (r.original ? { ...r.original } : r));
+  // A comparison measured on the picked reply describes other tokens. It is dropped and measured
+  // again on the restored reply, never read by position against it.
+  const t = store.get().turns[turn];
+  if (t?.changed && !t.changed.stale && !comparison(t)) {
+    patchReply(turn, "changed", (r) => ({ ...r, compare: undefined, compareError: undefined }));
+    void compareTurn(turn, store.get().version);
+  }
   settleSelection();
 }
 
 // ---------------------------------------------------------------- inspection
 
+/** How many inspections are kept. One holds every value of every layer for one token: megabytes each for Qwen. */
+const DETAILS = 12;
 const details = new Map<string, Promise<FloorDetail | null>>();
+let detailsOf = "";
+/** Inspections describe one model under one set of changes. When either moves on, none of them can be shown again. */
+function currentDetails(s: ReturnType<typeof store.get>) {
+  const epoch = `${s.model.id}.${s.version}`;
+  if (epoch !== detailsOf) { details.clear(); detailsOf = epoch; }
+  return details;
+}
+store.subscribe(() => { currentDetails(store.get()); });
 
-/** Recompute the selected token with its actual context and interventions. */
+/**
+ * Recompute the selected token with its actual context and interventions. The result is kept and
+ * shown only while that exact token still exists: the same sample, reply and preceding tokens under
+ * the same model and changes. Stop, Continue and work on other samples do not change that, so they
+ * never turn a good measurement into "unavailable". A request that could not be answered is not
+ * kept either: the next one asks the model again.
+ */
 export function floorDetail(w: WordRef): Promise<FloorDetail | null> {
-  const s = store.get();
-  const visit = navigation;
+  const s = store.get(), cache = currentDetails(s);
   const t = s.turns[w.turn];
   const r = w.side === "normal" ? t?.normal : t?.changed;
-  if (!r || r.stale || !r.toks[w.index]) return Promise.resolve(null);
-  const key = `${s.version}:${w.turn}:${w.side}:${w.index}:${r.toks.length}:${r.toks[w.index].id}`;
-  let p = details.get(key);
-  if (p) return p;
-  p = (async () => {
-    if (!engine || s.mode !== "live") return null;
-    const tokens = [...historyBefore(w.turn, w.side), ...r.toks.slice(0, w.index).map((x) => x.id)];
-    const res = await engine.inspect(w.side === "normal" ? 0 : 2, r.changes, tokens, r.toks[w.index].id);
-    if (visit !== navigation || store.get().version !== s.version) return null;
-    patchReply(w.turn, w.side, (x) => ({ ...x, toks: x.toks.map((tk, i) => (i === w.index && !tk.guesses ? { ...tk, guesses: res.guesses } : tk)) }));
+  if (!engine || s.mode !== "live" || !t || !r || r.stale || !r.toks[w.index]) return Promise.resolve(null);
+  const run = engine, ids = r.toks.slice(0, w.index + 1).map((x) => x.id);
+  const key = `${t.id}:${w.side}:${ids.join(".")}`;
+  const kept = cache.get(key);
+  if (kept) { cache.delete(key); cache.set(key, kept); return kept; }
+  const reply = () => {
+    const now = store.get(), at = now.turns.findIndex((x) => x.id === t.id), sample = now.turns[at];
+    const nr = w.side === "normal" ? sample?.normal : sample?.changed;
+    const same = now.version === s.version && now.model.id === s.model.id && !!nr && !nr.stale && ids.every((id, i) => nr.toks[i]?.id === id);
+    return same ? at : -1;
+  };
+  const p = (async () => {
+    const res = await run.inspect(w.side === "normal" ? 0 : 2, r.changes, [...r.read, ...ids.slice(0, -1)], ids[w.index]);
+    const at = reply();
+    if (at < 0) return null;
+    patchReply(at, w.side, (x) => ({ ...x, toks: x.toks.map((tk, i) => (i === w.index && !tk.guesses ? { ...tk, guesses: res.guesses } : tk)) }));
     await ensurePieces(res.guesses.flat().map((c: Cand) => c.id));
     return res.detail;
   })();
-  p.catch(() => details.delete(key));
-  details.set(key, p);
-  if (details.size > 24) details.delete(details.keys().next().value!);
+  const drop = () => { if (details.get(key) === p) details.delete(key); };
+  p.then((detail) => { if (!detail) drop(); }, drop);
+  cache.set(key, p);
+  while (cache.size > DETAILS) cache.delete(cache.keys().next().value!);
   return p;
 }
 
@@ -676,14 +763,14 @@ export async function attentionMap(w: WordRef, floor: number, head: number): Pro
 export function selectWord(w: WordRef | null, focus?: Focus) {
   const s = store.get();
   const view = w?.side === "normal" && comparisonTarget({ ...s, word: w }) ? s.view : "push";
-  store.set({ word: w, view, follow: false, focus: focus ?? { kind: "word" }, sheet: true, inspectView: "word" });
+  store.set({ word: w, view, ...paused(), focus: focus ?? { kind: "word" }, sheet: true, inspectView: "word" });
 }
 
 /** Choose the measured token in place, without opening the inspector. */
 export function chooseWord(w: WordRef) {
   const s = store.get();
   const view = w.side === "normal" && comparisonTarget({ ...s, word: w }) ? s.view : "push";
-  store.set({ word: w, view, follow: false });
+  store.set({ word: w, view, ...paused() });
 }
 
 export function setFocus(focus: Focus) {
@@ -728,7 +815,8 @@ async function initialize() {
     const info = await engine.load(weightsBase(), isPhone(), path.manifest_hash);
     void navigator.storage?.persist?.().catch(() => false);
     setDevice({ kind: "ready", seconds: r.seconds });
-    store.set({ mode: "live", qwenMode: "live", modelStored: info.stored, announce: S.ready });
+    store.set((now) => ({ mode: "live", qwenMode: "live", modelStored: info.stored, announce: S.ready,
+      contextCaps: { ...now.contextCaps, qwen: info.contextCap } }));
     await runPendingExperiment();
     if (new URLSearchParams(location.search).has("bench")) {
       const result = await engine.bench();

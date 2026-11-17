@@ -6,7 +6,8 @@ import { chooseWord, piece, retryComparison, setFocus, setTowerView, stepData } 
 import { guideAddress, guideTarget } from "../path/steps.ts";
 import { useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
-import { diverging, signed } from "./color.ts";
+import { diverging, pct, signed } from "./color.ts";
+import { written } from "./odds.ts";
 import { geometryLabel, multOf } from "./describe.ts";
 import { chosen, comparisonTarget, FLOORS, HEADS, hardestFloors, headIndex, maxAbs, memIndex, towerValues, visibleTokens } from "./word.ts";
 
@@ -56,6 +57,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
   const isOn = (f: Focus) => JSON.stringify(f) === JSON.stringify(focus);
   const label = (v: number | undefined) => {
     if (v === undefined || !c) return "";
+    if (Number.isNaN(v)) return ` the direct contribution to "${wq}" is not a number`;
     if (view === "difference") return ` ${signed(v)} change in direct contribution to "${wq}"`;
     return ` ${signed(v)}, ${v === 0 ? "neutral direct contribution to" : `direct contribution ${v < 0 ? "against" : "toward"}`} "${wq}"`;
   };
@@ -94,7 +96,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
       rows.push(
         <button key={`h${L}.${h}`} type="button" data-r={L} data-c={h} tabIndex={marked ? 0 : -1}
           className={`cell${marked ? " example-target" : ""}${vals ? " flowing" : ""}${m !== 1 || fm !== 1 || geometry ? " edit" : ""}${m === 0 || fm === 0 ? " off" : ""}${isOn({ kind: "head", floor: L, head: h }) ? " on" : ""}`}
-          style={{ background: v === undefined ? undefined : diverging(v / scale), animationDelay: `${L * 9}ms` }}
+          style={{ background: v === undefined || Number.isNaN(v) ? undefined : diverging(v / scale), animationDelay: `${L * 9}ms` }}
           aria-label={`${S.floorN(L + 1)}, ${S.headN(h + 1)}${marked ? ", example target" : ""}${m !== 1 ? ` (${S.mult(m)})` : ""}${geometry ? `, ${geometryLabel(geometry)}` : ""}:${label(v)}`}
           title={`${S.headN(h + 1)} · ${S.floorN(L + 1)}`} onClick={() => onSelect({ kind: "head", floor: L, head: h })} />,
       );
@@ -108,7 +110,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
     rows.push(
       <button key={`m${L}`} type="button" data-r={L} data-c={HEADS} tabIndex={marked ? 0 : -1}
         className={`cell mem${marked ? " example-target" : ""}${vals ? " flowing" : ""}${mm !== 1 || fm !== 1 || learnedHere || neuronsHere ? " edit" : ""}${mm === 0 || fm === 0 ? " off" : ""}${isOn({ kind: "memory", floor: L }) ? " on" : ""}`}
-        style={{ background: v === undefined ? undefined : diverging(v / scale), animationDelay: `${L * 9}ms` }}
+        style={{ background: v === undefined || Number.isNaN(v) ? undefined : diverging(v / scale), animationDelay: `${L * 9}ms` }}
         aria-label={`${S.floorN(L + 1)}, ${S.memoryBlock}${marked ? `, example target: ${guideAddress(st!)}` : ""}${mm !== 1 ? ` (${S.mult(mm)})` : ""}${learnedHere ? ", learned weights" : ""}${neuronsHere ? ", changed neuron" : ""}:${label(v)}`}
         title={`${S.memoryBlock}${learnedHere ? " with learned weights" : ""} · ${S.floorN(L + 1)}`} onClick={() => onSelect({ kind: "memory", floor: L })} />,
     );
@@ -119,7 +121,9 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
     return view === "push" ? S.summary(a + 1, b + 1, wq) : `The biggest differences are on layers ${a + 1} to ${b + 1}.`;
   })() : null;
   const dictV = vals?.[0];
-  const prob = c ? c.tok.cands.find((x) => x.id === c.tok.id)?.p : undefined;
+  // The written piece's real chance in the draw, after the cut. A piece the visitor picked was not drawn.
+  const how = c ? written(c.tok) : null;
+  const outNote = !how ? "" : how.by === "draw" ? `${pct(how.chance)} in the draw` : "your choice";
 
   return (
     <div>
@@ -143,7 +147,6 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
       {!hasDiff && <p id={diffHintId} className={comparisonTurn ? "note comparison-status" : "sr-only"} role="status">{!changedReply && comparisonTurn ? "Change a part to compare with the original." : diffHint}
         {canRetry && <> <button type="button" className="linkish" disabled={mode !== "live" || busy} onClick={() => void retryComparison()}>Retry comparison</button></>}
       </p>}
-      {view === "difference" && c && c.ref.turn > 0 && <p className="note comparison-status">Includes the effect of earlier regenerated answers.</p>}
       {target && st && <button className="example-marker-key" onClick={() => onSelect(target)}><span aria-hidden="true" />Marked: {guideAddress(st)}</button>}
       <div className="tower-color-key" aria-label="Diagram colors">
         <span className="legend-negative">Blue: {view === "push" ? <>against<span className="legend-token-label"> the token</span></> : "decreased"}</span>
@@ -159,10 +162,11 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
           minWidth: enlarged && embedded ? 44 + HEADS * 44 + 8 + 44 + HEADS + 2 : compact || embedded ? undefined : 40 + HEADS * 24 + 8 + 36 + HEADS + 2 }}>
         {!embedded && <><span aria-hidden="true" />
         <button type="button" className={`wide${isOn({ kind: "words-out" }) ? " on" : ""}`} onClick={() => onSelect({ kind: "words-out" })}
-          aria-label={`${S.wordsOut}${c ? `: "${wq}"${prob !== undefined ? `, ${Math.round(prob * 100)}% in the draw` : ""}` : ""}`}
-          title={c && prob !== undefined ? "Odds in the draw: among the top 20 at the sampling temperature. Open it for the probability at temperature 1." : undefined}>
+          aria-label={`${S.wordsOut}${c ? `: "${wq}", ${outNote}` : ""}`}
+          title={!how ? undefined : how.by === "draw" ? "Its chance in the draw: at the sampling temperature, among the candidates the top-p cut kept. Open it for the model's probability at temperature 1."
+            : "You picked this piece in place of the draw. Open it for the chance the draw gave it."}>
           <span>{S.wordsOut}</span>
-          {c && <span className="num">"{wq}" {prob !== undefined ? `${Math.round(prob * 100)}%` : ""}</span>}
+          {c && how && <span className="num">"{wq}" {how.by === "draw" ? pct(how.chance) : "your choice"}</span>}
         </button></>}
         <span className="tower-column">Layer</span>
         <span className="tower-column" style={{ gridColumn: `span ${HEADS}` }}>{S.attentionHeads}</span>
@@ -177,7 +181,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
         <button type="button" className={`wide${isOn({ kind: "dictionary" }) ? " on" : ""}`} onClick={() => onSelect({ kind: "dictionary" })}
           aria-label={`${S.wordsIn}${c ? `: read "${piece(c.input)}"${label(dictV)}` : ""}`}>
           <span>{S.wordsIn}{c ? <span className="num"> "{piece(c.input).replace(/\n/g, "↵")}"</span> : null}</span>
-          {dictV !== undefined && <span className="v num" style={{ background: diverging(dictV / scale) }}>{signed(dictV)}</span>}
+          {dictV !== undefined && <span className="v num" style={{ background: Number.isNaN(dictV) ? undefined : diverging(dictV / scale) }}>{signed(dictV)}</span>}
         </button>
       </div>
       </div>
@@ -190,7 +194,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
         {vals && <div className="legend-values num" aria-label="Score scale">
           <span>{signed(-scale)}</span><span>0</span><span>{signed(scale)}</span>
         </div>}
-        <p className="legend-note">{vals ? "Score units, not percentages. Scale adjusts for each token." : "Select a token to see its scores."}</p>
+        <p className="legend-note">{vals ? "Score units, not percentages. Scale adjusts for each token." : c ? (view === "difference" ? "No comparison has been measured for this token yet." : "No scores were measured for this token.") : "Select a token to see its scores."}</p>
         <details className="legend-help">
           <summary>How to read this diagram</summary>
           <p>{S.towerAnatomy(model)} Read upward, from input to output.</p>
@@ -201,7 +205,7 @@ export function Tower({ compact, embedded, onSelect = setFocus }: { compact?: bo
             <p>Blue does not mean an opposite word. A token is a word, part of a word, a character or punctuation.</p>
           </> : <>
             <p>Each cell compares the same part in both models, forcing the original token after this sample’s prompt and original preceding tokens. Blue means its contribution decreased; orange means it increased.</p>
-            <p>On later turns, the changed model reads its own earlier answers. Differences include both the model changes and that changed context.</p>
+            <p>Each sample is compared on its own prompt. Other samples are never part of it, so a difference comes from the model changes alone.</p>
             <p>An increase can still leave a contribution negative. These colors show the change, not whether the part now supports the token.</p>
           </>}
           <p>The numbers are in logits, the model's score units. The color range rescales to the largest absolute value shown, so use the numbers when comparing different tokens.</p>

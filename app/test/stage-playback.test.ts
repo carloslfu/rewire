@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { QWEN_INFO, TINY_INFO } from "../src/model/info.ts";
 import { buildArch, pushLength } from "../src/stage/arch.ts";
-import { beatAt, beatCount, beatLabel, beatOf, lit, plateLit, pushSoFar, runningPush, seek, spineFraction } from "../src/stage/playback.ts";
+import { beatAt, beatCount, beatLabel, beatOf, lit, plateLit, pushCoverage, pushSoFar, runningPush, seek, spineFraction } from "../src/stage/playback.ts";
 
 it("replays the architecture in the order it computes: token in, each layer's attention then MLP, token out", () => {
   for (const model of [QWEN_INFO, TINY_INFO]) {
@@ -88,4 +88,16 @@ it("brings a layer's plates up in computation order, only during that layer's ow
   // Whole steps (reduced motion): a beat's plates show once the step past it is reached.
   expect(plateLit(floor, "attention", 0, n, Math.floor(attention + 0.7))).toBe(0);
   expect(plateLit(floor, "attention", n - 1, n, attention + 1)).toBe(1);
+});
+
+it("counts a push as measured only when it is a number, and calls the set complete only when all are", () => {
+  const model = { floors: 2, heads: 2 }, all = Float32Array.from([0.1, 0.2, -0.3, 0.4, 0, 0.5, -0.6]);
+  expect(pushCoverage(model, all)).toEqual({ measured: 7, of: 7, complete: true });
+  // Zero is a measurement. NaN, an infinity and a value that is not there are not.
+  const some = all.slice(); some[2] = Number.NaN; some[5] = Number.NEGATIVE_INFINITY;
+  expect(pushCoverage(model, some)).toEqual({ measured: 5, of: 7, complete: false });
+  expect(pushCoverage(model, all.slice(0, 4))).toEqual({ measured: 4, of: 7, complete: false });
+  expect(pushCoverage(model, null)).toEqual({ measured: 0, of: 7, complete: false });
+  // Values past the model's own are not counted.
+  expect(pushCoverage(model, Float32Array.from([...all, 9, 9]))).toEqual({ measured: 7, of: 7, complete: true });
 });

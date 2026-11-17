@@ -40,6 +40,26 @@ export interface Units {
   now?: () => number;
 }
 
+/**
+ * How many pieces a write may add after `read` tokens of prompt and reply. A reply has to fit the
+ * context when it is read back to be compared or inspected, so nothing is written past the limit.
+ * A write with no room left, or one asked for nothing, is an error the page can name. It is never
+ * answered with an empty result that looks like a finished reply.
+ */
+export function writeRoom(maxContext: number, read: number, requested: number): number {
+  if (read >= maxContext) throw new Error("context-full");
+  if (!(requested >= 1)) throw new Error("A write needs room for at least one piece.");
+  return Math.min(Math.floor(requested), maxContext - read);
+}
+
+/**
+ * What a finished write added to the cache: the last token it was given, then every piece it wrote
+ * except the newest, which nothing has read yet. A write that never ran a step added nothing.
+ */
+export function readByWrite(last: number, written: readonly number[]): number[] {
+  return written.length ? [last, ...written.slice(0, -1)] : [];
+}
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**

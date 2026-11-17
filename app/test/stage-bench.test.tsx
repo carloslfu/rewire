@@ -8,6 +8,7 @@ import { VOCAB } from "@rewire/tiny/src/data.ts";
 import type { Tok } from "../src/model/types.ts";
 import { pushIndex, pushLength } from "../src/stage/arch.ts";
 import { QWEN_INFO } from "../src/model/info.ts";
+import { afterDamage, afterTraining, continueNote, copyLabel, isDamaged, type Lineage, whileTraining } from "../src/tiny/lineage.ts";
 
 let store: typeof import("../src/state/store.ts").store;
 let initial: typeof import("../src/state/store.ts").initial;
@@ -368,7 +369,8 @@ it("keeps Teach's training controls in the 3D bench and never offers Punch there
 it("gates Grow's weight edits on a trained, idle model", () => {
   const total = layout({ ...TINY, vocab: VOCAB }).total, params = Float32Array.from({ length: total }, (_, i) => Math.sin(i) * 0.02);
   const controls = { disabled: false, unavailable: false, validText: true, status: "", loss: null, mutation: "", damage: null, strength: 0.25, setStrength() {}, teach() {}, stop() {},
-    mutate() {}, restore() {}, prompt: "red star = ", setPrompt() {}, test() {}, result: null, baseline: null };
+    mutate() {}, restore() {}, keepLabel: "Keep learning", continueNote: "", retrained: 0, intactStep: 0, adopt() {},
+    prompt: "red star = ", setPrompt() {}, test() {}, result: null, baseline: null };
   const props = { params: null, reference: null, intact: null, step: 0, running: false, active: true };
   let b = buttons(renderToString(<Grow {...props} controls={controls} />));
   expect(b.get("Start learning")).toEqual([false]);
@@ -385,8 +387,238 @@ it("gates Grow's weight edits on a trained, idle model", () => {
   b = buttons(html);
   for (const label of ["Start over from noise", "Keep learning", "Scramble weights", "Erase weights", "Restore intact model", "Punch"]) expect(b.get(label)).toEqual([false]);
   expect(text(html)).toContain("Layer 2: noise at 25%");
+  // Nothing has been retrained yet, so there is nothing to make the intact copy.
+  expect(b.has("Make this the intact copy")).toBe(false);
   // The Strength slider is the control its label names.
   const strength = /<label for="([^"]+)">Strength<\/label>/.exec(html)![1];
   expect(html).toMatch(new RegExp(`<input[^>]*id="${strength}"[^>]*type="range"|<input[^>]*type="range"[^>]*id="${strength}"`));
   expect(text(html)).toContain("1,200 steps");
+});
+
+it("says what training a damaged copy does before it is pressed, and replaces the intact weights only when asked", () => {
+  const total = layout({ ...TINY, vocab: VOCAB }).total, params = Float32Array.from({ length: total }, (_, i) => Math.sin(i) * 0.02);
+  const damaged = params.map((x, i) => (i % 7 ? x : 0));
+  const base = { disabled: false, unavailable: false, validText: true, status: "", loss: null, strength: 0.25, setStrength() {}, teach() {}, stop() {},
+    mutate() {}, restore() {}, adopt() {}, prompt: "red star = ", setPrompt() {}, test() {}, result: null, baseline: null, damage: { kind: "erase" as const, floor: 1 } };
+  const props = { params: damaged, reference: params, intact: params, running: false, active: true };
+  // The bench is told by the lineage what to call things, so the page and the 3D bench cannot disagree.
+  const erased = afterDamage({ intact: { params, step: 1200, corpus: "red star = warm\n", run: { samples: [], losses: [] } }, damage: "", retrained: 0 }, "Layer 2: weights erased");
+  const view = (l: Lineage, step: number, running = false) => renderToString(<Grow {...props} running={running} step={step}
+    controls={{ ...base, mutation: copyLabel(l), keepLabel: isDamaged(l) ? "Retrain the damaged copy" : "Keep learning", continueNote: continueNote(l), retrained: l.retrained, intactStep: l.intact?.step ?? 0, disabled: running }} />);
+  let html = view(erased, 1200), b = buttons(html);
+  expect(b.has("Keep learning")).toBe(false);
+  expect(b.get("Retrain the damaged copy")).toEqual([false]);
+  expect(text(html)).toContain("Training continues from the damaged copy. The intact weights from step 1,200 are kept, and Restore intact model returns to them.");
+  expect(b.has("Make this the intact copy")).toBe(false);
+  expect(b.get("Restore intact model")).toEqual([false]);
+  // After 306 more steps the copy says so, Restore is still there, and adopting names what it replaces.
+  const retrained = afterTraining(whileTraining(erased), { params: damaged, step: 1506, corpus: "red star = warm\n", run: { samples: [], losses: [] } }, 306);
+  expect(retrained.intact?.params).toBe(params);
+  expect(retrained.intact?.step).toBe(1200);
+  html = view(retrained, 1506); b = buttons(html);
+  expect(text(html)).toContain("Layer 2: weights erased, then 306 more training steps");
+  expect(b.get("Restore intact model")).toEqual([false]);
+  expect(b.get("Make this the intact copy")).toEqual([false]);
+  expect(text(html)).toContain("It replaces the intact weights from step 1,200.");
+  // While it trains, the note about what pressing would do is not shown beside a button that is not there.
+  html = view(retrained, 1506, true);
+  expect(buttons(html).has("Retrain the damaged copy")).toBe(false);
+  expect(text(html)).not.toContain("Training continues from the damaged copy");
+  expect(html).not.toContain("—");
+});
+
+it("states no total in the difference view while the comparison is being measured or was never made", () => {
+  const cut = { floors: [{ floor: 14, mult: 0 }] };
+  const forced = (id: number) => ({ id, lp1: -0.3, concept: 0, pushes: pushes.map((x) => x * 0.5) });
+  const base = { mode: "live" as const, device: { kind: "ready" as const, seconds: 3 }, view: "difference" as const, chips: cut, follow: true };
+  const readout = (html: string) => text(/<p class="stage-readout" role="status">(.*?)<\/p>/.exec(html)![1]).trim();
+  // A new question under an active change, followed as it is written: the changed reply has a token and no comparison yet.
+  const writing = { ...sample(), changed: { ...sample().normal, toks: [tok(200)], ended: false, done: false, changes: cut } };
+  store.set({ ...base, turns: [writing], word: { turn: 0, side: "changed", index: 0 }, busy: true });
+  let said = readout(renderToString(<Dismantle />));
+  expect(said).toBe(`Measuring the change from the original for “${said.split("“")[1].split("”")[0]}”. Nothing is lit until it is done.`);
+  expect(said).not.toContain("add up to");
+  expect(said).not.toMatch(/[+-]?0\.00|\b0\b/);
+  // Written, and the changed model is reading the original reply: still measuring.
+  const comparing = { ...sample(), changed: { ...sample().normal, toks: [tok(200), tok(151645)], changes: cut, comparing: true } };
+  store.set({ turns: [comparing], busy: false });
+  expect(readout(renderToString(<Dismantle />))).toContain("Measuring the change from the original");
+  // The comparison did not arrive: it says there is none, offers the retry, and still gives no number.
+  store.set({ turns: [{ ...comparing, changed: { ...comparing.changed, comparing: false, compareError: "lost" } }] });
+  let html = renderToString(<Dismantle />);
+  said = readout(html);
+  expect(said).toMatch(/^No comparison has been measured for “.+”, so nothing is lit\.$/);
+  expect(buttons(html).get("Retry comparison")).toEqual([false]);
+  // One measured on other tokens (the original was rewritten since) is not a comparison of these.
+  store.set({ turns: [{ ...comparing, changed: { ...comparing.changed, comparing: false, compare: [forced(100), forced(999), forced(151645)] } }] });
+  expect(readout(renderToString(<Dismantle />))).toMatch(/^No comparison has been measured/);
+  // Measured on these tokens: now, and only now, every part is lit and the changes are totalled.
+  store.set({ turns: [{ ...comparing, changed: { ...comparing.changed, comparing: false, compare: [forced(100), forced(101), forced(151645)] } }], word: { turn: 0, side: "normal", index: 0 } });
+  html = renderToString(<Dismantle />);
+  expect(readout(html)).toMatch(/^Every part is lit\. Changes in direct push add up to [+−-]\d/);
+  expect(text(html)).not.toContain("—");
+});
+
+it("enables every change control by one rule in the inspector, the 2D view and the 3D bench", async () => {
+  const { Detail } = await import("../src/ui/Detail.tsx");
+  const Panels = await import("../src/ui/Panels.tsx");
+  const chips = { heads: [{ floor: 20, head: 13, mult: 0 }] };
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [sample()], word: { turn: 0, side: "normal", index: 0 }, follow: false,
+    focus: { kind: "head", floor: 20, head: 13 }, chips });
+  /** Whether the strength stops and the restore controls are disabled, per view. */
+  const state = () => {
+    const flat = buttons(renderToString(<Detail />)), stage = buttons(renderToString(<Dismantle />)), chip = renderToString(<Panels.Chips />);
+    return { inspector: flat.get("Off"), bench: stage.get("Off"), benchRestore: stage.get("Restore model"), chip: /<button[^>]*disabled=""[^>]*aria-label="Remove/.test(chip) || /aria-label="Remove[^>]*disabled=""/.test(chip) };
+  };
+  expect(state()).toEqual({ inspector: [false], bench: [false], benchRestore: [false], chip: false });
+  const locked = { inspector: [true], bench: [true], benchRestore: [true], chip: true };
+  // A reply is being written.
+  store.set({ busy: true });
+  expect(state()).toEqual(locked);
+  // While samples are updated, and after the update is stopped part way, a change restarts the update. Every view offers it.
+  const open = { inspector: [false], bench: [false], benchRestore: [false], chip: false };
+  store.set({ busy: true, replay: { turn: 0, status: "running" } });
+  expect(state()).toEqual(open);
+  store.set({ busy: false, replay: { turn: 0, status: "stopped" } });
+  expect(state()).toEqual(open);
+  // Qwen is being taught, and the model is not ready.
+  store.set({ replay: null, teachingBusy: true });
+  expect(state()).toEqual(locked);
+  store.set({ teachingBusy: false, mode: "unavailable" });
+  expect(state()).toEqual(locked);
+  store.set({ mode: "live" });
+  expect(state()).toEqual({ inspector: [false], bench: [false], benchRestore: [false], chip: false });
+  // The inspector's other change controls follow the same rule: precision, and hiding a prompt word.
+  const other = (focus: typeof initial.focus, label: string) => { store.set({ focus }); return buttons(renderToString(<Detail />)).get(label); };
+  expect(other({ kind: "bits" }, "2 bits (4 levels)")).toEqual([false]);
+  expect(other({ kind: "words-in", position: 1 }, "Hide this word from later words")).toEqual([false]);
+  store.set({ busy: true });
+  expect(other({ kind: "bits" }, "2 bits (4 levels)")).toEqual([true]);
+  expect(other({ kind: "words-in", position: 1 }, "Hide this word from later words")).toEqual([true]);
+  // Each panel says once why its controls wait, in the words the 3D bench uses, and says nothing when they do not.
+  const waits = (focus: typeof initial.focus) => { store.set({ focus }); return (renderToString(<Detail />).match(/<p class="note edit-wait">(.*?)<\/p>/g) ?? []).map((m) => text(m).trim()); };
+  const panels: (typeof initial.focus)[] = [{ kind: "head", floor: 20, head: 13 }, { kind: "memory", floor: 20 }, { kind: "floor", floor: 20 }, { kind: "bits" }, { kind: "words-in", position: 1 }];
+  for (const focus of panels) expect(waits(focus)).toEqual(["Wait for the reply to finish, then change a part."]);
+  expect(text(renderToString(<Dismantle />))).toContain("Wait for the reply to finish");
+  // A dictionary swap that is on cannot be undone or replaced while the reply is written, and typing another is not offered.
+  store.set({ chips: { swaps: [[100, 7]] }, focus: { kind: "word" } });
+  expect(buttons(renderToString(<Detail />)).get("Undo")).toEqual([true]);
+  expect(waits({ kind: "word" })).toEqual(["Wait for the reply to finish, then change a part."]);
+  store.set({ chips });
+  expect(renderToString(<Detail />)).not.toContain('aria-label="Word to swap with"');
+  // While samples are updated a change restarts the update, so nothing waits. Idle, nothing waits either.
+  store.set({ replay: { turn: 0, status: "running" } });
+  for (const focus of [...panels, { kind: "word" } as const]) expect(waits(focus)).toEqual([]);
+  expect(renderToString(<Detail />)).toContain('aria-label="Word to swap with"');
+  store.set({ chips: { swaps: [[100, 7]] } });
+  expect(buttons(renderToString(<Detail />)).get("Undo")).toEqual([false]);
+  store.set({ busy: false, replay: null, chips });
+  for (const focus of panels) expect(waits(focus)).toEqual([]);
+});
+
+it("says a reply reached the context limit instead of offering a Continue that cannot write", () => {
+  const read = Array.from({ length: 500 }, (_, i) => i + 10);
+  const cut = (n: number) => ({ id: 1, user: "Long", normal: { read, toks: Array.from({ length: n }, (_, i) => tok(300 + i)), ended: false, done: true, changes: {}, source: "live" as const } });
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [cut(8)], contextCaps: { qwen: 512 } });
+  // Room left: stopped at the reply cap, and Continue is there.
+  let html = renderToString(<Talk.Conversation />);
+  expect(buttons(html).get("Continue")).toEqual([false]);
+  expect(text(html)).not.toContain("context limit");
+  // Prompt and reply fill the context: the reason is given and there is no button that would do nothing.
+  store.set({ turns: [cut(12)] });
+  html = renderToString(<Talk.Conversation />);
+  expect(buttons(html).has("Continue")).toBe(false);
+  expect(text(html)).toContain("Reached the model's context limit at 12 word pieces. There is no room to continue it.");
+  // The other model's limit is its own.
+  store.set({ contextCaps: { tiny: 512 } });
+  expect(buttons(renderToString(<Talk.Conversation />)).get("Continue")).toEqual([false]);
+});
+
+it("marks no word with the changed model's probability unless the comparison was measured on these tokens", () => {
+  const changes = { floors: [{ floor: 14, mult: 0 }] };
+  const forced = (id: number, p: number) => ({ id, lp1: Math.log(p), concept: 0, pushes });
+  const turn = (compare: ReturnType<typeof forced>[]) => ({ ...sample(), changed: { ...sample().normal, toks: [tok(200), tok(151645)], changes, compare } });
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [turn([forced(100, 0.01), forced(101, 0.9), forced(151645, 0.9)])], chips: changes });
+  let html = renderToString(<Talk.Conversation />);
+  expect(html).toMatch(/class="tok under"[^>]*aria-label="[^"]*the changed model gives it 1%"/);
+  expect(html).toContain('title="Normal 90%, changed 1%"');
+  // The same numbers left over from a picked reply (another first token): nothing is underlined and no 1% is claimed.
+  store.set({ turns: [turn([forced(777, 0.01), forced(101, 0.9), forced(151645, 0.9)])] });
+  html = renderToString(<Talk.Conversation />);
+  expect(html).not.toContain("tok under");
+  expect(html).not.toContain("changed 1%");
+  expect(text(html)).not.toMatch(/gives .* 1%/);
+  // A comparison of a longer or shorter reply is no better.
+  store.set({ turns: [turn([forced(100, 0.01), forced(101, 0.9)])] });
+  expect(renderToString(<Talk.Conversation />)).not.toContain("tok under");
+});
+
+it("names a hidden word on the change chip only when every sample has that word there", async () => {
+  const Panels = await import("../src/ui/Panels.tsx");
+  const other = { ...sample(), id: 2, user: "Capital of Peru?", normal: { ...sample().normal, read: [5, 9] } };
+  const labels = (html: string) => [...html.matchAll(/<span class="chip">(.*?)<button/g)].map((m) => text(m[1]).trim());
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [sample()], chips: { hidden: [{ key: 1, from: 2 }] } });
+  const [alone] = labels(renderToString(<Panels.Chips />));
+  expect(alone).not.toContain("prompt position");
+  // A second sample with another word at that position: the chip stands for both, so it names the position.
+  store.set({ turns: [sample(), other] });
+  expect(labels(renderToString(<Panels.Chips />))).toEqual(["prompt position 1 hidden from later words in every sample"]);
+  // A position both samples share keeps its word, and position 0 is the start marker in every sample.
+  store.set({ turns: [other, { ...other, id: 3, user: "Capital of Chile?" }] });
+  expect(labels(renderToString(<Panels.Chips />))[0]).not.toContain("prompt position");
+  store.set({ chips: { hidden: [{ key: 0, from: 1 }] } });
+  expect(labels(renderToString(<Panels.Chips />))).toEqual(["the start marker hidden"]);
+});
+
+it("says a pick was stopped only once the reply has stopped, never while the picked piece is still on its way", () => {
+  const original = sample().normal;
+  const picking = { ...sample(), normal: { ...original, toks: [tok(100)], ended: false, done: false, pickedAt: 1, original } };
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [picking], busy: true });
+  // Being written: no claim about the pick yet, and Undo waits for the write.
+  let html = renderToString(<Talk.Conversation />);
+  expect(text(html)).not.toContain("The pick was stopped");
+  expect(text(html)).not.toContain("You picked this word");
+  expect(buttons(html).get("Undo")).toEqual([true]);
+  // Stopped before the piece was written: said plainly, with the way back.
+  store.set({ turns: [{ ...picking, normal: { ...picking.normal, done: true } }], busy: false });
+  html = renderToString(<Talk.Conversation />);
+  expect(text(html)).toContain("The pick was stopped before it was written.");
+  expect(buttons(html).get("Undo")).toEqual([false]);
+  // Written: the piece is named.
+  store.set({ turns: [{ ...picking, normal: { ...picking.normal, toks: [tok(100), { ...tok(555), picked: true }], done: true } }] });
+  html = renderToString(<Talk.Conversation />);
+  expect(text(html)).not.toContain("The pick was stopped");
+  expect(text(html)).toMatch(/You picked this word: "[^"]+"/);
+});
+
+it("gives no total and does not say every part is lit when some of a token's pushes are not numbers", () => {
+  const readout = (html: string) => text(/<p class="stage-readout" role="status">(.*?)<\/p>/.exec(html)![1]).trim();
+  const withPushes = (p: Float32Array) => ({ ...sample(), normal: { ...sample().normal, toks: [{ ...tok(100), pushes: p }, tok(151645)] } });
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [withPushes(pushes)], word: { turn: 0, side: "normal", index: 0 }, follow: false });
+  // The measured path is unchanged: the same sentence and the same total as before.
+  expect(readout(renderToString(<Dismantle />))).toMatch(/^Every part is lit\. Direct pushes add up to \+1\.25 for “.+”\.$/);
+  // Two values are not numbers. Nothing is totalled, and the parts without a value are said to be unlit.
+  const broken = pushes.slice();
+  broken[pushIndex(QWEN_INFO, { kind: "head", floor: 3, head: 2 })] = Number.NaN;
+  broken[pushIndex(QWEN_INFO, { kind: "mlp", floor: 9 })] = Number.POSITIVE_INFINITY;
+  store.set({ turns: [withPushes(broken)] });
+  let said = readout(renderToString(<Dismantle />));
+  expect(said).toMatch(new RegExp(`^Incomplete measurement for “.+”: 2 of ${pushLength(QWEN_INFO)} direct pushes are unavailable\\. Parts without a value are not lit, and no total is given\\.$`));
+  expect(said).not.toContain("Every part is lit");
+  expect(said).not.toMatch(/add up to|not a number|∞/);
+  // In a replay the same holds for the running total and the final one.
+  expect(R.startReplay("token")).toBe(true);
+  R.session.seek(3);
+  let bar = text(renderToString(<Dismantle />));
+  expect(bar).toContain("Some direct pushes are unavailable for this token, so no total is given.");
+  expect(bar).not.toMatch(/Direct pushes so far|add up to/);
+  R.session.seek(58);
+  bar = text(renderToString(<Dismantle />));
+  expect(bar).toContain("Some direct pushes are unavailable for this token, so no total is given.");
+  expect(bar).not.toMatch(/add up to|not a number/);
+  R.session.exit("live");
+  // No value at all is not an incomplete measurement: nothing was measured.
+  store.set({ turns: [withPushes(new Float32Array(pushLength(QWEN_INFO)).fill(Number.NaN))] });
+  said = readout(renderToString(<Dismantle />));
+  expect(said).toMatch(/^No direct pushes were measured for “.+”\. Nothing is lit\.$/);
 });

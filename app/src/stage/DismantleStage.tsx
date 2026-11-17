@@ -13,14 +13,14 @@ import { LearnedControl, MoreExperiments, PartControls } from "../ui/Lab.tsx";
 import { Chips, DeviceBar } from "../ui/Panels.tsx";
 import { ReplayStatus } from "../ui/ReplayStatus.tsx";
 import { replySegments } from "../ui/reply-text.ts";
-import { chosen, comparisonTarget, isStop, towerValues } from "../ui/word.ts";
+import { chosen, comparisonTarget, isStop, replyMark, towerValues } from "../ui/word.ts";
 import { ReplayBar } from "./ReplayBar.tsx";
 import { linkStage, outputIdentity, replayWait, session, startReplay, useReplay } from "./replay-session.ts";
 import { attentionRow, layerPlates, outputBars, pushValues, tray } from "./adapters.ts";
 import { buildArch, groupHeads, type Part, partIndex, partName } from "./arch.ts";
 import { blocked, focusOf, isTarget, partChanged, partOf, poseOf, punched, restored, restoreLabel, strengthOf } from "./intervene.ts";
 import { measurementKey } from "./latest.ts";
-import { runningPush } from "./playback.ts";
+import { pushCoverage, runningPush } from "./playback.ts";
 import type { BaySpec, Stage, Tool } from "./scene/stage.ts";
 import { useMeasured } from "./useMeasured.ts";
 import { RealNote, Workbench } from "./Workbench.tsx";
@@ -55,6 +55,7 @@ export default function DismantleStage() {
   const vals = useMemo(() => towerValues(c, view), [c, view]);
   const values = useMemo(() => pushValues(arch, vals), [arch, vals]);
   const running = useMemo(() => (vals ? runningPush(model, vals) : null), [model, vals]);
+  const coverage = useMemo(() => pushCoverage(model, vals), [model, vals]);
   const poses = useMemo(() => arch.parts.map((p) => poseOf(chips, p, model)), [arch, chips, model]);
   const changes = describeChips(chips);
   const reason = blocked({ mode, busy, replay, teachingBusy });
@@ -81,7 +82,7 @@ export default function DismantleStage() {
   // ------------------------------------------------------------ the inspection pass, newest request only
   const floor = selected && "floor" in selected ? selected.floor : -1;
   const measurable = !!c && c.reply.done && !c.reply.stale && mode === "live";
-  const key = c ? measurementKey({ model: model.id, version, turn: c.ref.turn, side: c.ref.side, index: c.ref.index, token: c.tok.id, length: c.reply.toks.length }) : "";
+  const key = c ? measurementKey({ model: model.id, version, turn: c.ref.turn, side: c.ref.side, index: c.ref.index, token: c.tok.id, length: c.reply.toks.length, mark: `${c.turn.id}.${replyMark(c.reply)}` }) : "";
   const detail = useMeasured<FloorDetail>(key, !!c && measurable && floor >= 0, passing, () => (c ? floorDetail(c.ref) : Promise.resolve(null)));
   const measured = detail.state === "ready" && detail.key === key ? detail.value : null;
 
@@ -144,6 +145,8 @@ export default function DismantleStage() {
   const hasDiff = !!comparisonTarget({ turns, word, fork });
   const turn = word ? turns[word.turn] : turns.at(-1);
   const canRetry = !!turn?.changed && !replay && !turn.changed.stale && !turn.changed.comparing && turn.normal.done && turn.changed.done && !hasDiff;
+  // The comparison for this sample is still on its way: a reply is being written, or the changed model is reading the original.
+  const measuring = !!turn?.changed && !turn.changed.stale && (!turn.normal.done || !turn.changed.done || !!turn.changed.comparing || replay?.status === "running");
 
   // ------------------------------------------------------------ edits
   const say = (announce: string) => store.set({ announce });
@@ -182,7 +185,14 @@ export default function DismantleStage() {
     </div>
     {canRetry && <p className="note">No comparison for this token yet. <button type="button" className="linkish" disabled={mode !== "live" || busy} onClick={() => void retryComparison()}>Retry comparison</button></p>}
     {!replaying && <p className="stage-readout" role="status">
-      {!c ? "Nothing to show yet." : `Every part is lit. ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${running ? signed(running[running.length - 1]) : "0"} for “${wq}”.`}
+      {!c ? "Nothing to show yet."
+        // A total is stated only for values that were measured. Without them nothing is lit and no number is given.
+        : running && coverage.complete ? `Every part is lit. ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${signed(running[running.length - 1])} for “${wq}”.`
+        // Some values are not numbers. The parts that have one are lit, the rest are not, and a total of only some of them would mislead.
+        : coverage.measured > 0 ? `Incomplete measurement for “${wq}”: ${(coverage.of - coverage.measured).toLocaleString("en-US")} of ${coverage.of.toLocaleString("en-US")} ${view === "difference" ? "changes in direct push" : "direct pushes"} are unavailable. Parts without a value are not lit, and no total is given.`
+        : view !== "difference" ? `No direct pushes were measured for “${wq}”. Nothing is lit.`
+        : measuring ? `Measuring the change from the original for “${wq}”. Nothing is lit until it is done.`
+        : `No comparison has been measured for “${wq}”, so nothing is lit.`}
     </p>}
     <p className="note">Replay shows values the model already measured while writing, slowed down and in the order the model computes them. Nothing is generated again. It is not a timing of the real computation.</p>
   </section>;
@@ -196,7 +206,7 @@ export default function DismantleStage() {
     <ReplayStatus compact />
     {part ? <>
       <PartControls key={`${model.id}.${part.kind}.${part.floor}.${part.kind === "head" ? part.head : ""}`} part={focusOf(part) as Extract<Focus, { kind: "head" | "memory" | "floor" }>}
-        disabled={busy || mode !== "live"} onClose={() => select(null)} />
+        disabled={!!reason} onClose={() => select(null)} />
       <div className="stage-part-actions">
         <button type="button" className="btn" disabled={!!reason} onClick={() => stage?.react(part, punch(part))}>{strengthOf(chips, part) === 0 ? "Put back" : "Knock out"}</button>
         <button type="button" className="btn quiet" disabled={!!reason || !partChanged(chips, part)} onClick={() => void chipsWith((spec) => restored(spec, part))}>{restoreLabel(part)}</button>
@@ -217,8 +227,8 @@ export default function DismantleStage() {
       <p className="note">Click a head, an MLP or a layer to open its controls here. A window lit orange pushed toward the selected token and one lit blue pushed against it.</p>
       {marked && st && <button type="button" className="btn" onClick={() => select(marked)}>Find marked part</button>}
     </section>}
-    <LearnedControl disabled={busy || mode !== "live"} />
-    <MoreExperiments disabled={busy || mode !== "live"} />
+    <LearnedControl disabled={!!reason} />
+    <MoreExperiments disabled={!!reason} />
     <RealNote punch real={`${model.floors} layers, ${model.heads} attention heads and one MLP in each, and heads paired on shared keys and values. The color of each lit window is a measured direct push. Plates are measured values. The bars over Words out are the model's own probabilities for its top pieces and the piece it wrote, over its whole vocabulary before any sampling setting. Punch and the strength controls change the running model.`}
       drawing={`The shapes, sizes and positions. A model has no physical form. The dictionary tiles and MLP fins stand in for ${model.vocab.toLocaleString("en-US")} rows and ${model.units.toLocaleString("en-US")} neurons; they are not drawn one by one. During a replay, the amber corner brackets and their label mark the step the replay is at. They are a position, not a measurement.`} />
   </Workbench>;
@@ -248,7 +258,7 @@ function StageQuestion() {
       {busy ? <button type="button" className="btn stop" onClick={stopReply}>Stop</button>
         : <button type="submit" className="btn primary" disabled={mode !== "live" || !!replay || !draft.trim()}>{model.id === "tiny" ? S.send : "Test question"}</button>}
     </form>
-    {model.id === "qwen" && <DeviceBar />}
+    <DeviceBar />
     <Chips />
     {turns.length > 1 && <label className="stage-sample">Sample
       <select value={k} onChange={(e) => { const i = Number(e.target.value), index = first(turns[i].normal); if (index >= 0) chooseWord({ turn: i, side: "normal", index }); }}>

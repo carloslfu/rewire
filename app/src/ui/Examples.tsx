@@ -2,6 +2,7 @@ import { chipsWith, openStep, setFocus, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { guideAddress, guideTarget, stepCopy, type StepData } from "../path/steps.ts";
 import { signed } from "./color.ts";
+import { useEditBlocked } from "./useEditBlocked.ts";
 
 export function ExampleSelector() {
   const step = useStore((s) => s.step);
@@ -63,8 +64,7 @@ export function SuggestedQuestions() {
 export function NeuronControl({ floor }: { floor: number }) {
   const st = stepData(useStore((s) => s.step));
   const chips = useStore((s) => s.chips);
-  const busy = useStore((s) => s.busy);
-  const ready = useStore((s) => s.mode === "live");
+  const why = useEditBlocked();
   const model = useStore((s) => s.model);
   if (model.id !== "qwen" || !st?.guide || st.control.kind !== "neurons") return null;
   const c = st.control, n = c.units.find((n) => n.floor === floor);
@@ -77,7 +77,7 @@ export function NeuronControl({ floor }: { floor: number }) {
     <p className="note">{st.guide.action}</p>
     <div className="seg change" role="group" aria-label={`${c.label} added activation`}>
       {c.stops.map((v) => <button key={v} type="button" data-v={v === 0 ? 1 : v}
-        aria-pressed={Math.abs(dose - v) < 1e-6} disabled={busy || !ready}
+        aria-pressed={Math.abs(dose - v) < 1e-6} disabled={!!why}
         onClick={() => void chipsWith((spec) => ({ ...spec, neurons: [
           ...(spec.neurons ?? []).filter((x) => x.floor !== floor || x.unit !== n.unit),
           ...(v ? [{ floor, unit: n.unit, delta: v * n.deltaPerDose }] : []),

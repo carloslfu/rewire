@@ -12,6 +12,7 @@ import { Modal } from "../ui/Modal.tsx";
 import { useNarrow } from "../ui/useNarrow.ts";
 import type { TinyIn, TinyOut } from "./train.worker.ts";
 import type { Damage } from "../stage/GrowStage.tsx";
+import { afterAdopting, afterDamage, afterRestore, type Checkpoint, continueNote, copyLabel, endRun, failureNote, type Held, isDamaged, type Lineage, NOTHING_HELD, NO_RUN, type Run, runIsCurrent, runNote, runUpTo, UNTRAINED, whileTraining } from "./lineage.ts";
 
 const GrowStage = lazy(() => import("../stage/GrowStage.tsx"));
 
@@ -27,12 +28,19 @@ export default function TinyView() {
   const [prompt, setPrompt] = useState(language.tests[0].prompt);
   const [running, setRunning] = useState(false);
   const [working, setWorking] = useState(false);
+  // The training history on screen. It belongs to the weights on screen and comes and goes with them.
   const [losses, setLosses] = useState<number[]>([]);
-  const [samples, setSamples] = useState<{ step: number; text: string }[]>([]);
+  const [samples, setSamples] = useState<Run["samples"]>([]);
+  const run = useRef<Run>(NO_RUN);
+  const showRun = (next: Run) => { run.current = next; setLosses(next.losses); setSamples(next.samples); };
   const [params, setParams] = useState<Float32Array | null>(null);
   const [reference, setReference] = useState<Float32Array | null>(null);
-  const [intact, setIntact] = useState<Float32Array | null>(null);
-  const [mutation, setMutation] = useState("");
+  // Which weights are on screen and which are kept behind them. The ref is for the worker's messages,
+  // which are handled by a function made once.
+  const [lineage, showLineage] = useState<Lineage>(UNTRAINED);
+  const line = useRef<Lineage>(UNTRAINED);
+  const setLineage = (next: Lineage) => { line.current = next; showLineage(next); };
+  const intact = lineage.intact?.params ?? null, mutation = copyLabel(lineage), damaged = isDamaged(lineage);
   const [damage, setDamage] = useState<Damage | null>(null);
   const [status, setStatus] = useState("");
   const [result, setResult] = useState<{ prompt: string; text: string; model: string } | null>(null);
@@ -46,6 +54,11 @@ export default function TinyView() {
   const w = useRef<Worker | null>(null);
   const runBase = useRef(0);
   const cumulative = useRef(0);
+  // The run under way: what the bench held when it began, the text it trains on, and the last weights it has delivered.
+  const training = useRef(false);
+  const began = useRef<Held>(NOTHING_HELD);
+  const runCorpus = useRef("");
+  const reached = useRef<{ params: Float32Array; steps: number } | null>(null);
   const first = useRef<Float32Array | null>(null);
   const request = useRef({ prompt: "", model: "" });
   const knownCorpus = useRef("");
@@ -61,20 +74,42 @@ export default function TinyView() {
   }, []);
   useEffect(() => { if (!active) w.current?.postMessage({ t: "stop" } satisfies TinyIn); }, [active]);
 
+  /** Put weights on screen with everything that belongs to them: their step, their text, their history and their lineage. */
+  const hold = (h: Held) => { setParams(h.params); setStep(h.step); cumulative.current = h.step; knownCorpus.current = h.corpus; showRun(h.run); setLineage(h.lineage); };
+  /** The run under way has ended: finished, stopped or failed. The bench holds what that leaves, never a half state. */
+  const finish = (result: { params: Float32Array; steps: number } | null) => {
+    const start = began.current, steps = result?.steps ?? 0;
+    const held = endRun(start, result, runCorpus.current, runUpTo(run.current, start.run.losses.length, start.step, steps));
+    training.current = false;
+    hold(held);
+    setRunning(false);
+    return { start, held };
+  };
+  /** The worker reported a failure. A training run ends on the last weights it delivered, or as it began. */
+  const fail = (message: string) => {
+    setWorking(false);
+    if (!training.current) { setRunning(false); setStatus(message); return; }
+    const { start, held } = finish(reached.current);
+    setStatus([/[.!?]$/.test(message) ? message : `${message}.`, failureNote(start, held)].filter(Boolean).join(" "));
+  };
   const receive = (m: TinyOut) => {
     if (!mounted.current) return;
     if (m.t === "ready") setStatus("Learning on this device…");
-    if (m.t === "unsupported") { setRunning(false); setWorking(false); setStatus("This browser cannot train with WebGPU. Try Chrome on a supported device."); }
-    if (m.t === "loss") { setLosses((l) => [...l, m.loss]); setStep(runBase.current + m.step); }
+    if (m.t === "unsupported") fail("This browser cannot train with WebGPU. Try Chrome on a supported device.");
+    if (m.t === "loss") { run.current = { ...run.current, losses: [...run.current.losses, m.loss] }; setLosses(run.current.losses); setStep(runBase.current + m.step); }
     if (m.t === "snapshot") {
       if (!first.current) { first.current = m.params; setReference(m.params); }
       setParams(m.params);
+      if (training.current) reached.current = { params: m.params, steps: m.step };
     }
-    if (m.t === "sample") setSamples((s) => [...s, { step: runBase.current + m.step, text: m.text }]);
+    if (m.t === "sample") { run.current = { ...run.current, samples: [...run.current.samples, { step: runBase.current + m.step, text: m.text }] }; setSamples(run.current.samples); }
     if (m.t === "done") {
-      cumulative.current = runBase.current + m.steps;
-      setStep(cumulative.current); setRunning(false); setParams(m.params); setIntact(m.params);
-      setStatus(m.steps ? `${m.steps} training ${m.steps === 1 ? "step" : "steps"} in ${m.seconds.toFixed(1)} seconds. The weights are ready to test.` : "No additional training steps completed. The current weights are ready to inspect.");
+      // From the intact weights the result is the new intact copy. A damaged copy stays a copy: the intact weights behind it are kept.
+      const { start } = finish({ params: m.params, steps: m.steps });
+      const before = start.lineage, ran = `${m.steps} training ${m.steps === 1 ? "step" : "steps"}`;
+      setStatus(isDamaged(before) && before.intact
+        ? (m.steps ? `${ran} on the damaged copy in ${m.seconds.toFixed(1)} seconds. The intact weights from step ${before.intact.step.toLocaleString("en-US")} are kept.` : "No additional training steps completed. The damaged copy is unchanged.")
+        : m.steps ? `${ran} in ${m.seconds.toFixed(1)} seconds. The weights are ready to test.` : "No additional training steps completed. The current weights are ready to inspect.");
     }
     if (m.t === "sampled") {
       setWorking(false); setResult({ ...request.current, text: m.text });
@@ -85,24 +120,28 @@ export default function TinyView() {
       setBaseline({ prompt: request.current.prompt, text: m.baseline });
     }
     if (m.t === "tested") { setWorking(false); setStatus("Test complete. Results below."); setTests(m.results); setTestCorpus(knownCorpus.current); }
-    if (m.t === "error") { setRunning(false); setWorking(false); setStatus(m.message); }
+    if (m.t === "error") fail(m.message);
   };
   const worker = () => {
     if (!w.current) {
       w.current = new Worker(new URL("./train.worker.ts", import.meta.url), { type: "module" });
       w.current.onmessage = (e: MessageEvent<TinyOut>) => receive(e.data);
-      w.current.onerror = () => { setRunning(false); setWorking(false); setStatus("The training worker stopped. Your last weight snapshot is still available."); w.current?.terminate(); w.current = null; };
+      w.current.onerror = () => { fail("The training worker stopped."); w.current?.terminate(); w.current = null; };
     }
     return w.current;
   };
   const teach = (resume: boolean) => {
     if (disabled || unavailable || encode(text).length < 65) return;
-    if (!resume) { first.current = null; setReference(null); setParams(null); setStep(0); cumulative.current = 0; setLosses([]); setSamples([]); }
-    setSamples([]);
-    runBase.current = cumulative.current;
-    knownCorpus.current = resume ? knownCorpus.current + "\n" + text : text;
-    setRunning(true); setStatus("Starting…"); setTests(null); setResult(null); setBaseline(null); setMutation(""); setDamage(null);
-    setIntact(null);
+    // What the run starts from. If it fails before delivering anything, this is what the bench goes back to.
+    const start: Held = resume ? { params, step: cumulative.current, corpus: knownCorpus.current, run: run.current, lineage: line.current } : NOTHING_HELD;
+    began.current = start; reached.current = null; training.current = true;
+    if (!resume) { first.current = null; setReference(null); setParams(null); setStep(0); cumulative.current = 0; setLineage(UNTRAINED); setDamage(null); }
+    else setLineage(whileTraining(start.lineage));
+    // A run shows its own checkpoints, after the losses of the training that led to the weights it starts from.
+    showRun({ samples: [], losses: start.run.losses });
+    runBase.current = start.step;
+    runCorpus.current = resume ? start.corpus + "\n" + text : text;
+    setRunning(true); setStatus("Starting…"); setTests(null); setResult(null); setBaseline(null);
     worker().postMessage({ t: "start", text, params: resume ? params!.slice() : undefined, prompt, steps: STEPS, batch: BATCH, lr: LR, seed: 1 + runBase.current } satisfies TinyIn);
   };
   const test = (weights = params, label = mutation) => {
@@ -114,22 +153,48 @@ export default function TinyView() {
   };
   // The whole model, or one layer when the 3D view punches it. Either way the result starts from the intact copy.
   const mutate = (kind: "noise" | "erase", floor?: number) => {
-    if (!intact || disabled) return;
-    const next = mutateWeights(intact, cfg, { kind, amount: strength, seed: mutationSeed.current++, floor });
+    const from = lineage.intact;
+    if (!from || disabled) return;
+    const next = mutateWeights(from.params, cfg, { kind, amount: strength, seed: mutationSeed.current++, floor });
     const where = floor === undefined ? "" : `Layer ${floor + 1}: `;
     const label = where + (kind === "erase" ? `${where ? "erased" : "Erased"} approximately ${Math.round(strength * 100)}% of matrix weights` : `${where ? "noise" : "Noise"} at ${Math.round(strength * 100)}% of each matrix’s RMS`);
-    setParams(next); setMutation(label); setDamage({ kind, floor }); setTests(null); test(next, label);
+    setParams(next); setLineage(afterDamage(line.current, label)); setDamage({ kind, floor }); setTests(null);
+    // The copy starts from the intact weights, so it stands at their step and has seen their text. It has
+    // no training of its own yet: the history shown is theirs, and is said to be.
+    backTo(from);
+    test(next, label);
   };
+  /** The step, text and history of a checkpoint, in place of whatever a retrained copy left behind. */
+  const backTo = (c: Checkpoint) => { setStep(c.step); cumulative.current = c.step; knownCorpus.current = c.corpus; showRun(c.run); };
   const restore = () => {
-    if (!intact || disabled) return;
-    setParams(intact); setMutation(""); setDamage(null); setTests(null); test(intact, "");
+    const back = lineage.intact;
+    if (!back || disabled) return;
+    setParams(back.params); setLineage(afterRestore(line.current)); setDamage(null); setTests(null);
+    backTo(back);
+    test(back.params, "");
   };
+  // The one action that replaces the intact weights: the visitor keeps the retrained copy as the model to go on from.
+  const adopt = () => {
+    if (!params || disabled || !damaged) return;
+    setLineage(afterAdopting({ params, step: cumulative.current, corpus: knownCorpus.current, run: run.current })); setDamage(null);
+    // What was generated before compared this copy with the old intact weights. "Intact weights" now
+    // means these, so the old pair is dropped and these weights answer the same prompt again.
+    setResult(null); setBaseline(null);
+    test(params, "");
+    setStatus(`These weights are now the intact copy, at step ${cumulative.current.toLocaleString("en-US")}.`);
+  };
+  const keepLabel = damaged ? "Retrain the damaged copy" : "Keep learning";
+  const intactStep = lineage.intact?.step ?? 0;
   const last = samples[samples.length - 1];
+  // Whether the history on screen ends at the weights on screen. A run under way is always its own.
+  const ownRun = running || runIsCurrent(lineage);
+  const lastLoss = losses.length ? losses[losses.length - 1] : null;
   const validText = encode(text).length >= 65;
   // Training state stays in this component; the flat map and the 3D model are two views of it.
   const visualizer = view3d ? <Suspense fallback={<p className="stage-state" role="status">Opening the 3D model…</p>}>
     <GrowStage params={params} reference={reference} intact={intact} step={step} running={running} active={active}
-      controls={{ disabled, unavailable, validText, status, loss: losses.length ? losses[losses.length - 1] : null, mutation, damage, strength, setStrength,
+      controls={{ disabled, unavailable, validText, status, loss: ownRun ? lastLoss : null, mutation, damage, strength, setStrength,
+        keepLabel, continueNote: continueNote(lineage), retrained: lineage.retrained, intactStep, adopt,
         teach, stop: () => { w.current?.postMessage({ t: "stop" } satisfies TinyIn); setStatus("Finishing the current step…"); }, mutate, restore,
         prompt, setPrompt, test: () => test(), result, baseline }} /></Suspense>
     : <WeightScope params={params} reference={reference} step={step} running={running} mutated={!!mutation} />;
@@ -150,14 +215,16 @@ export default function TinyView() {
         <div className="row training-actions">
           {running ? <button className="btn primary" onClick={() => { w.current?.postMessage({ t: "stop" } satisfies TinyIn); setStatus("Finishing the current step…"); }}>Stop learning</button>
             : <><button className="btn primary" disabled={disabled || unavailable || !validText} onClick={() => teach(false)}>{params ? "Start over from noise" : "Start learning"}</button>
-            {params && <button className="btn" disabled={disabled || unavailable || !validText} onClick={() => teach(true)}>Keep learning</button>}</>}
+            {params && <button className="btn" disabled={disabled || unavailable || !validText} onClick={() => teach(true)}>{keepLabel}</button>}</>}
         </div>
+        {damaged && !running && <p className="note">{continueNote(lineage)}</p>}
         <p className="note training-status" role="status">{unavailable ? "Live training needs WebGPU. Try Chrome on a supported device." : status || (params ? "Weights stay in memory for this visit." : "About 20 seconds on a fast laptop. Everything runs here.")}</p>
       </section>
       {samples.length > 0 && <section className="learning-output"><div className="section-heading"><h2>{running ? "Learning in front of you" : "What changed"}</h2><span className="num">Step {step}</span></div>
+        {!ownRun && <p className="note">{runNote(lineage)}</p>}
         <p className="note">Same starting text and random seed at every checkpoint.</p>
         <div className="training-samples"><div><h3>At the start of this lesson</h3><pre className="sample">{samples[0].text}</pre></div><div><h3>{running ? "Latest checkpoint" : "Last checkpoint"} · {last?.step}</h3><pre className="sample">{last?.text}</pre></div></div>
-        {losses.length > 0 && <><LossChart losses={losses} /><p className="note">Training loss {losses[losses.length - 1].toFixed(3)}. Lower means better predictions on the training text.</p></>}
+        {lastLoss !== null && <><LossChart losses={losses} /><p className="note">Training loss {lastLoss.toFixed(3)}{ownRun ? "" : " at the end of that run, before the damage"}. Lower means better predictions on the training text.</p></>}
       </section>}
       <section className="test-bench"><h2>Ask it something it hasn’t seen.</h2><p className="note">Only this starting text goes into the model. The training examples stay out of its context.</p>
         <label htmlFor="test-prompt" className="sr-only">Test starting text</label><div className="probe-input"><input id="test-prompt" value={prompt} disabled={disabled} onChange={(e) => setPrompt(e.target.value)} /><button className="btn" disabled={!params || disabled || !prompt.trim()} onClick={() => test()}>Generate</button></div>
@@ -171,9 +238,10 @@ export default function TinyView() {
         <label className="damage-strength" htmlFor="damage-strength">Strength <output>{Math.round(strength * 100)}%</output><input id="damage-strength" type="range" min="0.05" max="1" step="0.05" value={strength} disabled={disabled} onChange={(e) => setStrength(Number(e.target.value))} /></label>
         <div className="row"><button className="btn change" disabled={!intact || disabled} onClick={() => mutate("noise")}>Scramble weights</button><button className="btn" disabled={!intact || disabled} onClick={() => mutate("erase")}>Erase weights</button><button className="btn quiet" disabled={!mutation || disabled} onClick={restore}>Restore intact model</button></div>
         {mutation && <p className="note">{mutation}. Each experiment starts from the intact copy.</p>}
+        {lineage.retrained > 0 && <p className="note"><button className="linkish" disabled={disabled} onClick={adopt}>Make this the intact copy</button> It replaces the intact weights from step {intactStep.toLocaleString("en-US")}.</p>}
       </section>
       {params && <section className="training-handoff"><button className="btn" disabled={disabled} onClick={() => { setWorking(true); void openTiny(params).catch((e) => setStatus(String(e))).finally(() => setWorking(false)); }}>Open this model in the full lab</button><p className="note">Inspect attention, disable heads, and follow each letter through all four layers.</p></section>}
-      <details className="training-details"><summary>What is actually being trained?</summary><p className="note">A separate {layout(cfg).total.toLocaleString()}-parameter transformer, starting from random weights. Adam updates every trainable parameter using next-letter prediction. This does not fine-tune Qwen. Keep learning preserves the current weights and starts a new optimizer. It trains on 64-letter windows and works best with short ASCII patterns.</p>{params && !disabled && <SlowMotion params={params} corpus={text} worker={worker} />}</details>
+      <details className="training-details"><summary>What is actually being trained?</summary><p className="note">A separate {layout(cfg).total.toLocaleString()}-parameter transformer, starting from random weights. Adam updates every trainable parameter using next-letter prediction. This does not fine-tune Qwen. Keep learning preserves the current weights and starts a new optimizer. After Scramble or Erase it trains the damaged copy and the intact weights stay available to restore. It trains on 64-letter windows and works best with short ASCII patterns.</p>{params && !disabled && <SlowMotion params={params} corpus={text} worker={worker} />}</details>
     </main>
     {!narrow && <aside className={`lab-scope${view3d ? " stage-scope" : ""}`} id="training-scope" aria-label="Live training visualizer">{visualizer}</aside>}
     {narrow && <Modal open={scope && active} onClose={() => setScope(false)} title="Live weights" className="mobile-model"><div id="training-scope" className={view3d ? "stage-scope" : undefined}>{visualizer}</div></Modal>}

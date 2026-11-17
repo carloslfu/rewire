@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { isolate } from "../src/stage/isolate.ts";
-import { escapeIntent } from "../src/stage/keys.ts";
+import { escapeIntent, stageKey } from "../src/stage/keys.ts";
 import { type Box, declutter, dockInset, overlaps, placeBox, toolbarInset } from "../src/stage/labels.ts";
 
 it("keeps a label on its point when there is room and inside the view when there is not", () => {
@@ -130,4 +130,76 @@ it("stacks the full view above the sticky page header", () => {
   expect(css).toMatch(/\.lab-scope \{ position: sticky;/);
   expect(z(".lab-scope.stage-raised")).toBeGreaterThan(5);
   expect(z(".stage-bench.expanded")).toBeGreaterThan(5);
+});
+
+it("closes an open dock panel first, wherever the focus is, and leaves a composition to the input method", () => {
+  // A panel is open and the focus is on a button, a select or in a text field outside the stage: the panel goes first.
+  for (const target of [{ tagName: "BUTTON" }, { tagName: "SELECT" }, { tagName: "TEXTAREA" }, { tagName: "INPUT", type: "text" }]) {
+    expect(escapeIntent(target, false, false, true)).toBe("panel");
+  }
+  // The input method's own Escape is still its own.
+  expect(escapeIntent({ tagName: "TEXTAREA" }, false, true, true)).toBe("wait");
+  // With the panel closed, the next Escape is what it always was.
+  expect(escapeIntent({ tagName: "BUTTON" }, false, false, false)).toBe("close");
+  expect(escapeIntent({ tagName: "TEXTAREA" }, false, false, false)).toBe("leave");
+});
+
+it("acts once per press for keys that switch something or change the model, and repeats only movement", () => {
+  const press = (key: string, repeat = false, shiftKey = false) => stageKey({ key, repeat, shiftKey });
+  // Held down, P must not knock a part out and put it back, E must not flap the layers, and ? must not flicker the help.
+  for (const key of ["p", "P", "e", "E", "?", " "]) {
+    expect(press(key)?.act).not.toBe("ignore");
+    expect(press(key, true)).toEqual({ act: "ignore" });
+  }
+  expect(press("p")).toEqual({ act: "punch" });
+  expect(press("E")).toEqual({ act: "spread" });
+  expect(press("?")).toEqual({ act: "help" });
+  expect(press(" ")).toEqual({ act: "pan" });
+  // Moving between parts, turning and zooming go on for as long as the key is held.
+  expect(press("ArrowUp", true)).toEqual({ act: "move", key: "ArrowUp" });
+  expect(press("ArrowLeft", true, true)).toEqual({ act: "orbit", azimuth: -0.2, polar: 0 });
+  expect(press("ArrowDown", false, true)).toEqual({ act: "orbit", azimuth: 0, polar: 0.12 });
+  expect(press("+", true)).toEqual({ act: "zoom", factor: 0.8 });
+  expect(press("-", true)).toEqual({ act: "zoom", factor: 1.25 });
+  // Fitting, focusing and the named views land in the same place however often they fire.
+  expect(press("0")).toEqual({ act: "fit" });
+  expect(press("Home", true)).toEqual({ act: "fit" });
+  expect(press("f")).toEqual({ act: "focus", orFit: true });
+  expect(press("Enter")).toEqual({ act: "focus", orFit: false });
+  expect(["1", "2", "3", "4"].map((k) => press(k))).toEqual(["home", "front", "side", "top"].map((view) => ({ act: "view", view })));
+  // Anything else is not the model's key and is left to the browser.
+  for (const key of ["a", "Tab", "Escape", "5", "Shift"]) expect(press(key)).toBeNull();
+});
+
+it("lets no page style move a label off the box it was placed and measured on", () => {
+  // A label's kind is a plain second class, and the page has classes of the same names (.caption, .step).
+  // A margin or border from one of those shifts the label after it was placed: two labels the layout kept
+  // apart then overlap on screen. Every such property must be taken back for labels.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const stage = readFileSync(new URL("../src/stage/scene/stage.ts", import.meta.url), "utf8");
+  const kinds = new Set([...stage.matchAll(/stage-label((?: [a-z]+)+)/g)].flatMap((m) => m[1].trim().split(" ")));
+  for (const kind of ["caption", "step", "token", "bar", "layer", "plate", "message", "pending"]) expect(kinds).toContain(kind);
+  kinds.add("current");
+  const rules = [...css.matchAll(/([^{}@;]+)\{([^{}]*)\}/g)].map((m) => ({
+    selectors: m[1].split(",").map((s) => s.trim()),
+    properties: m[2].split(";").map((d) => d.split(":")[0].trim()).filter(Boolean),
+  }));
+  const moves = (p: string) => /^(margin|border|padding|inset|top|left|right|bottom|position|display|float|transform|translate)(-|$)/.test(p);
+  const family = (p: string) => p.split("-")[0];
+  const reset = new Set(rules.filter((r) => r.selectors.includes(".stage-labels > .stage-label")).flatMap((r) => r.properties.map(family)));
+  expect(reset).toContain("margin");
+  expect(reset).toContain("border");
+  const stray: string[] = [];
+  for (const kind of kinds) {
+    // What the label's own rule sets for this kind is deliberate.
+    const own = new Set(rules.filter((r) => r.selectors.includes(`.stage-label.${kind}`)).flatMap((r) => r.properties.map(family)));
+    for (const r of rules) {
+      if (!r.selectors.includes(`.${kind}`)) continue;
+      for (const p of r.properties) if (moves(p) && !reset.has(family(p)) && !own.has(family(p))) stray.push(`.${kind} { ${p} }`);
+    }
+  }
+  expect(stray).toEqual([]);
+  // The two that caused it are really there, so this test is about something.
+  expect(rules.some((r) => r.selectors.includes(".caption") && r.properties.includes("margin-top"))).toBe(true);
+  expect(rules.some((r) => r.selectors.includes(".step") && r.properties.some((p) => p.startsWith("border")))).toBe(true);
 });

@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import type { Side } from "../model/types.ts";
 import { setFollowing } from "../state/actions.ts";
 import { type State, store } from "../state/store.ts";
-import { chosen, comparisonTarget, visibleTokens } from "../ui/word.ts";
+import { chosen, comparisonTarget, replyMark, visibleTokens } from "../ui/word.ts";
 import { beatCount } from "./playback.ts";
 import { fadeMs, ReplayController, type Scope, type Snapshot, type Subject } from "./replay.ts";
 import type { Stage } from "./scene/stage.ts";
@@ -32,7 +32,7 @@ export function replaySubject(s: Live): Subject | null {
  */
 export function outputIdentity(s: Pick<State, "model" | "version" | "turns" | "word" | "fork">): string {
   const c = chosen(s);
-  return c ? `${s.model.id}.${s.version}.${c.turn.id}.${c.ref.side}.${c.ref.index}.${c.tok.id}` : "";
+  return c ? `${s.model.id}.${s.version}.${c.turn.id}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${replyMark(c.reply)}` : "";
 }
 
 /** Why Replay answer is not available yet, in the visitor's words. Empty when it is. */
@@ -50,6 +50,9 @@ export function replayWait(s: Live): string {
 /** The view a token can be shown in: a comparison only where one was measured. */
 const viewFor = (s: State, word: NonNullable<State["word"]>): State["view"] => (word.side === "normal" && comparisonTarget({ ...s, word }) ? s.view : "push");
 
+/** The visitor's own pauses counted when the replay began. */
+let pausesAtStart = 0;
+
 export const session = new ReplayController({
   beats: () => beatCount(store.get().model),
   subject: () => replaySubject(store.get()),
@@ -59,7 +62,12 @@ export const session = new ReplayController({
     const word = { ...c.ref, index };
     store.set({ word, view: viewFor(s, word) });
   },
-  left: (_reason, follow) => { if (follow && !store.get().follow) setFollowing(true); },
+  left: (reason, follow) => {
+    // A token chosen or a candidate picked during the replay is the visitor's own pause, as it is in
+    // live output. It outlasts a replay that ends by itself. Back to live always follows.
+    const chose = store.get().pauseRevision !== pausesAtStart;
+    if (follow && (reason === "live" || !chose) && !store.get().follow) setFollowing(true);
+  },
 });
 // The inspector measures the selected token as soon as it opens, so a replay never plays under it.
 store.subscribe(() => { if (session.sync() && store.get().sheet) session.pause(); });
@@ -80,6 +88,7 @@ export function startReplay(scope: Scope, of?: { sample: number; side: Side }): 
   }
   if (!word || !replaySubject({ ...s, word })?.ready) return false;
   const following = s.follow;
+  if (session.get().mode === "live") pausesAtStart = s.pauseRevision;
   store.set({ word, view: viewFor(s, word), follow: false });
   if (session.enter(scope, following)) return true;
   if (following) setFollowing(true);

@@ -74,6 +74,7 @@ h3 { font-size: 15px; font-weight: 600; }
 .muted, .note { color: var(--muted); }
 .faint { color: var(--faint); }
 .small, .note { font-size: 13px; }
+.edit-wait { margin: 6px 0; }
 .changed-text { color: var(--changed); }
 .btn { min-height: 40px; padding: 8px 14px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; }
 .btn:hover { border-color: var(--muted); }
@@ -355,9 +356,13 @@ html:has(dialog[open]) { overflow: hidden; }
 .kv dd { margin: 0; }
 .cands { width: 100%; border-collapse: collapse; font-size: 14px; }
 .cands td { padding: 2px 4px; vertical-align: middle; }
+.cands th { padding: 2px 4px; font-size: 12px; font-weight: 500; color: var(--muted); text-align: left; white-space: nowrap; }
+.cands th.p { text-align: right; }
 .cands tr.cutline td { border-top: 2px dashed var(--faint); }
-.cands .p { width: 46px; text-align: right; }
-.cands .barc { width: 40%; }
+.cands .p { width: 52px; text-align: right; white-space: nowrap; }
+/* The model's probability has two decimals and a bound sign: >99.99% must fit on one line. */
+.cands .p.m { width: 70px; }
+.cands .barc { width: 30%; }
 .cands .bar { height: 10px; background: var(--fg); border-radius: 2px; opacity: 0.75; }
 .cands tr.chosen td:first-child { font-weight: 700; }
 .cands tr.dropped { color: var(--faint); }
@@ -581,7 +586,10 @@ html:has(dialog[open]) { overflow: hidden; }
   .geometry-choice { flex-wrap: wrap; }
   .geometry-choice select { max-width: 100%; }
   .cands { table-layout: fixed; }
-  .cands .barc { width: 18%; }
+  .cands .barc { display: none; }
+  .cands .p { width: 44px; font-size: 13px; }
+  .cands .p.m { width: 66px; }
+  .cands th:last-child, .cands td:last-child { width: 96px; text-align: right; }
   .cands td { overflow-wrap: anywhere; }
   .cands .btn { padding-inline: 5px; font-size: 12px; }
   input:not([type="checkbox"]):not([type="range"]), textarea, select { font-size: 16px; }
@@ -696,13 +704,16 @@ html:has(dialog[open]) { overflow: hidden; }
 .view-toggle button { min-width: 38px; }
 .training-lab .lab-scope.stage-scope { padding: 0; overflow: hidden; }
 .stage-bench { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; background: var(--panel); }
-.stage-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px 4px; }
+/* The title and the status line keep the height of their own text. They never give it up to the stage
+   below them, so a status that wraps on a narrow screen pushes the stage down instead of spilling over it. */
+.stage-head { display: flex; flex: none; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px 4px; }
 .stage-title { min-width: 0; }
 .stage-title h2 { font-size: 21px; }
 .stage-title .eyebrow { margin-bottom: 2px; }
 .stage-head-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .stage-head-actions .btn, .stage-status .btn { font-size: 12px; min-height: 30px; padding: 4px 8px; }
-.stage-status { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 0 20px 8px; font-size: 11px; color: var(--muted); min-height: 30px; }
+.stage-status { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 0 20px 8px; font-size: 11px; line-height: 1.4; color: var(--muted); min-height: 30px; }
+.stage-status > span { flex: 1 1 180px; min-width: 0; }
 .stage-status .btn { flex-shrink: 0; margin-left: auto; }
 .stage-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* The stage is a photo studio under either theme: a dark seamless backdrop, a little lighter beside a light page.
@@ -719,6 +730,10 @@ html:has(dialog[open]) { overflow: hidden; }
 .stage-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 /* Labels are positioned by the stage, which keeps them inside the view and apart from each other. */
 .stage-label { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11px; line-height: 1.25; color: var(--stage-muted); font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgb(0 0 0 / .75); }
+/* A label's kind is a second class (caption, step, token…), and some of those words are also classes of the
+   page. Whatever the page gives them, a label takes no margin or border: it is placed by its transform alone,
+   on the box that was measured, so the labels that give way to each other really are apart on screen. */
+.stage-labels > .stage-label { margin: 0; border: 0; }
 .stage-label.layer { font-size: 10px; color: var(--stage-faint); }
 .stage-label.caption { font-weight: 600; color: var(--stage-ink); }
 .stage-label.token { font-family: var(--mono); font-size: 10px; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }

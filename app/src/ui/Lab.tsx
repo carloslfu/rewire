@@ -11,6 +11,7 @@ import { FollowControl } from "./FollowControl.tsx";
 import { ReplayStatus } from "./ReplayStatus.tsx";
 import { HeadExampleHint, NeuronControl } from "./Examples.tsx";
 import { ViewToggle } from "../stage/ViewToggle.tsx";
+import { useEditBlocked } from "./useEditBlocked.ts";
 
 type Part = Extract<Focus, { kind: "head" | "memory" | "floor" }>;
 
@@ -25,12 +26,12 @@ export function LabScope() {
 function FlatScope() {
   const trigger = useRef<HTMLElement | null>(null);
   const overview = useRef<HTMLDivElement | null>(null);
-  const busy = useStore((s) => s.busy);
   const mode = useStore((s) => s.mode);
   const chips = useStore((s) => s.chips);
   const model = useStore((s) => s.model);
   const view = useStore((s) => s.view);
   const focus = useStore((s) => s.focus);
+  const why = useEditBlocked();
   const [controlsModel, setControlsModel] = useState<string | null>(null);
   const part = controlsModel === model.id && (focus.kind === "head" || focus.kind === "memory" || focus.kind === "floor") ? focus : null;
   const selectedRow = part?.floor;
@@ -59,7 +60,8 @@ function FlatScope() {
     reveal();
     return () => { cancelAnimationFrame(frame); resize.disconnect(); };
   }, [selectedRow, selectedColumn, view]);
-  const disabled = busy || mode !== "live";
+  // The same rule as the 3D view and as applying a change: a running sample update can be replaced, a reply being written cannot.
+  const disabled = !!why;
   const changes = describeChips(chips);
   const select = (focus: Focus) => {
     if (focus.kind === "head" || focus.kind === "memory" || focus.kind === "floor") {

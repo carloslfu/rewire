@@ -48,6 +48,12 @@ export interface State {
   /** Bumped each time following is resumed, so a 3D replay ends even when the followed token is unchanged. */
   followRevision: number;
   /**
+   * Bumped each time the visitor pauses following themselves: by choosing a token or by picking a
+   * candidate. A 3D replay that ends on its own gives following back only if this has not moved
+   * since the replay began, so a choice made during a replay stays the visitor's.
+   */
+  pauseRevision: number;
+  /**
    * A reply the visitor asked to replay in the 3D view, by sample id and side. The 3D view starts
    * the visual replay once it is open and clears this. Not to be confused with `replay` above, which
    * is the model writing changed answers again.
@@ -88,6 +94,8 @@ export interface State {
   qwenMode?: Mode;
   /** The conversation reached the model's context limit. */
   full?: boolean;
+  /** Tokens of prompt and reply each loaded model can hold. A reply that fills it cannot be continued. */
+  contextCaps?: { qwen?: number; tiny?: number };
   /** Speed bench results (?bench). */
   bench?: Record<string, unknown>;
 }
@@ -106,6 +114,7 @@ export const initial: State = {
   word: null,
   follow: true,
   followRevision: 0,
+  pauseRevision: 0,
   replayRequest: null,
   outputSample: null,
   focus: { kind: "word" },

@@ -16,7 +16,8 @@ export function Strip({ values, rows = 1, label, scale, names, height }: {
   const [hover, setHover] = useState<string>("");
   const [theme, setTheme] = useState(0);
   const cols = Math.ceil(values.length / rows);
-  const s = scale ?? values.reduce((m, x) => Math.max(m, Math.abs(x)), 0) ?? 1;
+  // The scale comes from the numbers. A masked score (−∞) or a value that is not a number cannot set it.
+  const s = scale ?? values.reduce((m, x) => { const a = Math.abs(x); return Number.isFinite(a) && a > m ? a : m; }, 0);
   useEffect(() => onThemeChange(() => setTheme((t) => t + 1)), []);
   useEffect(() => {
     const cv = ref.current;
@@ -41,6 +42,7 @@ export function Strip({ values, rows = 1, label, scale, names, height }: {
   };
   let min = Infinity, max = -Infinity;
   for (const x of values) { if (x < min) min = x; if (x > max) max = x; }
+  if (min > max) min = max = Number.NaN; // nothing here is a number
   return (
     <div>
       <canvas ref={ref} className="strip" style={{ height: height ?? (rows > 1 ? Math.min(160, rows * 6) : 22) }}

@@ -29,7 +29,30 @@ written is selected once and kept. Only you turn following on or off, with one e
 the samples, opening a guided example and switching between Qwen and the tiny model start a new
 experiment, which follows again. Switching between Push and Change from original, or between 2D and
 3D, keeps the setting. A 3D Replay holds the selection while it lasts: Back to live turns following
-on, and a replay that ends any other way leaves following as you had set it before.
+on, and a replay that ends any other way leaves following as you had set it before. Choosing a token
+or using a candidate during a replay is your own pause, the same as in live output: it stays paused
+on your token when the replay ends, and only Back to live or the toggle follows again.
+
+Using a candidate in place of the written piece rewrites the reply from that piece on, to the length
+the reply had (or the reply cap, whichever is longer), so a pick late in a continued reply or near the
+end of a tiny-model text still writes the picked piece and everything after it. Undo restores the
+reply as it was. A comparison with the changed model belongs to the exact tokens it was measured on:
+after a pick, an Undo or a Continue the old one is dropped and measured again, and until the new one
+arrives no word is underlined and no changed probability is quoted.
+
+A reply stops at its cap (64 word pieces for Qwen, 160 letters for the tiny model) and Continue writes
+on from there. Prompt and reply together cannot exceed the model's context: 1,024 tokens for Qwen on
+desktop, 512 on a phone, 512 letters for the tiny model. A reply that reaches it says so in place of
+Continue.
+
+The change table the kernels read has fixed room: 16 dictionary swaps, 16 hidden words, 8 zeroed
+weights and 16 neuron pushes at once. One more than that is refused before anything is shown as
+active, with a message naming the limit, and the control that would add it is disabled with the same
+reason. Nothing is dropped silently. A hidden word is hidden by its position in the prompt, so with
+several samples its chip names the word only where every sample has the same word at that position,
+and the position otherwise. Every change control, in the inspector, the 2D view and the 3D bench, is
+enabled by one rule: the model is ready, no reply is being written and Qwen is not being taught.
+While samples are updating, a further change restarts the update.
 
 **Teach** fine-tunes the same Qwen model using editable question/answer pairs. A rank-8 LoRA adds
 32,768 trainable float32 parameters to layer 28's MLP down projection; original Qwen weights stay
@@ -63,7 +86,19 @@ The live weight map shows actual parameter values or their changes since initial
 continues from current weights with a fresh optimizer, including after changing the training text.
 
 Scramble and Erase rewrite the learned matrix parameters themselves. A retained intact copy makes the
-experiment reversible, and both copies generate with the same input and sampling seed. Open the result
+experiment reversible, and both copies generate with the same input and sampling seed. The intact copy
+is the last one trained without damage, and only two actions replace it: Start over from noise, and
+Make this the intact copy. While a damaged copy is on screen, the continue button reads Retrain the
+damaged copy and a note says before you press it that training continues from the damaged weights and
+the intact ones are kept. The copy is then labelled with its damage and the steps trained since, and
+Restore intact model still returns to the intact weights, their step count and their training text.
+Make this the intact copy appears once the damaged copy has been retrained, and names the step of the
+weights it replaces; the last generation is then made again, so Intact weights always means the
+current intact copy. The checkpoints and the loss on screen belong to the weights on screen: Restore
+and a new damage experiment bring back the intact weights' own history, and a damaged copy that has
+not been trained says that the history shown is the intact run's. A run that fails keeps the last
+snapshot it delivered, under the same rules as a finished run, or leaves the bench exactly as it was
+before the run. Open the result
 in the full lab to inspect attention and direct contributions or disable components. Grow does not
 fine-tune Qwen. The tiny model trains on 64-letter windows and works best with short ASCII patterns.
 
@@ -115,9 +150,11 @@ Moving around:
   between the decks. Every part stays selectable. It moves the drawing only, and Reset layout closes it.
 - With the model focused: arrow keys move between parts, Shift with arrows turns the model, + and −
   zoom, F or Enter focuses the selected part, Home or 0 fits the model, 1 to 4 pick a view, E spreads
-  the layers, Space held pans, P punches the selected part, and ? opens the help panel. In the full
-  view, Escape closes an open panel or menu first, steps out of a text field next, and only then closes
-  the view.
+  the layers, Space held pans, P punches the selected part, and ? opens the help panel. E, P, ? and
+  Space act once per press: holding one down does not repeat it, while arrows and zoom do repeat.
+  Space stops panning when it is released, when a modifier key goes down or when the stage loses
+  focus. In the docked and the full view alike, Escape closes an open panel or menu first, steps out
+  of a text field next, and only then closes the full view.
 
 A selected part has its own restore button, and it undoes only what belongs to that part. Restore this
 head clears the head's strength and direction change. Restore this MLP clears its strength and the
@@ -144,15 +181,34 @@ What is measured and what is drawn:
   replay the plates of the selected layer come up in that order. Hover a tile to read its number. With a head selected, arcs show its measured attention over the context. The bars over
   Words out are the model's own probabilities for the pieces it ranked highest and for the piece that
   was written: temperature 1, over the whole vocabulary, the same measure as the written piece's
-  log-probability. They are not the sampler's odds, which are a softmax at the sampling temperature
-  over the top 20 only and can read 100% for a piece the model gave far less. The 2D view keeps those
-  odds where the draw is the subject, and says so: the candidate table (where a candidate is picked)
-  is headed Odds in the draw, the detail panel lists Probability when drawn beside At temperature 1,
-  and the tower's Words out figure is described as in the draw. The written piece always has a bar,
+  log-probability. They are not the sampler's odds. The sampler takes the top 20 with a softmax at
+  the sampling temperature, keeps the first of them that reach 0.8 of that mass (top-p), and draws
+  among those kept, so a piece's chance in the draw is its share of the kept candidates and a
+  candidate past the cut has none. With one candidate kept the draw is certain, 100%, whatever the
+  model gave it. The 2D view shows those odds where the draw is the subject, and says so: the
+  candidate table has a Draw column (the chance after the cut, or cut for a dropped candidate) beside
+  a Model column (temperature 1, whole vocabulary, in the same two-decimal bounded form as the 3D
+  bars, while a certain draw reads exactly 100%); the detail panel lists Chance in the draw beside
+  Model's probability; and the tower's Words out figure is described as in the draw. A piece you
+  picked is never called drawn: it reads Selection: Your choice, with what the
+  draw would have given it. Candidates past the cut and outside the list can still be used; that is
+  your intervention, and is labelled as one. The written piece always has a bar,
   also when you picked it from outside the top 20. Every number has two decimals (62.18%, 99.72%,
   1.00%), so tokens with different probabilities read differently as a replay moves through them.
   Below 0.01% a bar reads <0.01%, from 99.995% up it reads >99.99%, never exactly 0% or 100%, and a
   value that is not a probability reads unavailable.
+- In Change from original the parts are lit only by a comparison measured on the selected token.
+  While one is being measured the readout says so, and when there is none it says that. It never
+  states a total of zero for values that do not exist.
+- A direct push that is not a number is no measurement: its part and its layer stay unlit, the
+  others keep their colors and scale, and the readout says the measurement is incomplete and gives
+  no total, live and in a replay.
+- A measurement belongs to one writing of a reply. Every new reply and every rewrite from a picked
+  piece is its own writing, also when a later pick repeats an earlier one after different tokens;
+  Continue keeps it, and Undo returns to the writing it restores.
+- Grab moves a part only once the press has travelled past the click threshold, so a click with a
+  trembling hand selects the part and leaves it on its socket. A tooltip is read again when the
+  values or the part under a resting pointer change.
 - Teach shows the adapter's actual A and B matrices and the size of each of its eight ranks, refreshed
   every 10 steps. Frozen layers are drawn dimmed. No activations are measured during teaching, so
   nothing else lights up.
@@ -226,7 +282,7 @@ different thing: there the model really writes the changed answers again.)
   inspection. A measurement is only ever shown for the token it was made for. Opening the inspector
   pauses the replay for the same reason.
 - **Back to live** ends the replay and follows the newest output. A replay also ends by itself, never
-  moving the selection again, when the model starts writing (a new question, Continue, a picked
+  moving the selection again and keeping a token you chose during it, when the model starts writing (a new question, Continue, a picked
   candidate), when the model changes (a control, Punch, Restore), when a sample is edited, removed,
   restored or cleared, when you switch models, benches or to the 2D view, or when the model sheet is
   closed on a phone. It pauses, and stays paused until you resume, when the tab is hidden, the stage
@@ -401,12 +457,30 @@ the tokenizer files and license notices. Deployment checks verify the public man
 subpath assets. Both refuse builds that contain archived recordings. Historical traces are preserved in
 `fixtures/recordings/` for research and format tests, outside the deployed app.
 
-For isolated fallback checks, run `node app/scripts/browser-qa.mjs`. Its local page at
-`http://localhost:5200/?scenario=reset` adds a button that sends a simulated GPU-loss notification to the
-real engine client. It must cancel current writes, reload the worker and let Continue re-read the saved
-conversation. This checks the recovery path; physical GPU loss still needs a device test. Other scenarios
-are `no-gpu`, `crashed`, `storage` and `corrupt`. The fixtures live in a temporary directory and are absent
-from the production build. Phone layout checks on a desktop do not qualify phone performance.
+For isolated fallback checks, run `node app/scripts/browser-qa.mjs` after `pnpm build`. It serves the
+production build unchanged, at the deployed subpath and under the same response policies, from a
+temporary directory that also holds a few QA files. Open
+`http://localhost:5200/rewire/?scenario=<name>`; several names can be joined with commas.
+
+- `reset` adds a Simulate GPU reset button (Alt+Shift+G) that sends a device-loss notification to the
+  real engine client. It must cancel current writes, reload the worker and let Continue re-read the
+  saved conversation. This checks the recovery path; physical GPU loss still needs a device test.
+- `worker-fail` adds a Fail engine worker button (Alt+Shift+W) that terminates the engine worker and
+  reports its error, as a crash does. Press it with the tiny model on screen: the device line and Try
+  again must appear and Back to Qwen must work. Press it on the Grow bench before Open this model in
+  the full lab: the handoff must start a fresh worker, and the tiny model, which then runs, shows no
+  error. Qwen is not loaded in that worker, so back on Qwen the error and Try again are still there
+  and Try again loads it. Leaving the tiny model announces Qwen's actual state, never a stopped reply.
+- `worker-dead` makes the engine worker throw while it starts (`&dead=N` for the first N workers).
+- `no-gpu` removes `navigator.gpu`, and `storage` makes the worker's cache storage refuse to open.
+- `corrupt` replaces the first cached weight chunk with zeros before the model loads and reports
+  whether the page repaired it. It needs the model: the pinned remote one, downloaded on a first
+  visit to that origin, or local weights with a build made with `VITE_WEIGHTS_URL=/weights/`.
+
+The controls sit in a small fixed panel, the key chords work when a dialog covers the page, and each
+event is logged to the console as `QA_<EVENT>`. `node app/scripts/browser-qa.mjs --check` writes the
+QA files, checks that the served page starts from them and that nothing of them is in `app/dist`, and
+exits. Phone layout checks on a desktop do not qualify phone performance.
 
 ## Deploying
 

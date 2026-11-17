@@ -95,6 +95,7 @@ const studioLook = (page: Theme): Theme => (page.dark ? page : { ...DARK });
 /** How far, in pixels, a press may travel and still be a click, and how far from a part a click still reaches it. */
 const SLOP = { mouse: 5, touch: 12 };
 const DOUBLE_MS = 380;
+const NOTHING = -1, PLATE = -2;
 
 export class Stage {
   readonly specimen: Specimen;
@@ -142,6 +143,8 @@ export class Stage {
   private hoverAt: { x: number; y: number } | null = null;
   private selected: Part | null = null;
   private tipPinned = 0;
+  /** What the tip on show describes: a part's index, PLATE for a tile of the detail bay, or NOTHING. */
+  private tipOf = NOTHING;
   private readonly beats: number;
   private readonly shadows: boolean;
   private reduced: boolean;
@@ -500,12 +503,28 @@ export class Stage {
   setValues(scaled: Float32Array | null, kind: "signed" | "size") {
     this.specimen.setValues(scaled, kind);
     this.specimen.setPlayhead(this.shown);
+    this.refreshTip();
     this.invalidate();
+  }
+
+  /**
+   * What the tip describes has changed under a pointer that did not move: another token's values,
+   * another layer's plates, a changed part. The tip is read again from where the pointer rests, so it
+   * never keeps a number that is no longer under it. A tip pinned by a tap has no pointer to read
+   * from: one about a part is written again for that part, and one about a tile is taken away when
+   * the plates change.
+   */
+  private refreshTip(plates = false) {
+    if (this.o.tip.hidden) return;
+    if (this.hoverAt) this.invalidateHover();
+    else if (this.tipOf === PLATE) { if (plates) this.hideTip(); }
+    else if (this.tipOf >= 0) this.o.tip.textContent = this.o.describe(this.o.arch.parts[this.tipOf], this.tool);
   }
 
   setPoses(poses: Parameters<Specimen["setPoses"]>[0]) {
     this.specimen.setPoses(poses);
     this.shadowDirty = true;
+    this.refreshTip();
     this.invalidate();
   }
 
@@ -567,6 +586,7 @@ export class Stage {
    */
   setBay(spec: BaySpec | null) {
     const message = spec?.message ?? "";
+    this.refreshTip(true);
     if (spec && this.bay && this.bay.spec.key === spec.key && message === this.bayMessage && this.bay.update(spec.plates)) { this.bay.reveal(this.specimen.playheadNow); this.invalidate(); return; }
     if (this.bay) { this.scene.remove(this.bay.group); this.bay.dispose(); this.bay = null; }
     this.bayMessage = message;
@@ -834,6 +854,9 @@ export class Stage {
     const down = this.down;
     if (down && e.pointerId === down.pointer && Math.hypot(e.clientX - down.x, e.clientY - down.y) > down.slop) down.strayed = true;
     if (this.drag && e.pointerId === this.drag.pointer) {
+      // A press that has not travelled is still a click on the part. The part moves only once it has,
+      // so a hand that trembles by a pixel does not leave it off its socket.
+      if (!this.drag.moved && !down?.strayed) return;
       this.aim(e.clientX, e.clientY);
       const at = new THREE.Vector3();
       if (this.ray.ray.intersectPlane(this.drag.plane, at)) {
@@ -859,8 +882,8 @@ export class Stage {
       const plate = this.bay?.pick(this.ray);
       const i = plate || this.panning ? -1 : this.partAt(this.hoverAt.x, this.hoverAt.y, SLOP.mouse);
       this.specimen.setHover(i);
-      if (plate) this.showTip(this.plateTip(plate), this.hoverAt.x - rect.left, this.hoverAt.y - rect.top);
-      else if (i >= 0) this.showTip(this.o.describe(this.o.arch.parts[i], this.tool), this.hoverAt.x - rect.left, this.hoverAt.y - rect.top);
+      if (plate) this.showTip(this.plateTip(plate), this.hoverAt.x - rect.left, this.hoverAt.y - rect.top, false, PLATE);
+      else if (i >= 0) this.showTip(this.o.describe(this.o.arch.parts[i], this.tool), this.hoverAt.x - rect.left, this.hoverAt.y - rect.top, false, i);
       else if (!this.tipPinned) this.hideTip();
       if (i >= 0 && this.tool === "explore" && !this.panning) this.canvas.style.cursor = "pointer"; else this.idleCursor();
       this.invalidate();
@@ -885,7 +908,7 @@ export class Stage {
     const plate = this.bay?.pick(this.ray);
     if (plate) {
       if (this.twice(e, -2)) this.focusBay();
-      else this.showTip(this.plateTip(plate), e.clientX - rect.left, e.clientY - rect.top, touch);
+      else this.showTip(this.plateTip(plate), e.clientX - rect.left, e.clientY - rect.top, touch, PLATE);
       return;
     }
     const i = this.partAt(e.clientX, e.clientY, touch ? SLOP.touch : SLOP.mouse), again = this.twice(e, i);
@@ -901,7 +924,7 @@ export class Stage {
     }
     this.o.onSelect(part);
     if (again && this.tool !== "punch") this.focus(part);
-    else if (touch) this.showTip(this.o.describe(part, this.tool), e.clientX - rect.left, e.clientY - rect.top, true);
+    else if (touch) this.showTip(this.o.describe(part, this.tool), e.clientX - rect.left, e.clientY - rect.top, true, i);
   };
 
   /** Whether this click is the second of a double click on the same thing. Punch never doubles: each of its clicks is an edit. */
@@ -934,8 +957,9 @@ export class Stage {
     this.o.onLost();
   };
 
-  private showTip(text: string, x: number, y: number, pin = false) {
+  private showTip(text: string, x: number, y: number, pin = false, about = NOTHING) {
     const tip = this.o.tip;
+    this.tipOf = about;
     tip.textContent = text;
     tip.hidden = false;
     const left = Math.max(8, Math.min(this.width - 8 - Math.min(260, this.width - 16), x + 14));
@@ -947,6 +971,7 @@ export class Stage {
   private hideTip() {
     clearTimeout(this.tipPinned);
     this.tipPinned = 0;
+    this.tipOf = NOTHING;
     this.o.tip.hidden = true;
   }
 

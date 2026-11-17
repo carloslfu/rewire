@@ -75,6 +75,20 @@ export function isNeutral(spec: ChangeSpec | undefined | null): boolean {
   );
 }
 
+/**
+ * The change table has a fixed number of slots for each kind of change. A spec that needs more is
+ * refused whole, with a sentence the page can show: an entry the table has no room for must never be
+ * listed as active while the model runs without it. Returns null when the spec fits.
+ */
+export function specLimit(spec: ChangeSpec | null | undefined): string | null {
+  const s = spec ?? {};
+  const over = (n: number, max: number, what: string) => (n > max ? `At most ${max} ${what} can be active at once. Remove one before adding another.` : null);
+  return over(s.swaps?.length ?? 0, MAX_SWAPS, "dictionary swaps")
+    ?? over(s.hidden?.length ?? 0, MAX_HIDDEN, "hidden words")
+    ?? over(s.zeroed?.length ?? 0, MAX_ZEROED, "zeroed weights")
+    ?? over(s.neurons?.length ?? 0, MAX_NEURONS, "neuron pushes");
+}
+
 export function encodeTable(
   spec: ChangeSpec | null | undefined,
   cfg: Pick<ModelConfig, "floors" | "queryHeads" | "width"> & Partial<Pick<ModelConfig, "units">>,
@@ -86,6 +100,8 @@ export function encodeTable(
   const u = new Uint32Array(buf);
   const f = new Float32Array(buf);
   const s = spec ?? {};
+  const limit = specLimit(s);
+  if (limit) throw new Error(limit);
   u[H_MAGIC] = TABLE_MAGIC;
   u[H_VERSION] = 3;
   u[H_FLAGS] = isNeutral(s) ? 0 : FLAG_ANY;
@@ -104,19 +120,19 @@ export function encodeTable(
     u[H_CONCEPT_FIRST] = conceptFirst;
     f.set(v, lay.concept);
   }
-  const swaps = (s.swaps ?? []).slice(0, MAX_SWAPS);
+  const swaps = s.swaps ?? [];
   u[H_NSWAPS] = swaps.length;
   swaps.forEach(([a, b], i) => {
     u[lay.swaps + 2 * i] = a;
     u[lay.swaps + 2 * i + 1] = b;
   });
-  const hidden = (s.hidden ?? []).slice(0, MAX_HIDDEN);
+  const hidden = s.hidden ?? [];
   u[H_NHIDDEN] = hidden.length;
   hidden.forEach((h, i) => {
     u[lay.hidden + 2 * i] = h.key;
     u[lay.hidden + 2 * i + 1] = h.from;
   });
-  const zeroed = (s.zeroed ?? []).slice(0, MAX_ZEROED);
+  const zeroed = s.zeroed ?? [];
   u[H_NZEROED] = zeroed.length;
   zeroed.forEach((z, i) => {
     u.set([z.floor, TENSOR_ID[z.tensor], z.row, z.col], lay.zeroed + 4 * i);
@@ -124,7 +140,6 @@ export function encodeTable(
   f.set(bitTable(bits), lay.bitTable);
   const seen = new Set<number>();
   const neurons = s.neurons ?? [];
-  if (neurons.length > MAX_NEURONS) throw new Error(`At most ${MAX_NEURONS} neuron pushes`);
   const addresses = new Set<string>();
   for (const n of neurons) {
     const key = `${n.floor}:${n.unit}`;

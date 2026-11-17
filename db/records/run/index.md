@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-11-17T17:23:56.656589Z
+updated: 2026-11-17T18:57:37.395702Z
 ---
 
 # records/run
 
+- [[records/run/2026/11/2026-11-17-release-correctness-ux]] — Release correctness and usability raw verification
 - [[records/run/2026/11/2026-11-17-output-reveal-probabilities]] — Output reveal and probability raw verification
 - [[records/run/2026/11/2026-11-17-replay-experience]] — Whole-answer replay release and Chrome verification
 - [[records/run/2026/11/2026-11-17-follow-output]] — Follow output release gate and Chrome evidence

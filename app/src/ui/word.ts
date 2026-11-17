@@ -30,6 +30,32 @@ export interface Chosen {
   forced?: Forced;
 }
 
+/**
+ * The changed model's measurement of this sample's original reply, token for token, or undefined
+ * when there is none that still describes it. A comparison is made for one exact sequence of tokens:
+ * once the original reply is rewritten, continued or restored after a pick, the old one belongs to
+ * other tokens and must not be read by position.
+ */
+export function comparison(turn: Turn | undefined): Forced[] | undefined {
+  const c = turn?.changed, measured = c?.compare, toks = turn?.normal.toks;
+  if (!c || c.stale || !measured || !toks || measured.length !== toks.length) return undefined;
+  return measured.every((x, i) => x.id === toks[i].id) ? measured : undefined;
+}
+
+/**
+ * Which writing of a reply this is, for keying what is measured on its tokens. It is the reply's own
+ * revision, not a description of its latest pick: two picks of the same piece at the same place can
+ * follow different earlier tokens, and each is its own writing.
+ */
+export function replyMark(reply: Pick<Reply, "rev">): string {
+  return `r${reply.rev ?? 0}`;
+}
+
+/** Whether prompt and reply fill the model's context, so nothing more can be written after them. */
+export function contextFull(reply: Pick<Reply, "read" | "toks">, cap: number | undefined): boolean {
+  return cap !== undefined && reply.read.length + reply.toks.length >= cap;
+}
+
 export function chosen(s: Pick<State, "turns" | "word" | "fork">): Chosen | null {
   const w = s.word;
   if (!w) return null;
@@ -40,9 +66,7 @@ export function chosen(s: Pick<State, "turns" | "word" | "fork">): Chosen | null
   if (!reply || !tok) return null;
   const input = w.index > 0 ? reply.toks[w.index - 1].id : reply.read[reply.read.length - 1];
   const position = reply.read.length + w.index - 1;
-  const comparison = turn.changed?.compare;
-  const sameReply = comparison?.length === turn.normal.toks.length && comparison?.every((x, i) => x.id === turn.normal.toks[i].id);
-  const compared = w.side === "normal" && !turn.changed?.stale && sameReply ? comparison?.[w.index] : undefined;
+  const compared = w.side === "normal" ? comparison(turn)?.[w.index] : undefined;
   const forced = compared?.id === tok.id && compared.pushes.length === tok.pushes.length ? compared : undefined;
   return { ref: w, turn, reply, tok, input, position, forced };
 }
@@ -163,9 +187,10 @@ export function towerValues(c: Chosen | null, view: "push" | "difference"): Floa
   return out;
 }
 
+/** The largest magnitude among the values that are numbers; a value that is not one cannot set the scale. */
 export function maxAbs(v: Float32Array): number {
   let m = 0;
-  for (const x of v) m = Math.max(m, Math.abs(x));
+  for (const x of v) { const a = Math.abs(x); if (Number.isFinite(a) && a > m) m = a; }
   return m || 1;
 }
 

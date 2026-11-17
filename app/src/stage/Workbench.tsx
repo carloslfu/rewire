@@ -8,14 +8,13 @@ import { onThemeChange } from "../ui/color.ts";
 import { useNarrow } from "../ui/useNarrow.ts";
 import { type Arch, groupHeads, movePart, type Part, partKey } from "./arch.ts";
 import { isolate } from "./isolate.ts";
-import { escapeIntent } from "./keys.ts";
+import { escapeIntent, stageKey } from "./keys.ts";
 import { type DockPanel, NavDock } from "./NavDock.tsx";
-import type { DragMode, Stage, Tool, ViewName } from "./scene/stage.ts";
+import type { DragMode, Stage, Tool } from "./scene/stage.ts";
 import { readTheme } from "./theme.ts";
 import { ViewToggle } from "./ViewToggle.tsx";
 
 const TOOL_NAME: Record<Tool, string> = { explore: "Explore", grab: "Grab", punch: "Punch" };
-const VIEW_KEYS: Record<string, ViewName> = { 1: "home", 2: "front", 3: "side", 4: "top" };
 
 export interface WorkbenchProps {
   arch: Arch;
@@ -163,17 +162,19 @@ export function Workbench(p: WorkbenchProps) {
   const collapse = () => { setExpanded(false); requestAnimationFrame(() => expander.current?.focus()); };
 
   const frameKeys = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!expanded) return;
     if (e.key === "Escape" && !e.defaultPrevented) {
-      // Escape first belongs to what has focus: it closes an open menu, or steps out of a text field.
-      const from = e.target as HTMLInputElement, intent = escapeIntent(from, escaped.current === from, e.nativeEvent.isComposing);
+      // Escape first closes an open dock panel, from anywhere on the bench. Then it belongs to what has
+      // focus: it closes an open menu, or steps out of a text field. Only then does it close the full view.
+      const from = e.target as HTMLInputElement, intent = escapeIntent(from, escaped.current === from, e.nativeEvent.isComposing, !!panel);
+      if (intent === "panel") { e.preventDefault(); escaped.current = null; setPanel(null); return; }
+      if (!expanded) return;
       escaped.current = intent === "menu" ? from : null;
       if (intent === "leave") { e.preventDefault(); host.current?.focus(); }
       else if (intent === "close") { e.preventDefault(); collapse(); }
       return;
     }
     escaped.current = null;
-    if (e.key !== "Tab") return;
+    if (!expanded || e.key !== "Tab") return;
     const items = [...e.currentTarget.querySelectorAll<HTMLElement>("button, a[href], input, select, textarea, summary, [tabindex]")]
       .filter((el) => el.tabIndex >= 0 && !el.matches(":disabled") && el.getClientRects().length > 0);
     const first = items[0], last = items[items.length - 1];
@@ -186,24 +187,30 @@ export function Workbench(p: WorkbenchProps) {
   const stageKeys = (e: React.KeyboardEvent<HTMLDivElement>) => {
     // An open panel takes Escape before the full view does, wherever in the stage the focus is.
     if (e.key === "Escape" && panel) { e.preventDefault(); setPanel(null); return; }
-    if (e.target !== e.currentTarget || e.altKey || e.metaKey || e.ctrlKey) return;
-    const k = e.key;
-    if (k.startsWith("Arrow")) {
-      e.preventDefault();
-      if (e.shiftKey) { stage?.orbit(k === "ArrowLeft" ? -0.2 : k === "ArrowRight" ? 0.2 : 0, k === "ArrowUp" ? -0.12 : k === "ArrowDown" ? 0.12 : 0); return; }
-      const next = movePart(arch.model, selected, k);
-      if (next) p.onSelect(next);
-    } else if (k === "+" || k === "=") { e.preventDefault(); stage?.zoom(0.8); }
-    else if (k === "-" || k === "_") { e.preventDefault(); stage?.zoom(1.25); }
-    else if (k === "0" || k === "Home") { e.preventDefault(); stage?.resetView(); }
-    else if (k === "f" || k === "F" || k === "Enter") { e.preventDefault(); if (selected) stage?.focus(selected); else if (k !== "Enter") stage?.resetView(); }
-    else if (VIEW_KEYS[k]) { e.preventDefault(); stage?.view(VIEW_KEYS[k]); }
-    else if (k === "e" || k === "E") { e.preventDefault(); setSpread((now) => (now > 0 ? 0 : 1)); }
-    else if (k === "?") { e.preventDefault(); setPanel((now) => (now === "help" ? null : "help")); }
-    else if (k === " ") { e.preventDefault(); if (!e.repeat) stage?.holdPan(true); }
-    else if ((k === "p" || k === "P") && selected && p.tools.includes("punch")) { e.preventDefault(); stage?.react(selected, p.onPunch(selected)); }
+    if (e.target !== e.currentTarget) return;
+    // A browser or system shortcut. While its modifier is down the release of Space may never reach
+    // the page, so a pan held with Space ends here instead of staying on.
+    if (e.altKey || e.metaKey || e.ctrlKey) { stage?.holdPan(false); return; }
+    const key = stageKey(e);
+    if (!key) return;
+    e.preventDefault();
+    switch (key.act) {
+      case "move": { const next = movePart(arch.model, selected, key.key); if (next) p.onSelect(next); break; }
+      case "orbit": stage?.orbit(key.azimuth, key.polar); break;
+      case "zoom": stage?.zoom(key.factor); break;
+      case "fit": stage?.resetView(); break;
+      case "focus": if (selected) stage?.focus(selected); else if (key.orFit) stage?.resetView(); break;
+      case "view": stage?.view(key.view); break;
+      case "spread": setSpread((now) => (now > 0 ? 0 : 1)); break;
+      case "help": setPanel((now) => (now === "help" ? null : "help")); break;
+      case "pan": stage?.holdPan(true); break;
+      case "punch": if (selected && p.tools.includes("punch")) stage?.react(selected, p.onPunch(selected)); break;
+      case "ignore": break;
+    }
   };
-  const stageKeyUp = (e: React.KeyboardEvent<HTMLDivElement>) => { if (e.key === " ") stage?.holdPan(false); };
+  const stageKeyUp = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === " " || e.key === "Meta" || e.key === "Control" || e.key === "Alt") stage?.holdPan(false);
+  };
 
   const dock = <NavDock arch={arch} stage={stage} selected={selected} onSelect={p.onSelect} drag={drag} onDrag={setDrag}
     spread={spread} onSpread={setSpread} panel={panel} onPanel={setPanel} punch={p.tools.includes("punch")} />;

@@ -16,7 +16,8 @@ export interface PartValues {
 
 function finish(raw: Float32Array, scale: number): PartValues {
   const s = scale > 0 && Number.isFinite(scale) ? scale : 1;
-  return { raw, scale: s, scaled: raw.map((v) => (Number.isNaN(v) ? NaN : Math.max(-1, Math.min(1, v / s)))) };
+  // A value that is not a number, or not finite, is no measurement: its part stays unlit instead of reading as the strongest.
+  return { raw, scale: s, scaled: raw.map((v) => (Number.isFinite(v) ? Math.max(-1, Math.min(1, v / s)) : NaN)) };
 }
 
 export interface OutputBar { id: number; p: number; chosen: boolean }
@@ -43,7 +44,8 @@ export function pushValues(arch: Arch, pushes: ArrayLike<number> | null | undefi
   if (!pushes || pushes.length < pushLength(arch.model)) return null;
   const raw = new Float32Array(arch.parts.length).fill(NaN);
   let scale = 0;
-  for (let i = 0; i < pushLength(arch.model); i++) scale = Math.max(scale, Math.abs(pushes[i]));
+  // The scale comes from the values that are numbers, so one that is not cannot unlight or rescale the rest.
+  for (let i = 0; i < pushLength(arch.model); i++) { const a = Math.abs(pushes[i]); if (Number.isFinite(a) && a > scale) scale = a; }
   const layer = new Float64Array(arch.floors);
   arch.parts.forEach((p, i) => {
     const k = pushIndex(arch.model, p);

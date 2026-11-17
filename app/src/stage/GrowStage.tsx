@@ -30,6 +30,16 @@ export interface GrowControls {
   stop: () => void;
   mutate: (kind: Damage["kind"], floor?: number) => void;
   restore: () => void;
+  /** What the continue button is called: it trains the damaged copy while one is on screen. */
+  keepLabel: string;
+  /** What continuing will do to the damaged copy and the intact weights; "" when nothing is damaged. */
+  continueNote: string;
+  /** Training steps run on the damaged copy. */
+  retrained: number;
+  /** The step the intact weights were trained to. */
+  intactStep: number;
+  /** Make the retrained copy the intact one. */
+  adopt: () => void;
   prompt: string;
   setPrompt: (v: string) => void;
   test: () => void;
@@ -85,13 +95,14 @@ export default function GrowStage({ params, reference, intact, step, running, ac
   const actions = <div className="row training-actions">
     {running ? <button type="button" className="btn primary" onClick={controls.stop}>Stop learning</button>
       : <><button type="button" className="btn primary" disabled={disabled || controls.unavailable || !controls.validText} onClick={() => controls.teach(false)}>{params ? "Start over from noise" : "Start learning"}</button>
-        {params && <button type="button" className="btn" disabled={disabled || controls.unavailable || !controls.validText} onClick={() => controls.teach(true)}>Keep learning</button>}</>}
+        {params && <button type="button" className="btn" disabled={disabled || controls.unavailable || !controls.validText} onClick={() => controls.teach(true)}>{controls.keepLabel}</button>}</>}
     <span className="num">{step.toLocaleString("en-US")} steps{controls.loss !== null ? ` · loss ${controls.loss.toFixed(3)}` : ""}</span>
   </div>;
 
   const transport = <section className="stage-transport" aria-label="Training">
     {actions}
     <p className="note training-status" role="status">{controls.unavailable ? "Live training needs WebGPU. Try Chrome on a supported device." : controls.status || (params ? "Colors refresh from the real weights every 100 steps." : "Start learning to watch every part's weights move.")}</p>
+    {controls.continueNote && !running && <p className="note">{controls.continueNote}</p>}
     <div className="seg" role="group" aria-label="Colors show"><button type="button" aria-pressed={difference} onClick={() => setDifference(true)}>Change since start</button><button type="button" aria-pressed={!difference} onClick={() => setDifference(false)}>Weights now</button></div>
   </section>;
 
@@ -135,6 +146,7 @@ export default function GrowStage({ params, reference, intact, step, running, ac
       <div className="stage-part-actions"><button type="button" className="btn change" disabled={!intact || disabled} onClick={() => controls.mutate("noise")}>Scramble weights</button>
         <button type="button" className="btn" disabled={!intact || disabled} onClick={() => controls.mutate("erase")}>Erase weights</button></div>
       <p className="note">{controls.mutation ? `${controls.mutation}. Each experiment starts from the intact copy.` : "These rewrite the actual matrix weights used to generate text. The intact copy stays available."}</p>
+      {controls.retrained > 0 && <p className="note"><button type="button" className="linkish" disabled={disabled} onClick={controls.adopt}>Make this the intact copy</button> It replaces the intact weights from step {controls.intactStep.toLocaleString("en-US")}.</p>}
     </section>
     <RealNote punch real={`Four layers, four attention heads and one MLP in each, with heads paired on shared keys and values, exactly as configured. The color of every lit window is computed from that part's slice of the ${layout(cfg).total.toLocaleString("en-US")} parameters. Plates are the real matrices. Punch, Scramble and Erase rewrite those weights.`}
       drawing="The shapes and positions. Training measures no activations here, so there is no token replay on this bench. Open the model in the full lab to follow a letter through it." />

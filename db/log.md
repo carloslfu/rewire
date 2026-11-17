@@ -52,3 +52,9 @@ Captured final release checks, full GPU suites, early-reveal reproduction and co
 ## [2026-11-17 17:24] decide | records/decisions/2026-11-17-output-reveal-probabilities
 Reveal output at the final replay step, gate candidate delivery by full identity and show full-vocabulary probabilities with honest precision.
 
+## [2026-11-17 18:59] capture | records/measurements/2026-11-17-release-correctness-ux.md
+Captured release gate, GPU suites and browser verification of the 2D/3D, Teach, Grow, replay and recovery fixes implemented with Claude Code Fable 5.2.
+
+## [2026-11-17 18:59] decide | records/decisions/2026-11-17-computation-identity-and-checkpoint-lineage.md
+Keep measurement identity, draw semantics, shared edit availability and Grow checkpoint lineage faithful to the computation on screen.
+

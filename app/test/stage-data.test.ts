@@ -36,6 +36,17 @@ it("places a token's measured pushes on the parts that made them and nothing on 
   expect(pushValues(arch, null)).toBeNull();
   expect(pushValues(arch, new Float32Array(20))).toBeNull();
   expect(pushValues(arch, new Float32Array(pushLength(QWEN_INFO)))!.scale).toBe(1);
+  // A value that is not a number leaves its own part, and the layer that sums it, unlit. The rest keep their values and their scale.
+  const broken = pushes.slice(), lost = { kind: "head", floor: 5, head: 1 } as const, loud = { kind: "mlp", floor: 7 } as const;
+  broken[pushIndex(QWEN_INFO, lost)] = Number.NaN;
+  broken[pushIndex(QWEN_INFO, loud)] = Number.POSITIVE_INFINITY;
+  const partial = pushValues(arch, broken)!;
+  expect(partial.scale).toBe(v.scale);
+  for (const p of [lost, loud, { kind: "layer", floor: 5 } as const, { kind: "layer", floor: 7 } as const]) expect(partial.scaled[partIndex(arch, p)]).toBeNaN();
+  arch.parts.forEach((p, i) => {
+    if ("floor" in p && (p.floor === 5 || p.floor === 7)) return;
+    expect(Object.is(partial.scaled[i], v.scaled[i]) || partial.scaled[i] === v.scaled[i]).toBe(true);
+  });
 });
 
 it("gives every weight of a tiny-model layer to exactly one part", () => {

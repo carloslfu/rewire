@@ -10,7 +10,9 @@ import { Transform } from "node:stream";
 const [port = 5199, kbps = 1100, latency = 170] = process.argv.slice(2).map(Number);
 const dist = process.env.REWIRE_DIST ? resolve(process.env.REWIRE_DIST) : resolve(import.meta.dirname, "..", "dist");
 const weightsRoot = resolve(import.meta.dirname, "..", "..", "artifacts", "weights");
-const weights = join(weightsRoot, process.env.REWIRE_WEIGHTS ?? readdirSync(weightsRoot).sort()[0]);
+// Local weights are optional: a production build reads the pinned remote model, and /weights/ then answers 404.
+const weightsId = process.env.REWIRE_WEIGHTS ?? (existsSync(weightsRoot) ? readdirSync(weightsRoot).sort()[0] : undefined);
+const weights = weightsId ? join(weightsRoot, weightsId) : null;
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml",
   ".txt": "text/plain", ".wasm": "application/wasm" };
 
@@ -50,6 +52,7 @@ createServer((req, res) => {
       }
     }
     const inWeights = url.startsWith("/weights/");
+    if (inWeights && !weights) { res.statusCode = 404; return res.end(); }
     const base = inWeights ? weights : dist;
     let file = join(base, inWeights ? url.slice("/weights/".length) : url);
     if (file !== base && !file.startsWith(base + sep)) { res.statusCode = 403; return res.end(); }

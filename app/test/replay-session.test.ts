@@ -379,3 +379,48 @@ it("names a token by its model, sample, reply and place, so the same index elsew
   expect(id(at(0, "normal", 1))).not.toBe(before);
   expect(R.outputIdentity({ ...store.get(), word: null })).toBe("");
 });
+
+it("keeps a pause the visitor made during a replay: choosing a token, then using another word, does not turn following back on", async () => {
+  await actions.send("Capital of France?");
+  expect(store.get().follow).toBe(true);
+  expect(R.startReplay("answer")).toBe(true);
+  // The visitor opens a token of the reply being replayed and uses another word there.
+  actions.selectWord(at(0, "normal", 1));
+  expect(R.session.get()).toMatchObject({ mode: "replay", playing: false, token: 1 });
+  defer();
+  const picking = actions.pick(at(0, "normal", 1), 555); await flush();
+  // The rewrite ends the replay. Following was on before it, but the pick is the visitor's own pause.
+  expect(mode()).toBe("live");
+  expect(store.get().follow).toBe(false);
+  streams[0].emit(555);
+  expect(store.get().word).toEqual(at(0, "normal", 1));
+  // New pieces arrive after the picked one: the selection stays on the pick instead of running to the end.
+  streams[0].emit(301); streams[0].emit(302);
+  expect(store.get()).toMatchObject({ word: at(0, "normal", 1), follow: false });
+  streams[0].emit(STOP); streams[0].end(); await picking;
+  expect(store.get()).toMatchObject({ word: at(0, "normal", 1), follow: false });
+  expect(store.get().turns[0].normal.toks.map((t) => t.id)).toEqual([100, 555, 301, 302, STOP]);
+});
+
+it("treats a token chosen by hand during a replay as a pause that outlasts it, and the replay's own steps as none", async () => {
+  await actions.send("One");
+  // The replay moving through tokens itself, and its own Previous and Next, are not the visitor pausing.
+  R.startReplay("answer");
+  frames(() => R.session.get().token === 1);
+  R.session.toToken(2);
+  instant();
+  await actions.send("Two");
+  expect(mode()).toBe("live");
+  expect(store.get().follow).toBe(true);
+  // A token chosen in a reply during the replay is. The replay ending by itself leaves it paused there.
+  R.startReplay("answer");
+  actions.chooseWord(at(0, "normal", 1));
+  await actions.applyChips(head(0)); await flush();
+  expect(mode()).toBe("live");
+  expect(store.get()).toMatchObject({ follow: false, word: at(0, "normal", 1) });
+  // Back to live is the visitor asking to follow again, whatever was chosen during the replay.
+  R.startReplay("answer");
+  actions.chooseWord(at(1, "normal", 0));
+  R.session.exit("live");
+  expect(store.get().follow).toBe(true);
+});

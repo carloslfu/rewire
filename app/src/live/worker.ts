@@ -15,7 +15,7 @@ import type { WriteJob } from "./engine.ts";
 import type { FromWorker, ToWorker } from "./protocol.ts";
 import { ModelFiles } from "./files.ts";
 import { candidates } from "./cands.ts";
-import { FULL, paceFor, runUnits } from "./pace.ts";
+import { FULL, paceFor, readByWrite, runUnits, writeRoom } from "./pace.ts";
 import { LessonRuntime } from "../teach/runtime.ts";
 import type { TokenPiece } from "@rewire/engine/src/token-text.ts";
 
@@ -369,7 +369,7 @@ async function loadTiny(params: Float32Array, config: TinyConfig) {
     slots: [0, 1, 2].map(() => ({ c: m.conversation(), tokens: [], key: "{}", table: encodeTable({}, cfg), lock: Promise.resolve() })),
     host: { qkNorm, meanRow: new Float32Array(await download(dev, w.meanRow)), finalNorm: new Float32Array(await download(dev, w.finalNorm)) },
   };
-  return { floors: cfg.floors, heads: cfg.queryHeads };
+  return { floors: cfg.floors, heads: cfg.queryHeads, contextCap: cfg.maxContext };
 }
 
 // ------------------------------------------------------------------ conversations
@@ -412,9 +412,8 @@ function contextCheck(n: number) {
 async function write(job: WriteJob, id: number, epoch = writeEpoch): Promise<{ ended: boolean; cancelled: boolean }> {
   if (epoch !== writeEpoch) return { ended: false, cancelled: true };
   const all = [...job.history, ...job.prefix];
-  const room = curModel().cfg.maxContext - all.length;
-  const cap = Math.min(job.cap, room);
   contextCheck(all.length);
+  const cap = writeRoom(curModel().cfg.maxContext, all.length, job.cap);
   const s = cur()[job.conv];
   ensure(job.conv, job.changes, all.slice(0, -1), conceptFrom(all));
   const c = s.c;
@@ -443,7 +442,7 @@ async function write(job: WriteJob, id: number, epoch = writeEpoch): Promise<{ e
       force: i === 0 ? job.force : undefined, slot: i,
     }),
   });
-  const read = [all[all.length - 1], ...toks.slice(0, Math.max(0, toks.length - 1))];
+  const read = readByWrite(all[all.length - 1], toks);
   s.tokens.push(...read);
   const keep = all.length - 1 + read.length;
   c.rewind(keep);

@@ -1,13 +1,14 @@
 // Independent samples, each with an editable question and its original/changed pair.
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { Reply, Side, Turn } from "../model/types.ts";
-import { askReplay, continueReply, editSample, piece, removeSample, selectWord, undoPick, undoRemoveSample } from "../state/actions.ts";
+import { askReplay, contextCap, continueReply, editSample, piece, removeSample, selectWord, undoPick, undoRemoveSample } from "../state/actions.ts";
 import { useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { pct } from "./color.ts";
 import { describe } from "./describe.ts";
 import { ReplayStatus } from "./ReplayStatus.tsx";
 import { replySegments, replyText, STOP, wordGroups } from "./reply-text.ts";
+import { comparison, contextFull } from "./word.ts";
 
 const MARKERS: Record<number, string> = { 151644: "<|im_start|>", 151645: "<|im_end|>", 151643: "<|endoftext|>", 151667: "<think>", 151668: "</think>" };
 
@@ -90,7 +91,10 @@ function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; si
   const replay = useStore((s) => s.replay);
   const model = useStore((s) => s.model);
   const stage3d = useStore((s) => s.stage3d);
-  const compare = side === "normal" ? turn.changed?.compare : undefined;
+  // Only a comparison measured on these very tokens. One left from another version of this reply is not read by position.
+  const compare = side === "normal" ? comparison(turn) : undefined;
+  const full = useStore((s) => contextFull(reply, contextCap(s)));
+  const pickedPiece = reply.pickedAt === undefined ? undefined : reply.toks[reply.pickedAt];
   const changed = side === "changed";
   const label = !changed ? (model.id === "tiny" ? "Your tiny model" : "Original")
     : reply.stale ? S.writtenUnder(describe(reply.changes, turn.normal.read)) : S.changedBy(describe(reply.changes, turn.normal.read));
@@ -155,16 +159,17 @@ function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; si
       <div className="foot">
         {reply.pickedAt !== undefined && reply.original && (
           <>
-            <span>{S.youPicked}: "{piece(toks[reply.pickedAt]?.id ?? 0).trim()}"</span>
+            {/* Until the picked piece arrives the reply is still being written; only a finished reply without it was stopped. */}
+            {(pickedPiece || reply.done) && <span>{pickedPiece ? `${S.youPicked}: "${piece(pickedPiece.id).trim() || JSON.stringify(piece(pickedPiece.id)).slice(1, -1)}"` : S.pickStopped}</span>}
             <button type="button" className="btn quiet" disabled={busy || !!replay} onClick={() => undoPick(k, side)}>{S.undo}</button>
           </>
         )}
-        {reply.done && !reply.ended && !reply.stale && !replay && (
+        {reply.done && !reply.ended && !reply.stale && !replay && (full ? <span>{S.contextLimit(reply.toks.length, model.piece)}</span> : (
           <>
             <span>{S.stopped(reply.toks.length, model.piece)}</span>
             {live && <button type="button" className="btn" disabled={busy} onClick={() => void continueReply(k)}>{S.cont}</button>}
           </>
-        )}
+        ))}
         {reply.done && !reply.stale && !busy && !replay && stage3d && segments.length > 0 && (
           <button type="button" className="linkish reply-replay" title={S.replayIn3dTitle} onClick={() => askReplay(turn.id, side)}>{S.replayIn3d}</button>
         )}
@@ -192,18 +197,18 @@ export function FinishedReplies() {
 
 /** When the words come out the same, say what moved instead (section 4.3). */
 function whatMoved(turn: Turn): string | null {
-  const c = turn.changed;
-  if (!c?.compare || !turn.normal.done) return null;
+  const c = turn.changed, measured = comparison(turn);
+  if (!c || !measured || !turn.normal.done) return null;
   const a = turn.normal.toks.map((t) => t.id), b = c.toks.map((t) => t.id);
   if (a.length !== b.length || a.some((x, i) => x !== b[i])) return null;
   let best = -1, gap = 0;
   for (let i = 0; i < a.length; i++) {
-    if (STOP.has(a[i]) || !c.compare[i]) continue;
-    const d = Math.abs(Math.exp(turn.normal.toks[i].lp1) - Math.exp(c.compare[i].lp1));
+    if (STOP.has(a[i])) continue;
+    const d = Math.abs(Math.exp(turn.normal.toks[i].lp1) - Math.exp(measured[i].lp1));
     if (d > gap) { gap = d; best = i; }
   }
   if (best < 0 || gap < 0.02) return S.sameNumbers;
-  const pa = Math.round(Math.exp(turn.normal.toks[best].lp1) * 100), pb = Math.round(Math.exp(c.compare[best].lp1) * 100);
+  const pa = Math.round(Math.exp(turn.normal.toks[best].lp1) * 100), pb = Math.round(Math.exp(measured[best].lp1) * 100);
   const segment = replySegments(turn.normal).find((s) => s.from <= best && best < s.to);
   if (segment && segment.to - segment.from > 1) return `Same text. Token ${best + 1} (${piece(a[best])}) changed from ${pa}% to ${pb}%.`;
   return S.sameWords(piece(a[best]).trim(), pa, pb);

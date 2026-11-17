@@ -269,7 +269,7 @@ it("frames the model inside the clear part of the view when the toolbar and labe
 
 // ------------------------------------------------------------------ stage lifecycle with a fake renderer
 
-function harness(arch: Arch, options: { hidden?: boolean; width?: number; coarse?: boolean; reduced?: boolean; reserved?: { left: number; top: number; width: number; height: number }[] } = {}) {
+function harness(arch: Arch, options: { hidden?: boolean; width?: number; height?: number; coarse?: boolean; reduced?: boolean; reserved?: { left: number; top: number; width: number; height: number }[]; describe?: () => string } = {}) {
   const frames = new Map<number, (t: number) => void>();
   let id = 0;
   vi.stubGlobal("requestAnimationFrame", (f: (t: number) => void) => { frames.set(++id, f); return id; });
@@ -291,7 +291,7 @@ function harness(arch: Arch, options: { hidden?: boolean; width?: number; coarse
   };
   const canvas = element(), spans: ReturnType<typeof element>[] = [];
   const doc = { ...element(), hidden: options.hidden ?? false, createElement: (tag: string) => { if (tag === "canvas") return canvas; const s = element(); spans.push(s); return s; } };
-  const host = { ...element(), ownerDocument: doc, clientWidth: options.width ?? 400, clientHeight: 600 };
+  const host = { ...element(), ownerDocument: doc, clientWidth: options.width ?? 400, clientHeight: options.height ?? 600 };
   const labels = { ...element(), ownerDocument: doc }, tip = element();
   const renderer = { render: vi.fn(), dispose: vi.fn(), forceContextLoss: vi.fn(), setSize: vi.fn(), setPixelRatio: vi.fn(), setClearColor: vi.fn(), getPixelRatio: () => 1,
     shadowMap: { enabled: false, type: 0, autoUpdate: true, needsUpdate: false }, info: { render: { calls: 0, triangles: 0 } }, outputColorSpace: "", toneMapping: 0 };
@@ -301,7 +301,7 @@ function harness(arch: Arch, options: { hidden?: boolean; width?: number; coarse
   const events = { select: vi.fn(), punch: vi.fn(() => true), lost: vi.fn(), hidden: vi.fn(), arranged: vi.fn() };
   const stage = new Stage({
     host: host as unknown as HTMLElement, labels: labels as unknown as HTMLElement, tip: tip as unknown as HTMLElement, arch, theme: LIGHT, reducedMotion: options.reduced ?? false, coarse: options.coarse ?? false, reserved: () => options.reserved ?? [],
-    onSelect: events.select, onPunch: events.punch, describe: () => "part", onLost: events.lost, onHidden: events.hidden, onArranged: events.arranged,
+    onSelect: events.select, onPunch: events.punch, describe: options.describe ?? (() => "part"), onLost: events.lost, onHidden: events.hidden, onArranged: events.arranged,
     deps: { renderer: () => renderer as unknown as THREE.WebGLRenderer, controls: () => controls, environment: () => environment },
   });
   let now = 0;
@@ -1285,5 +1285,117 @@ it("never turns a camera gesture into an edit: Pan, Space, modifiers, drags that
   expect(h.stage.specimen.center(i, new THREE.Vector3()).distanceTo(rest)).toBeLessThan(1e-5);
   expect(h.stage.specimen.arranged()).toBe(0);
   expect(h.events.punch).toHaveBeenCalledTimes(2);
+  h.stage.dispose();
+});
+
+it("leaves a part on its socket when a press in Grab trembles, and moves it when the press really travels", () => {
+  const arch = buildArch(TINY_INFO), h = harness(arch), { fire } = h, part: Part = { kind: "head", floor: 2, head: 1 }, i = partIndex(arch, part);
+  h.run(4);
+  h.stage.setTool("grab");
+  // The presses are seconds apart, so none of them is the second half of a double click.
+  let t = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => t);
+  const rest = h.stage.specimen.center(i, new THREE.Vector3()).clone(), grip = h.screen(rest);
+  // A click with a pixel or two of tremor, with a mouse and with a finger: the part is selected and nothing has been arranged.
+  for (const [pointerType, dx, dy] of [["mouse", 2, -1], ["mouse", -3, 3], ["touch", 6, -7]] as const) {
+    t += 2000;
+    fire("pointerdown", { ...grip, pointerType });
+    fire("pointermove", { clientX: grip.clientX + dx, clientY: grip.clientY + dy, pointerType, buttons: 1 });
+    fire("pointerup", { clientX: grip.clientX + dx, clientY: grip.clientY + dy, pointerType });
+    h.run(400);
+    expect(h.stage.specimen.center(i, new THREE.Vector3()).distanceTo(rest)).toBeLessThan(1e-6);
+    expect(h.stage.specimen.arranged()).toBe(0);
+    expect(h.stage.specimen.tetherCount).toBe(0);
+    expect(h.events.arranged).toHaveBeenLastCalledWith(0);
+  }
+  expect(h.events.select).toHaveBeenLastCalledWith(part);
+  // A press that travels is a drag: the part follows it and Reset layout has something to reset.
+  t += 2000;
+  fire("pointerdown", grip);
+  fire("pointermove", { clientX: grip.clientX + 30, clientY: grip.clientY - 10, buttons: 1 });
+  fire("pointermove", { clientX: grip.clientX + 60, clientY: grip.clientY - 30, buttons: 1 });
+  fire("pointerup", { clientX: grip.clientX + 60, clientY: grip.clientY - 30 });
+  h.run(400);
+  expect(h.stage.specimen.center(i, new THREE.Vector3()).distanceTo(rest)).toBeGreaterThan(0.2);
+  expect(h.stage.specimen.arranged()).toBe(1);
+  expect(h.events.arranged).toHaveBeenLastCalledWith(1);
+  vi.restoreAllMocks();
+  h.stage.dispose();
+});
+
+it("reads the tip again when what it describes changes under a pointer that has not moved", () => {
+  const arch = buildArch(TINY_INFO), part: Part = { kind: "mlp", floor: 2 }, i = partIndex(arch, part);
+  let said = "+0.40 direct push for “Paris”";
+  const h = harness(arch, { describe: () => said }), { fire } = h;
+  h.run(4);
+  const at = h.screen(h.stage.specimen.center(i, new THREE.Vector3()));
+  fire("pointermove", at); h.run(1);
+  expect(h.tip.hidden).toBe(false);
+  expect(h.tip.textContent).toBe("+0.40 direct push for “Paris”");
+  // Another token is selected while the pointer rests there: new values arrive, and the tip is of them.
+  said = "−0.12 direct push for “is”";
+  h.stage.setValues(new Float32Array(arch.parts.length), "signed"); h.run(1);
+  expect(h.tip.textContent).toBe("−0.12 direct push for “is”");
+  // A changed part is read again too.
+  said = "Signal off";
+  h.stage.setPoses(arch.parts.map((p) => poseOf({ memory: [{ floor: 2, mult: 0 }] }, p, TINY_INFO))); h.run(400);
+  expect(h.tip.textContent).toBe("Signal off");
+
+  // A tile of the detail bay: its number is replaced when the plates are, and gone when the bay is.
+  const tiles = (v: number) => [plate({ id: "x", title: "Stream in", band: 0, rows: 2, cols: 2, data: new Float32Array(4).fill(v) })];
+  h.stage.setBay({ key: "tiny.layer.1", floor: 1, plates: tiles(0.25) });
+  h.run(400);
+  const bay = (h.stage as unknown as { bay: Bay }).bay, mesh = bay.group.children.find((o) => ((o as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined)?.map) as THREE.Mesh;
+  h.scene.updateMatrixWorld(true);
+  const tile = h.screen(mesh.getWorldPosition(new THREE.Vector3()));
+  fire("pointermove", tile); h.run(1);
+  expect(h.tip.textContent).toContain("Stream in");
+  expect(h.tip.textContent).toContain("0.250");
+  h.stage.setBay({ key: "tiny.layer.1", floor: 1, plates: tiles(0.75) }); h.run(1);
+  expect(h.tip.textContent).toContain("0.750");
+  expect(h.tip.textContent).not.toContain("0.250");
+  h.stage.setBay(null); h.run(400);
+  expect(h.tip.hidden || !String(h.tip.textContent).includes("0.750")).toBe(true);
+
+  // A tip pinned by a tap has no pointer to read from. About a part it is written again; about a tile it goes with the plates.
+  fire("pointerleave", {}); h.run(1);
+  expect(h.tip.hidden).toBe(true);
+  said = "first";
+  h.click(h.screen(h.stage.specimen.center(i, new THREE.Vector3())), { pointerType: "touch" });
+  expect(h.tip.hidden).toBe(false);
+  expect(h.tip.textContent).toBe("first");
+  said = "second";
+  h.stage.setValues(new Float32Array(arch.parts.length), "signed");
+  expect(h.tip.hidden).toBe(false);
+  expect(h.tip.textContent).toBe("second");
+  h.stage.setBay({ key: "tiny.layer.1", floor: 1, plates: tiles(0.25) }); h.run(400);
+  h.scene.updateMatrixWorld(true);
+  const again = (h.stage as unknown as { bay: Bay }).bay.group.children.find((o) => ((o as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined)?.map) as THREE.Mesh;
+  h.click(h.screen(again.getWorldPosition(new THREE.Vector3())), { pointerType: "touch" });
+  expect(h.tip.textContent).toContain("0.250");
+  h.stage.setBay({ key: "tiny.layer.1", floor: 1, plates: tiles(0.75) });
+  expect(h.tip.hidden).toBe(true);
+  h.stage.dispose();
+});
+
+it("keeps the current input and output labels in a compact docked pane, and no label on another", () => {
+  // The docked desktop pane at its smallest: 520 by 369, with the toolbar, the help text, the breadcrumb and the camera dock over the stage.
+  const reserved = [{ left: 12, top: 11, width: 182, height: 32 }, { left: 414, top: 11, width: 93, height: 32 }, { left: 12, top: 50, width: 400, height: 43 }, { left: 12, top: 321, width: 133, height: 36 }, { left: 204, top: 321, width: 303, height: 36 }];
+  const h = harness(buildArch(QWEN_INFO), { width: 520, height: 369, reserved });
+  h.stage.setTray(Array.from({ length: 16 }, (_, i) => ({ label: i === 15 ? "Paris" : `tok${i}`, weight: NaN })), 15, 9, null);
+  h.stage.setCandidates([{ label: ".", p: 0.9999, chosen: true }]);
+  h.run(400);
+  h.camera.updateMatrixWorld(true); h.stage.invalidate(); h.run(3);
+  const boxes = h.spans.filter((s) => !s.removed && !s.hidden && s.style.transform).map((s) => {
+    const [, x, y] = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(s.style.transform)!;
+    return { text: s.textContent, left: Number(x), top: Number(y), width: s.textContent.length * 6.2 + 8, height: 14 };
+  });
+  // What the model read and what it wrote are always named. Structural captions are shown where they have room.
+  for (const need of ["Paris", ". 99.99%", "Words in", "Words out"]) expect(boxes.map((b) => b.text)).toContain(need);
+  const apart = (a: typeof boxes[number], b: { left: number; top: number; width: number; height: number }) => !(a.left < b.left + b.width && b.left < a.left + a.width && a.top < b.top + b.height && b.top < a.top + a.height);
+  for (const a of boxes) {
+    for (const r of reserved) expect(apart(a, r)).toBe(true);
+    for (const b of boxes) if (a !== b) expect(apart(a, b)).toBe(true);
+  }
   h.stage.dispose();
 });

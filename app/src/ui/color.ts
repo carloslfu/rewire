@@ -46,7 +46,8 @@ export function diverging(v: number): string {
 
 export function divergingRGB(v: number): RGB {
   const p = palette();
-  const t = Math.min(1, Math.abs(v)) ** 0.7;
+  // A value that is not a number has no color: it is drawn as zero and named in words where it is read.
+  const t = Number.isNaN(v) ? 0 : Math.min(1, Math.abs(v)) ** 0.7;
   const to = v < 0 ? p.neg : p.pos;
   return [
     Math.round(p.zero[0] + (to[0] - p.zero[0]) * t),
@@ -61,12 +62,16 @@ export function ink(v: number): string {
 }
 
 export function fmt(v: number, digits = 2): string {
-  if (!Number.isFinite(v)) return String(v);
+  if (!Number.isFinite(v)) return Number.isNaN(v) ? NO_NUMBER : v > 0 ? "∞" : "−∞";
   const s = Math.abs(v).toFixed(digits);
   return v < 0 ? `−${s}` : s;
 }
 
+/** What is shown where a number was expected and the model produced something that is not one. */
+export const NO_NUMBER = "not a number";
+
 export function signed(v: number, digits = 2): string {
+  if (!Number.isFinite(v)) return Number.isNaN(v) ? NO_NUMBER : v > 0 ? "+∞" : "−∞";
   return v >= 0 ? `+${Math.abs(v).toFixed(digits)}` : `−${Math.abs(v).toFixed(digits)}`;
 }
 
@@ -85,6 +90,7 @@ export function modelPct(p: number): string {
 }
 
 export function pct(p: number): string {
+  if (!Number.isFinite(p)) return "unavailable";
   const x = p * 100;
   if (x >= 99.5 && x < 100) return ">99%";
   if (x > 0 && x < 0.5) return "<1%";

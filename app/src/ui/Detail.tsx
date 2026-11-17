@@ -4,14 +4,19 @@ import type { FloorDetail } from "../model/types.ts";
 import { attentionMap, chipsWith, floorDetail, liveEngine, pathData, pick, piece, setFocus, stepAction, stepData, tokenPiece } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
-import { fmt, pct, signed } from "./color.ts";
+import { fmt, modelPct, pct, signed } from "./color.ts";
 import { multOf, withMult } from "./describe.ts";
 import { HeadGeometry } from "./HeadGeometry.tsx";
-import { Knob } from "./Knob.tsx";
+import { EditWait, Knob } from "./Knob.tsx";
+import { useEditBlocked } from "./useEditBlocked.ts";
 import { HeadExampleHint, NeuronControl } from "./Examples.tsx";
 import { Strip } from "./Strip.tsx";
 import { encode } from "@rewire/tiny/src/data.ts";
-import { type Chosen, chosen, HEADS, headIndex, memIndex } from "./word.ts";
+import { type Chosen, chosen, HEADS, headIndex, memIndex, replyMark } from "./word.ts";
+import { drawOdds, keptCount, written } from "./odds.ts";
+import { useMeasured } from "../stage/useMeasured.ts";
+import { canonical } from "../model/change-key.ts";
+import { MAX_HIDDEN, MAX_SWAPS } from "@rewire/engine/src/config.ts";
 
 export function Detail() {
   const focus = useStore((s) => s.focus);
@@ -48,9 +53,11 @@ export function useDetail(c: Chosen | null): { detail: FloorDetail | null; loadi
   // "nothing" again after every token of a fast burst is what React throws as an update loop.
   const holding = useRef(false);
   const version = useStore((s) => s.version);
-  const key = c ? `${version}.${c.ref.turn}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${c.reply.done}` : "";
+  // The model being ready is part of the request: one made while it was reloading is made again once it is back.
+  const ready = useStore((s) => s.mode === "live");
+  const key = c ? `${version}.${c.turn.id}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${replyMark(c.reply)}.${c.reply.done}.${ready}` : "";
   useEffect(() => {
-    if (!c || !c.reply.done) {
+    if (!c || !c.reply.done || !ready) {
       if (holding.current) { holding.current = false; setSt({ key, detail: null, loading: false }); }
       return;
     }
@@ -61,7 +68,7 @@ export function useDetail(c: Chosen | null): { detail: FloorDetail | null; loadi
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return st.key === key ? st : { detail: null, loading: !!c?.reply.done };
+  return st.key === key ? st : { detail: null, loading: !!c?.reply.done && ready };
 }
 
 function NoWord() {
@@ -80,6 +87,7 @@ function WordPanel({ c }: { c: Chosen | null }) {
   const model = useStore((s) => s.model);
   const D = S.def(model);
   const temperature = useStore((s) => s.temperature);
+  const live = useStore((s) => s.mode === "live"), busy = useStore((s) => s.busy), updating = useStore((s) => s.replay);
   if (!c) return (
     <>
       <Head kicker={S.terms.token[0]} title={S.terms.token[0]} std={S.terms.token[1]} def={D.token} />
@@ -87,29 +95,34 @@ function WordPanel({ c }: { c: Chosen | null }) {
     </>
   );
   const t = c.tok;
-  const chosenP = t.cands.find((x) => x.id === t.id)?.p ?? 0;
-  const canPick = c.reply.done && !c.reply.stale && store.get().mode === "live" && !store.get().busy;
+  const how = written(t), odds = drawOdds(t), kept = keptCount(t);
+  const drawnAt = store.get().turns[c.ref.turn]?.temperature ?? temperature;
+  // The same guard the pick itself applies: a finished, current reply and an idle model with no sample update left open.
+  const canPick = c.reply.done && !c.reply.stale && live && !busy && !updating;
   return (
     <>
-      <Head kicker={model.id === "tiny" ? "Letter" : `${S.terms.token[0]} · ${S.terms.token[1]}`} title={`"${wordText(t.id)}"`} def={D.word} code={`id ${t.id}`} />
+      <Head kicker={model.id === "tiny" ? "Letter" : `${S.terms.token[0]} · ${S.terms.token[1]}`} title={`"${wordText(t.id)}"`} def={how.by === "draw" ? D.word : D.picked} code={`id ${t.id}`} />
       {tokenPiece(t.id).fragment && <p className="note">This token contains bytes of a character. The reply combines them with neighboring tokens; each part keeps its own probability and controls.</p>}
       <section>
         <div className="kicker">{S.numbers}</div>
         <dl className="kv">
-          <dt>Probability when drawn</dt><dd className="num">{pct(chosenP)} at temperature {store.get().turns[c.ref.turn]?.temperature ?? temperature}</dd>
-          <dt>At temperature 1</dt><dd className="num">{pct(Math.exp(t.lp1))}</dd>
-          {c.forced && <><dt>Changed model</dt><dd className="num changed-text">{pct(Math.exp(c.forced.lp1))}</dd></>}
-          {t.picked && <><dt>Picked by</dt><dd>you</dd></>}
+          {how.by === "draw" ? <><dt>{S.drawChance}</dt><dd className="num">{S.drawn(pct(how.chance), drawnAt, kept)}</dd></>
+            : <><dt>{S.selection}</dt><dd>{S.pickedBy}</dd><dt>{S.drawChance}</dt><dd className="num">{S.undrawn(how.place, pct(how.chance), drawnAt)}</dd></>}
+          {/* The model's own probabilities keep two decimals and never round to 0% or 100%, as in the 3D view. Draw odds can be exactly 100%. */}
+          <dt>{S.modelChance}</dt><dd className="num">{modelPct(Math.min(1, Math.exp(t.lp1)))} {S.modelChanceAt}</dd>
+          {c.forced && <><dt>Changed model</dt><dd className="num changed-text">{modelPct(Math.min(1, Math.exp(c.forced.lp1)))} {S.modelChanceAt}</dd></>}
         </dl>
         <h3 style={{ marginTop: 12 }}>{S.candidates}</h3>
-        <p className="note">{S.candidatesNote(t.cut)}</p>
+        <p className="note">{S.candidatesNote(kept, t.cands.length)}</p>
         <table className="cands">
+          <thead><tr><th scope="col">Candidate</th><th scope="col" className="p">Draw</th><th className="barc" aria-hidden="true" /><th scope="col" className="p m">Model</th><th aria-hidden="true" /></tr></thead>
           <tbody>
             {t.cands.slice(0, allCandidates ? undefined : 5).map((x, i) => (
-              <tr key={x.id} className={`${x.id === t.id ? "chosen" : ""}${i >= t.cut ? " dropped" : ""}${i === t.cut ? " cutline" : ""}`}>
+              <tr key={x.id} className={`${x.id === t.id ? "chosen" : ""}${i >= kept ? " dropped" : ""}${i === kept ? " cutline" : ""}`}>
                 <td><span className="num faint">{i + 1}.</span> {wordText(x.id)}</td>
-                <td className="p num">{pct(x.p)}</td>
-                <td className="barc"><div className="bar" style={{ width: `${Math.max(1, x.p * 100)}%` }} /></td>
+                <td className="p num">{i < kept ? pct(odds[i]) : S.cut}</td>
+                <td className="barc"><div className="bar" style={{ width: `${i < kept && Number.isFinite(odds[i]) ? Math.max(1, odds[i] * 100) : 0}%` }} /></td>
+                <td className="p m num">{x.modelP === undefined ? "" : modelPct(x.modelP)}</td>
                 <td>
                   {canPick && x.id !== t.id && (
                     <button type="button" className="btn quiet small" onClick={() => void pick(c.ref, x.id)}
@@ -121,9 +134,10 @@ function WordPanel({ c }: { c: Chosen | null }) {
           </tbody>
         </table>
         {t.cands.length > 5 && <button type="button" className="linkish" onClick={() => setAllCandidates(!allCandidates)}>{allCandidates ? "Show fewer candidates" : `Show all ${t.cands.length} candidates`}</button>}
+        {updating && c.reply.done && !c.reply.stale && <p className="note">{S.pickAfterUpdate}</p>}
         {t.guesses && <details><summary>Follow the guesses through the layers</summary><Guesses c={c} /></details>}
       </section>
-      <details><summary>Change this word’s dictionary entry</summary><SwapControl id={t.id} /></details>
+      <details><summary>Change this word’s dictionary entry</summary><EditWait /><SwapControl id={t.id} /></details>
     </>
   );
 }
@@ -155,12 +169,14 @@ function Guesses({ c }: { c: Chosen }) {
 function SwapControl({ id }: { id: number }) {
   const model = useStore((s) => s.model);
   const chips = useStore((s) => s.chips);
-  const mode = useStore((s) => s.mode);
+  const why = useEditBlocked();
   const [text, setText] = useState("");
   const [msg, setMsg] = useState("");
   const pairs = model.id === "qwen" ? pathData()?.swap_pairs ?? [] : [];
   const current = (chips.swaps ?? []).find(([a, b]) => a === id || b === id);
   const suggestions = pairs.filter((p) => p.ids.includes(id));
+  // The model has room for a fixed number of swaps. One more is not offered, so none is listed without being applied.
+  const full = (chips.swaps?.length ?? 0) >= MAX_SWAPS;
   const doSwap = (a: number, b: number) => chipsWith((s) => ({ ...s, swaps: [...(s.swaps ?? []).filter(([x, y]) => x !== a && y !== a && x !== b && y !== b), [a, b]] }));
   const typed = async () => {
     const eng = liveEngine();
@@ -176,7 +192,7 @@ function SwapControl({ id }: { id: number }) {
       <h3>{S.swapWith}</h3>
       {current ? (
         <p className="note">Swapped with "{wordText(current[0] === id ? current[1] : current[0])}".{" "}
-          <button type="button" className="linkish" onClick={() => void chipsWith((s) => ({ ...s, swaps: (s.swaps ?? []).filter((p) => p !== current && !(p[0] === current[0] && p[1] === current[1])) }))}>{S.undo}</button>
+          <button type="button" className="linkish" disabled={!!why} title={why ?? undefined} onClick={() => void chipsWith((s) => ({ ...s, swaps: (s.swaps ?? []).filter((p) => p !== current && !(p[0] === current[0] && p[1] === current[1])) }))}>{S.undo}</button>
         </p>
       ) : (
         <>
@@ -184,16 +200,17 @@ function SwapControl({ id }: { id: number }) {
             <div className="suggest">
               {suggestions.map((p) => {
                 const other = p.ids[0] === id ? p.ids[1] : p.ids[0];
-                return <button key={other} type="button" className="btn change" disabled={mode !== "live"} onClick={() => void doSwap(id, other)}>Swap with "{other === p.ids[0] ? p.a : p.b}"</button>;
+                return <button key={other} type="button" className="btn change" disabled={!!why || full} onClick={() => void doSwap(id, other)}>Swap with "{other === p.ids[0] ? p.a : p.b}"</button>;
               })}
             </div>
           )}
-          {mode === "live" && (
+          {!why && !full && (
             <div className="composer">
               <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Another word" aria-label="Word to swap with" />
               <button type="button" className="btn" onClick={() => void typed()}>Swap</button>
             </div>
           )}
+          {full && <p className="note">{S.limitReached(MAX_SWAPS, "dictionary swaps")}</p>}
           {msg && <p className="note">{msg}</p>}
         </>
       )}
@@ -222,6 +239,9 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
   const row = probs ? probs.subarray(head * n, head * n + n) : null;
   const top = row ? [...row].map((p, j) => ({ p, j })).sort((a, b) => b.p - a.p).slice(0, 8) : [];
   const ctx = c ? contextTokens(c) : [];
+  // A map belongs to one head at one token of one reply under one set of changes.
+  const version = useStore((s) => s.version);
+  const mapId = c ? `${model.id}.${version}.${c.turn.id}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${c.reply.toks.length}.${replyMark(c.reply)}.${floor}.${head}` : "";
   return (
     <>
       <Head kicker={S.terms.head[1]} title={`${S.headN(head + 1)} · ${S.floorN(floor + 1)}`}
@@ -232,6 +252,7 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
         <div className="kicker">Signal strength</div>
         <Knob label={`Attention head ${head + 1} on layer ${floor + 1}`} value={mult}
           onChange={(v) => void chipsWith((s) => withMult(s, "head", floor, head, v))} />
+        <EditWait />
         <p className="note" style={{ marginTop: 6 }}>Off sends zero. Flip reverses the signal; ×2 and ×5 amplify it.</p>
       </section>
       <HeadGeometry key={`${floor}.${head}`} floor={floor} head={head} detail={detail} loading={loading} chosen={c} />
@@ -260,7 +281,7 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
                 <p className="note">Where head {head + 1} looks from this word, out of {n} earlier positions.</p>
               </div>
             )}
-            <FullMap key={`${store.get().version}.${c.ref.turn}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${c.reply.toks.length}`} c={c} floor={floor} head={head} />
+            <FullMap key={mapId} id={mapId} c={c} floor={floor} head={head} />
           </>
         )}
       </section>
@@ -269,18 +290,34 @@ function HeadPanel({ c, floor, head }: { c: Chosen | null; floor: number; head: 
   );
 }
 
-function FullMap({ c, floor, head }: { c: Chosen; floor: number; head: number }) {
+/**
+ * A head's full attention map, computed on request. What was asked for is remembered with the
+ * identity it was asked under (token, reply, changes and head), and a result is handed over only by
+ * the newest-request guard and only for that identity. A map that arrives after the visitor moved to
+ * another head or token is dropped, never drawn under the other one's name.
+ */
+export function useFullMap(id: string, compute: () => Promise<{ map: Float32Array; tokens: number[] } | null>) {
+  const live = useStore((s) => s.mode === "live");
+  const [asked, setAsked] = useState<{ id: string; n: number } | null>(null);
+  const wanted = asked?.id === id, key = `${id}#${asked?.n ?? 0}`;
+  const map = useMeasured(key, wanted && live, false, compute);
+  const mine = wanted && map.state !== "none" && map.key === key;
+  return {
+    map: mine && map.state === "ready" ? map.value : null,
+    computing: mine && map.state === "loading",
+    failed: mine && map.state === "unavailable",
+    ask: () => setAsked((now) => ({ id, n: (now?.n ?? 0) + 1 })),
+  };
+}
+
+function FullMap({ c, floor, head, id }: { c: Chosen; floor: number; head: number; id: string }) {
   const mode = useStore((s) => s.mode);
-  const [res, setRes] = useState<{ map: Float32Array; tokens: number[] } | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => setRes(null), [c.ref.turn, c.ref.side, c.ref.index, floor, head]);
+  const { map: res, computing, failed, ask } = useFullMap(id, () => attentionMap(c.ref, floor, head));
   if (mode !== "live") return null;
-  if (!res) return (
-    <button type="button" className="btn small" style={{ marginTop: 8 }} disabled={busy}
-      onClick={() => { setBusy(true); void attentionMap(c.ref, floor, head).then((r) => { setRes(r); setBusy(false); }, () => setBusy(false)); }}>
-      {busy ? "Computing…" : S.attentionMap}
-    </button>
-  );
+  if (!res) return <>
+    <button type="button" className="btn small" style={{ marginTop: 8 }} disabled={computing} onClick={ask}>{computing ? "Computing…" : S.attentionMap}</button>
+    {failed && <p className="note">The map could not be computed for this token. Try again.</p>}
+  </>;
   const n = res.tokens.length;
   const from = Math.max(0, n - 48); // the last 48 positions stay readable
   const sub = new Float32Array((n - from) * (n - from));
@@ -324,6 +361,7 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
       <section>
         <div className="kicker">Output strength</div>
         <Knob label={`MLP on layer ${floor + 1}`} value={mult} onChange={(v) => void chipsWith((s) => withMult(s, "memory", floor, 0, v))} />
+        <EditWait />
         <p className="note" style={{ marginTop: 6 }}>These controls scale the whole MLP's output activation. Off sends zero; Flip reverses it; ×2 and ×5 amplify it. They do not train or edit its weights.</p>
       </section>
       <section>
@@ -435,6 +473,7 @@ function FloorPanel({ c, floor }: { c: Chosen | null; floor: number }) {
       <section>
         <div className="kicker">{S.control}</div>
         <Knob label={`Layer ${floor + 1}`} value={mult} onChange={(v) => void chipsWith((s) => withMult(s, "floor", floor, 0, v))} />
+        <EditWait />
         <p className="note" style={{ marginTop: 6 }}>Off skips the layer: middle = x + α·attention(x), output = middle + α·MLP(middle), with α = 0.</p>
         <ConceptControl floor={floor} />
       </section>
@@ -443,7 +482,7 @@ function FloorPanel({ c, floor }: { c: Chosen | null; floor: number }) {
 }
 
 function ConceptControl({ floor }: { floor: number }) {
-  const ready = useStore((s) => s.mode === "live");
+  const ready = !useEditBlocked();
   const model = useStore((s) => s.model);
   const D = S.def(model);
   const chips = useStore((s) => s.chips);
@@ -479,6 +518,7 @@ function WordsInPanel({ c, position, side }: { c: Chosen | null; position?: numb
   const chips = useStore((s) => s.chips);
   const turns = useStore((s) => s.turns);
   const mode = useStore((s) => s.mode);
+  const why = useEditBlocked();
   const { detail } = useDetail(position === undefined ? c : null);
   const [row, setRow] = useState<Float32Array | null>(null);
   const changedHistory = (side ?? c?.ref.side) === "changed";
@@ -489,18 +529,24 @@ function WordsInPanel({ c, position, side }: { c: Chosen | null; position?: numb
   }, [sampleReply]);
   const pos = position ?? c?.position;
   const id = position !== undefined ? all[position] : c?.input;
+  // The row as the model that wrote this reply read it: no changes for an original reply, and the
+  // changed reply's own changes, not whatever is switched on now.
+  const readUnder = sampleReply?.changes ?? {}, readKey = canonical(readUnder);
+  const swapped = (chips.swaps ?? []).some((p) => id !== undefined && p.includes(id));
   useEffect(() => {
     setRow(null);
     const eng = liveEngine();
     if (id === undefined || !eng || mode !== "live") return;
     let live = true;
-    eng.dictRow(id, chips).then((r) => live && setRow(r), () => {});
+    eng.dictRow(id, readUnder).then((r) => live && setRow(r), () => {});
     return () => { live = false; };
-  }, [id, mode, chips]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, mode, readKey]);
   const fromDetail = position === undefined ? detail?.get("f0.x") : undefined;
   const values = row ?? fromDetail ?? null;
   const hidden = (chips.hidden ?? []).find((h) => h.key === pos);
   const lastReplyStart = sampleReply?.read.length ?? 0;
+  const hideFull = (chips.hidden?.length ?? 0) >= MAX_HIDDEN;
   return (
     <>
       <Head kicker={`${S.terms.embedding[0]} · ${S.terms.embedding[1]}`} title={id !== undefined ? `"${wordText(id)}"` : S.wordsIn}
@@ -510,6 +556,7 @@ function WordsInPanel({ c, position, side }: { c: Chosen | null; position?: numb
         {id === undefined ? <NoWord /> : (
           <>
             {values ? <Strip values={values} label={S.dictionaryRow(id)} /> : <p className="note">{S.noDetail}</p>}
+            {values && swapped && <p className="note">{changedHistory ? "The row the changed model reads for this piece, with its swap." : "The row the original model reads. The swap applies to changed replies only."}</p>}
             {c && position === undefined && <p className="note">Its own direct push toward "{wordText(c.tok.id)}": <span className="num">{signed(c.tok.pushes[0])}</span></p>}
             <p className="note" style={{ marginTop: 6 }}>{D.position}</p>
           </>
@@ -517,14 +564,15 @@ function WordsInPanel({ c, position, side }: { c: Chosen | null; position?: numb
       </section>
       <section>
         <div className="kicker">{S.control}</div>
+        <EditWait />
         {id !== undefined && <SwapControl id={id} />}
         {pos !== undefined && pos < lastReplyStart && (
           <div style={{ marginTop: 12 }}>
-            <button type="button" className={`btn change${hidden ? " on" : ""}`} disabled={mode !== "live"}
+            <button type="button" className={`btn change${hidden ? " on" : ""}`} disabled={!!why || (!hidden && hideFull)}
               onClick={() => void chipsWith((s) => ({ ...s, hidden: hidden ? (s.hidden ?? []).filter((h) => h.key !== pos) : [...(s.hidden ?? []), { key: pos, from: pos + 1 }] }))}>
               {hidden ? S.unhideWord : S.hideWord}
             </button>
-            <p className="note" style={{ marginTop: 4 }}>Every head on every layer skips this word from the next word on.</p>
+            <p className="note" style={{ marginTop: 4 }}>{!hidden && hideFull ? S.limitReached(MAX_HIDDEN, "hidden words") : S.hideNote(turns.length)}</p>
           </div>
         )}
       </section>
@@ -560,7 +608,7 @@ function WordsOutPanel({ c }: { c: Chosen | null }) {
               </>
             )}
             <h3 style={{ marginTop: 8 }}>The choice</h3>
-            <p>"{wordText(c.tok.id)}", drawn from {c.tok.cut} candidate{c.tok.cut === 1 ? "" : "s"} after the cut.</p>
+            <p>{S.choice(wordText(c.tok.id), written(c.tok), keptCount(c.tok))}</p>
             {c.tok.guesses && <Guesses c={c} />}
           </>
         )}
@@ -579,7 +627,7 @@ function WordsOutPanel({ c }: { c: Chosen | null }) {
 // ------------------------------------------------------------------ bits
 
 function BitsPanel() {
-  const ready = useStore((s) => s.mode === "live");
+  const ready = !useEditBlocked();
   const model = useStore((s) => s.model);
   const D = S.def(model);
   const chips = useStore((s) => s.chips);
@@ -594,6 +642,7 @@ function BitsPanel() {
       <Head kicker="Weights" title={`${bits} bits`} def={D.bits} />
       <section>
         <div className="kicker">{S.control}</div>
+        <EditWait />
         <div className="seg change" role="radiogroup" aria-label="Bits per weight">
           {([4, 3, 2] as const).map((b) => (
             <button key={b} type="button" role="radio" data-v={b === 4 ? 1 : b} aria-checked={bits === b} disabled={!ready} onClick={() => set(b)}>

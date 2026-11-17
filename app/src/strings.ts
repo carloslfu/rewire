@@ -33,6 +33,8 @@ export const S = {
   recovered: "The model is ready again. You can continue your reply.",
   retry: "Try again",
   loadError: (m: string) => `The model could not start: ${m}.`,
+  retryToLoad: "Use Try again to load it.",
+  qwenNotLoaded: "The model is not loaded.",
 
   // conversation
   you: "You",
@@ -58,6 +60,8 @@ export const S = {
   reply: "Reply",
   replyWords: "Arrow keys move between word pieces; Enter shows what went into one.",
   contextFull: "This sample has reached the model's context limit here.",
+  contextLimit: (n: number, piece: string) => `Reached the model's context limit at ${n} ${piece}s. There is no room to continue it.`,
+  pickStopped: "The pick was stopped before it was written.",
   freshStart: "Start fresh",
 
   // chips
@@ -69,6 +73,7 @@ export const S = {
     floor: (f: number, m: string) => `Layer ${f} ${m}`,
     swap: (a: string, b: string) => `${a} and ${b} swapped`,
     hidden: (w: string) => `"${w}" hidden from later words`,
+    hiddenAt: (position: number) => `prompt position ${position} hidden from later words in every sample`,
     concept: (c: string, f: number, s: number) => `"${c}" pushed at layer ${f}, strength ${s}`,
     bits: (b: number) => `${b} bits`,
     zeroed: (f: number, n: number) => (n === 1 ? `one weight on layer ${f} set to zero` : `${n} weights on layer ${f} set to zero`),
@@ -90,7 +95,7 @@ export const S = {
   towerNone: "Select a word or word piece in a reply to see which parts contribute toward or against it.",
   viewPush: "Push",
   viewDiff: "Change from original",
-  diffNote: "Each cell shows how its contribution changed for this original token: modified minus original. Later turns also include the effect of earlier regenerated answers.",
+  diffNote: "Each cell shows how its contribution changed for this original token: changed model minus original, on this sample's own prompt and original preceding tokens.",
   diffNone: "Change a layer, attention head or MLP to compare with the original.",
 
   // the visual replay of a finished reply, in the 3D view
@@ -135,6 +140,7 @@ export const S = {
   } as Record<string, [string, string]>,
   def: (m: ModelInfo) => ({
     word: `A ${m.piece} the model wrote. It was drawn from the candidates below.`,
+    picked: `A ${m.piece} you picked in place of the model's draw. The model wrote everything after it.`,
     token: m.id === "tiny" ? "The tiny model reads one letter at a time; its dictionary has 97 of them."
       : "Text is cut into word pieces before the model reads it. This model knows 151,669 of them.",
     dictionary: `Each ${m.piece} has a row of ${n(m.width)} numbers in the dictionary. The same table turns numbers back into ${m.piece}s at the end.`,
@@ -153,8 +159,27 @@ export const S = {
   }),
 
   candidates: "Candidates",
-  candidatesNote: (k: number) => `Odds in the draw: the top 20 at the sampling temperature, not the model's probability over its whole vocabulary. The draw used the top ${k} after the cut (top-p 0.8).`,
+  /** The two measures of the candidate table, and what the cut did. */
+  candidatesNote: (kept: number, listed: number) => `Draw is each candidate's chance in the draw at the sampling temperature. ${
+    kept >= listed ? `The top-p cut (0.8) kept all ${listed} listed.` : `The top-p cut (0.8) kept the top ${kept} of ${listed}; the rest had no chance, though you can still use one yourself.`
+  } Model is its probability at temperature 1 over the whole vocabulary.`,
   cut: "cut",
+  drawChance: "Chance in the draw",
+  drawn: (chance: string, temperature: number, kept: number) =>
+    `${chance} at temperature ${temperature}, ${kept === 1 ? "the only candidate the top-p cut kept" : `among the ${kept} candidates the top-p cut kept`}`,
+  selection: "Selection",
+  pickedBy: "Your choice",
+  undrawn: (place: "kept" | "cut" | "unlisted", chance: string, temperature: number) =>
+    place === "kept" ? `${chance} at temperature ${temperature}, had the draw been left alone`
+      : place === "cut" ? "none: the top-p cut dropped it" : "none: it was outside the top 20",
+  modelChance: "Model's probability",
+  modelChanceAt: "at temperature 1, over the whole vocabulary",
+  choice: (word: string, how: { by: "draw" | "visitor"; chance: number }, kept: number) =>
+    how.by === "draw" ? `"${word}", drawn from ${kept} candidate${kept === 1 ? "" : "s"} after the cut.`
+      : `"${word}", your choice in place of the draw. The draw would have chosen among ${kept} candidate${kept === 1 ? "" : "s"}.`,
+  pickAfterUpdate: "Finish the sample update, or restore the originals, to use another word here.",
+  limitReached: (max: number, what: string) => `${max} ${what} are active, the most the model has room for. Remove one to add another.`,
+  hideNote: (samples: number) => `Every head on every layer skips this word from the next word on.${samples > 1 ? " The hide is by position in the prompt, so it applies at this position in every sample." : ""}`,
   forcePick: "Use this word",
   floorGuesses: "Layer predictions",
   guessesNote: "Guesses on early layers are unreliable.",

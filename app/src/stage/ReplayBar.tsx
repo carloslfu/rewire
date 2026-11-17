@@ -6,7 +6,7 @@ import { store, useStore } from "../state/store.ts";
 import { modelPct, pct, signed } from "../ui/color.ts";
 import { FollowControl } from "../ui/FollowControl.tsx";
 import { chosen, towerValues, visibleTokens } from "../ui/word.ts";
-import { beatAt, beatLabel, pushSoFar, runningPush } from "./playback.ts";
+import { beatAt, beatLabel, pushCoverage, pushSoFar, runningPush } from "./playback.ts";
 import { type Scope, SPEEDS } from "./replay.ts";
 import { replayWait, session, startReplay, useReplay } from "./replay-session.ts";
 
@@ -42,6 +42,7 @@ export function ReplayBar() {
   const c = useMemo(() => chosen({ turns, word, fork }), [turns, word, fork]);
   const vals = useMemo(() => towerValues(c, view), [c, view]);
   const running = useMemo(() => (vals ? runningPush(model, vals) : null), [model, vals]);
+  const complete = useMemo(() => pushCoverage(model, vals).complete, [model, vals]);
   const wait = replayWait({ model, version, turns, word, fork, busy, replay: update });
   const replaying = rp.mode === "replay";
   const visible = visibleTokens(c?.reply), at = c ? visible.indexOf(c.ref.index) : -1;
@@ -79,7 +80,9 @@ export function ReplayBar() {
   </section>;
 
   const whole = rp.step >= rp.beats, beat = beatAt(model, rp.step - 1);
-  const total = running ? signed(running[running.length - 1]) : "";
+  // A total is given only when every push is a number. Otherwise the readout says the measurement is incomplete.
+  const total = running && complete ? signed(running[running.length - 1]) : "";
+  const partial = running && !complete ? ` Some ${view === "difference" ? "changes in direct push" : "direct pushes"} are unavailable for this token, so no total is given.` : "";
   const guess = !whole && beat.kind === "mlp" ? c?.tok.guesses?.[beat.floor]?.[0] : undefined;
   const where = `Token ${rp.token + 1} of ${rp.tokens}, step ${rp.step} of ${rp.beats}`;
   const spoken = rp.playing ? `Replay playing: ${rp.scope === "answer" ? "the whole answer" : "this token"}.`
@@ -117,8 +120,8 @@ export function ReplayBar() {
       </label>
     </div>
     <p className="replay-readout">
-      {!c ? "" : whole ? <>{rp.ended ? (rp.scope === "answer" ? "End of the answer. " : "End of this token. ") : ""}Token written: “{wq}”, {Number.isFinite(Math.exp(c.tok.lp1)) ? `which the model gave ${modelPct(Math.min(1, Math.exp(c.tok.lp1)))}.` : "whose probability is unavailable."}{total ? ` ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${total}.` : ""}</>
-        : <><strong>{beatLabel(beat)}.</strong>{view === "push" && running ? ` Direct pushes so far: ${signed(pushSoFar(running, rp.step))} of ${total}.` : ""}
+      {!c ? "" : whole ? <>{rp.ended ? (rp.scope === "answer" ? "End of the answer. " : "End of this token. ") : ""}Token written: “{wq}”, {Number.isFinite(Math.exp(c.tok.lp1)) ? `which the model gave ${modelPct(Math.min(1, Math.exp(c.tok.lp1)))}.` : "whose probability is unavailable."}{total ? ` ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${total}.` : partial}</>
+        : <><strong>{beatLabel(beat)}.</strong>{view === "push" && total ? ` Direct pushes so far: ${signed(pushSoFar(running!, rp.step))} of ${total}.` : view === "push" ? partial : ""}
           {guess ? ` If it stopped after this layer it would say “${text(guess.id)}” (${pct(guess.p)}).` : ""}</>}
     </p>
     <div className="replay-options">
