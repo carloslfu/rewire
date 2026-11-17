@@ -61,13 +61,16 @@ source of facts. The visualizer reports measured contributions, not a complete c
 ## The model in 3D
 
 Every bench has a **2D / 3D** switch above its visualizer. 2D is the flat diagram described above and
-stays the default. 3D draws the same model as a specimen you can turn, zoom and take apart: one deck
-per layer, its attention heads seated in pairs on the keys and values they share, its MLP, and the two
-points where their output joins the residual stream, with the dictionary below and the output above.
-**Full view** gives the stage the whole window, with the question and replies (or the training
-controls) on the left and the selected part's controls on the right. The page behind it is inert until
-the full view is closed. Three.js loads only when the 3D
-view is opened. If the browser cannot create a WebGL context, the benches stay in 2D.
+stays the default. 3D draws the same model as a laboratory instrument you can turn, zoom and take
+apart: one deck per layer in a four-post rack, its attention heads seated in pairs on the socket for
+the keys and values they share, its MLP under a finned heatsink, and the two points where their
+output joins the residual stream, a glass tube running from the dictionary below to the output above.
+It is lit as a product photograph: brushed aluminum, dark ceramic, gold contacts and copper bus bars
+under studio softboxes, on a dark seamless backdrop in both themes. **Full view** gives the stage the
+whole window, with the question and replies (or the training controls) on the left and the selected
+part's controls on the right. The page behind it is inert until the full view is closed. Three.js
+loads only when the 3D view is opened. If the browser cannot create a WebGL context, the benches stay
+in 2D. Touch-first devices get simpler shapes and materials and no shadow pass.
 
 Three tools keep looking, arranging and changing apart:
 
@@ -80,6 +83,30 @@ Three tools keep looking, arranging and changing apart:
   the chosen strength, starting from the intact copy. Teach has no Punch; it hands the taught model to
   Dismantle.
 
+Moving around:
+
+- Drag turns the model, the wheel or a pinch zooms toward the pointer, and the right button, Shift
+  with a drag, or two fingers pan. Double-click a part to **focus** on it: the camera comes close from
+  the angle you were already looking from and pivots around that part. Double-click the backdrop, or
+  press Fit, to return to the whole model.
+- A breadcrumb at the bottom left says where you are (Model › Layer 21 › Head 14) and steps the
+  selection up and down the layers. Once you have focused on a part, the camera follows the selection
+  and keeps your angle and zoom. Showing the whole model, it stays put, and measurements arriving never
+  move a camera you have placed.
+- The dock at the bottom right holds Fit, Focus, zoom, Pan, Spread, Views (three-quarter, front, side,
+  top, around the part in focus) and a help panel listing every mouse, trackpad, touch and keyboard
+  control. On a phone the dock sits under the stage with each action named.
+- **Pan** makes plain drags slide the view. While it is on, or Space is held, clicks select nothing and
+  change nothing. A press that ever travelled, a second finger, or a modifier key is always the
+  camera's: it can never end as a Punch or leave a part dragged.
+- **Spread** opens the layers apart and lifts every module off its socket on a tether, so you can look
+  between the decks. Every part stays selectable. It moves the drawing only, and Reset layout closes it.
+- With the model focused: arrow keys move between parts, Shift with arrows turns the model, + and −
+  zoom, F or Enter focuses the selected part, Home or 0 fits the model, 1 to 4 pick a view, E spreads
+  the layers, Space held pans, P punches the selected part, and ? opens the help panel. In the full
+  view, Escape closes an open panel or menu first, steps out of a text field next, and only then closes
+  the view.
+
 A selected part has its own restore button, and it undoes only what belongs to that part. Restore this
 head clears the head's strength and direction change. Restore this MLP clears its strength and the
 additions to its neurons. Restore this layer and its parts clears the layer's strength, the weights
@@ -90,11 +117,14 @@ these; they have their own controls, and Restore model removes everything.
 What is measured and what is drawn:
 
 - The number of layers, heads and key/value groups, and which heads share a group, come from the
-  model's configuration. The shapes, sizes and positions are a drawing. A model has no physical form.
-  The dictionary tiles and MLP fins stand in for 151,669 rows and 3,072 neurons and are not drawn one
-  by one.
-- In Dismantle, colors are the selected token's direct pushes, the same numbers as the 2D tower.
-  Selecting a layer opens the tower above it and stands that layer's measured values there as plates,
+  model's configuration. The shapes, sizes, positions, materials, screws, contacts, circuit traces and
+  lighting are a drawing. A model has no physical form, and no shape stands for real hardware or for an
+  individual parameter. The dictionary tiles and MLP fins stand in for 151,669 rows and 3,072 neurons
+  and are not drawn one by one.
+- In Dismantle, the lit windows on each module, the strips on the sockets and the rings on the stream
+  are colored by the selected token's direct pushes, the same numbers as the 2D tower. The chassis
+  keeps its own material, and a window with no measurement stays dark. Once a token is measured,
+  selecting a layer opens the tower above it and stands that layer's measured values there as plates,
   in computation order, from the same inspection pass the detail panel uses: the stream in, its
   normalization, the query, key and value projections, the normalized and position-rotated queries and
   keys, the scores, attention, mixed values, the combined heads and the addition to the stream, then
@@ -105,7 +135,7 @@ What is measured and what is drawn:
   read, each layer's attention then its MLP, then the choice. It is a slowed illustration with step,
   scrub and speed controls. It does not show how long any step took.
 - Teach shows the adapter's actual A and B matrices and the size of each of its eight ranks, refreshed
-  every 10 steps. Frozen layers are drawn pale. No activations are measured during teaching, so
+  every 10 steps. Frozen layers are drawn dimmed. No activations are measured during teaching, so
   nothing else lights up.
 - Grow colors each part by its own slice of the 800,256 parameters: a head owns its rows of the query
   matrix and its columns of the output matrix, and a pair's base owns their shared key and value rows.
@@ -230,7 +260,8 @@ semantic opposite.
 ## Layout
 
 - `app/` the page: React, Vite and TypeScript, built as static files. `app/src/stage/` is the 3D view:
-  pure modules for the architecture, replay, interventions and data, and `scene/` for Three.js
+  pure modules for the architecture, replay, interventions and data, and `scene/` for Three.js (the
+  specimen, its generated materials and detail, the studio lighting, the camera and the stage)
 - `engine/` the WebGPU engine (TypeScript and WGSL): 4-bit weights unpacked in the kernels, math in 32-bit
   floats, a change table every kernel reads, direct pushes and an inspection pass for any word
 - `tiny/` the tiny model in jax-js (about 0.8 million numbers), handed to the engine's 32-bit path

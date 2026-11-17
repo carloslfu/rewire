@@ -40,6 +40,13 @@ export interface Inset { top: number; bottom: number; side: number }
  */
 export function toolbarInset(reserved: Box[], modelLeft: number, modelRight: number, viewHeight: number, most = 0.38): number {
   let bottom = 0;
-  for (const r of reserved) if (r.left < modelRight && r.left + r.width > modelLeft) bottom = Math.max(bottom, r.top + r.height);
+  for (const r of reserved) if (r.top + r.height / 2 < viewHeight / 2 && r.left < modelRight && r.left + r.width > modelLeft) bottom = Math.max(bottom, r.top + r.height);
   return viewHeight > 0 ? Math.min(most, (bottom ? bottom + 8 : 0) / viewHeight) : 0;
+}
+
+/** The same for the camera dock and the breadcrumb at the bottom of the view. */
+export function dockInset(reserved: Box[], modelLeft: number, modelRight: number, viewHeight: number, most = 0.3): number {
+  let top = viewHeight;
+  for (const r of reserved) if (r.top + r.height / 2 >= viewHeight / 2 && r.left < modelRight && r.left + r.width > modelLeft) top = Math.min(top, r.top);
+  return viewHeight > 0 ? Math.min(most, (top < viewHeight ? viewHeight - top + 8 : 0) / viewHeight) : 0;
 }

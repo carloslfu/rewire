@@ -1,17 +1,22 @@
-// The 3D stage: one WebGL renderer drawing the specimen on demand. It renders only when the camera,
-// a spring, the replay or the data changed, pauses when hidden, and frees its GPU resources on dispose.
+// The 3D stage: one WebGL renderer drawing the specimen in its studio, on demand. It renders only when
+// the camera, a spring, the replay or the data changed, pauses when hidden, and frees its GPU resources
+// on dispose. It also owns the camera: fitting, focusing, named views, and what a drag or a click means.
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { type Arch, type Part, partIndex } from "../arch.ts";
-import { type Box, declutter, type Inset, placeBox, toolbarInset } from "../labels.ts";
+import { type Box, declutter, dockInset, type Inset, placeBox, toolbarInset } from "../labels.ts";
 import { advance, beatCount, type Clock, seek } from "../playback.ts";
-import type { Theme } from "../theme.ts";
+import { DARK, type Theme } from "../theme.ts";
 import { Bay, type BaySpec, type PlateHit } from "./bay.ts";
+import { along, ease, frame, type Pose, type ViewName, VIEWS } from "./camera.ts";
 import { MAX_BARS, Specimen } from "./specimen.ts";
+import { Studio, studioEnvironment } from "./studio.ts";
 
 export type Tool = "explore" | "grab" | "punch";
-export type { BaySpec };
+/** What a plain drag does to the camera. */
+export type DragMode = "turn" | "pan";
+export type { BaySpec, ViewName };
+export { frame };
 
 export interface StageOptions {
   /** The stage creates its own canvas here, so a remount always gets a fresh WebGL context. */
@@ -21,7 +26,7 @@ export interface StageOptions {
   arch: Arch;
   theme: Theme;
   reducedMotion: boolean;
-  /** Touch-first device: lower pixel ratio and no shadow pass. */
+  /** Touch-first device: lower pixel ratio, simpler shapes and materials, and no shadow pass. */
   coarse: boolean;
   onSelect: (part: Part | null) => void;
   /** Run the real edit for a punch. Returns whether it was accepted. */
@@ -31,14 +36,15 @@ export interface StageOptions {
   onClock: (clock: Clock) => void;
   /** Number of parts dragged away from their sockets. */
   onArranged: (count: number) => void;
-  /** Areas of the view taken by the toolbar and help text, in view pixels. Labels and the framing keep clear of them. */
+  /** Areas of the view taken by the toolbar, the help text and the camera dock, in view pixels. Labels and the framing keep clear of them. */
   reserved?: () => Box[];
   deps?: Partial<StageDeps>;
 }
 
 interface Controls {
-  enabled: boolean; target: THREE.Vector3;
+  enabled: boolean; enableRotate: boolean; target: THREE.Vector3;
   minDistance?: number; maxDistance?: number;
+  mouseButtons: { LEFT?: number | null }; touches: { ONE?: number | null };
   update(): boolean; dispose(): void;
   addEventListener(type: "start" | "change", f: () => void): void;
 }
@@ -46,24 +52,21 @@ interface Controls {
 export interface StageDeps {
   renderer: (canvas: HTMLCanvasElement) => THREE.WebGLRenderer;
   controls: (camera: THREE.PerspectiveCamera, element: HTMLElement) => Controls;
-  environment: (renderer: THREE.WebGLRenderer) => THREE.Texture | null;
+  /** The studio's reflections. The stage owns what it gets and disposes it. */
+  environment: (renderer: THREE.WebGLRenderer) => { texture: THREE.Texture; dispose(): void } | null;
 }
 
 const real: StageDeps = {
-  renderer: (canvas) => new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }),
+  renderer: (canvas) => new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: "high-performance" }),
   controls: (camera, element) => {
     const c = new OrbitControls(camera, element);
-    c.enableDamping = true; c.dampingFactor = 0.09;
+    c.enableDamping = true; c.dampingFactor = 0.1;
     c.zoomToCursor = true; c.screenSpacePanning = true;
+    c.rotateSpeed = 0.9; c.zoomSpeed = 1.1;
     c.minPolarAngle = 0.08; c.maxPolarAngle = Math.PI * 0.56;
     return c as unknown as Controls;
   },
-  environment: (renderer) => {
-    const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment();
-    const texture = pmrem.fromScene(room, 0.04).texture;
-    room.dispose(); pmrem.dispose();
-    return texture;
-  },
+  environment: studioEnvironment,
 };
 
 interface LabelSpec {
@@ -75,31 +78,12 @@ interface LabelSpec {
 }
 interface Label extends LabelSpec { el: HTMLElement; group: string; width: number; height: number }
 
-const NO_INSET: Inset = { top: 0, bottom: 0, side: 0 };
+/** The stage is a dark studio under either page theme, so it draws with the colors made for dark surroundings. */
+const studioLook = (page: Theme): Theme => (page.dark ? page : { ...DARK });
 
-const VIEW = new THREE.Vector3(0.42, 0.26, 1).normalize();
-
-/**
- * Camera placement that frames a box from a direction, for a vertical field of view and aspect ratio.
- * `inset` keeps fractions of the view clear (the toolbar above, labels at the edges): the box is fitted
- * to what remains and centered there. `span` is the box's half-width as a fraction of half the view.
- */
-export function frame(box: THREE.Box3, dir: THREE.Vector3, fovDeg: number, aspect: number, margin = 1.08, inset: Inset = NO_INSET) {
-  const center = box.getCenter(new THREE.Vector3());
-  const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize(), up = new THREE.Vector3().crossVectors(dir, right).normalize();
-  let w = 0, h = 0, d = 0;
-  const v = new THREE.Vector3();
-  for (let i = 0; i < 8; i++) {
-    v.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).sub(center);
-    w = Math.max(w, Math.abs(v.dot(right))); h = Math.max(h, Math.abs(v.dot(up))); d = Math.max(d, v.dot(dir));
-  }
-  const tan = Math.tan((fovDeg * Math.PI) / 360), wide = tan * Math.max(0.1, aspect);
-  const clearH = Math.max(0.2, 1 - inset.top - inset.bottom), clearW = Math.max(0.2, 1 - 2 * inset.side);
-  const distance = Math.max(h / (tan * clearH), w / (wide * clearW)) * margin + d;
-  // Aim above the box when more is reserved at the top than the bottom, so the box sits lower in the view.
-  const target = center.clone().addScaledVector(up, (inset.top - inset.bottom) * distance * tan);
-  return { target, position: target.clone().addScaledVector(dir, distance), span: w / (distance * wide) };
-}
+/** How far, in pixels, a press may travel and still be a click, and how far from a part a click still reaches it. */
+const SLOP = { mouse: 5, touch: 12 };
+const DOUBLE_MS = 380;
 
 export class Stage {
   readonly specimen: Specimen;
@@ -108,10 +92,8 @@ export class Stage {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(30, 1, 0.1, 600);
   private readonly controls: Controls;
-  private readonly key: THREE.DirectionalLight;
-  private readonly fill: THREE.HemisphereLight;
-  private readonly env: THREE.Texture | null;
-  private readonly ground: THREE.Mesh | null = null;
+  private readonly studio: Studio;
+  private readonly env: { texture: THREE.Texture; dispose(): void } | null;
   private readonly ray = new THREE.Raycaster();
   private readonly resize: ResizeObserver;
   private readonly seen: IntersectionObserver;
@@ -120,17 +102,27 @@ export class Stage {
   private bayMessage = "";
   private labels: Label[] = [];
   private tool: Tool = "explore";
+  private dragMode: DragMode = "turn";
+  /** Space is held: a drag pans for as long as it is. */
+  private panHeld = false;
   private clock: Clock = { t: 0, playing: false, speed: 1 };
   private clockMark = -1;
   private raf = 0; private last = 0;
   private dirty = true; private shadowDirty = true;
   private onScreen = true; private width = 0; private height = 0;
   private lost = false; private disposed = false;
-  /** True until the visitor moves the camera; a pristine view refits when the stage resizes or the bay opens. */
-  private pristine = true;
-  private flight: { from: THREE.Vector3; to: THREE.Vector3; fromTarget: THREE.Vector3; toTarget: THREE.Vector3; t: number } | null = null;
-  private drag: { part: number; plane: THREE.Plane; start: THREE.Vector3; base: THREE.Vector3; pointer: number } | null = null;
-  private down: { x: number; y: number; pointer: number } | null = null;
+  /** True while the camera is where the stage last put it. A resize, an opening bay or a spread then reframe; once the visitor moves it, they do not. */
+  private auto = true;
+  /** The part the camera is centered on, or null for the whole model. */
+  private subject: number | null = null;
+  /** The direction the stage last framed from. */
+  private dir = VIEWS.home.clone();
+  private flight: { from: Pose; to: Pose; t: number; ms: number } | null = null;
+  private drag: { part: number; plane: THREE.Plane; start: THREE.Vector3; base: THREE.Vector3; pointer: number; moved: boolean } | null = null;
+  /** The press in progress. `strayed` once it has travelled past the slop or been joined by another pointer: from then on it is the camera's and can never become a click. */
+  private down: { x: number; y: number; pointer: number; strayed: boolean; slop: number } | null = null;
+  private readonly pointers = new Set<number>();
+  private tap: { x: number; y: number; at: number; part: number } | null = null;
   private hoverAt: { x: number; y: number } | null = null;
   private selected: Part | null = null;
   private tipPinned = 0;
@@ -138,12 +130,12 @@ export class Stage {
   private readonly shadows: boolean;
   private reduced: boolean;
   private reserved: Box[] = [];
-  private theme: Theme;
+  private look: Theme;
 
   constructor(private readonly o: StageOptions) {
     const deps = { ...real, ...o.deps }, a = o.arch;
     this.beats = beatCount(a.model);
-    this.theme = o.theme;
+    this.look = studioLook(o.theme);
     this.reduced = o.reducedMotion;
     this.clock.t = this.beats;
     this.shadows = !o.coarse;
@@ -160,33 +152,18 @@ export class Stage {
     const r = this.renderer;
     r.setPixelRatio(Math.min(globalThis.devicePixelRatio || 1, o.coarse ? 1.5 : 2));
     r.outputColorSpace = THREE.SRGBColorSpace;
-    r.toneMapping = THREE.NeutralToneMapping;
+    // Neutral tone mapping keeps hues where they are, so the lit inserts stay the page's orange and blue.
+    r.toneMapping = THREE.NeutralToneMapping; r.toneMappingExposure = 1;
     r.shadowMap.enabled = this.shadows; r.shadowMap.type = THREE.PCFShadowMap; r.shadowMap.autoUpdate = false;
-    r.setClearColor(0x000000, 0);
+    r.setClearColor(0x0d0e10, 1);
 
-    this.specimen = new Specimen(a, o.theme, { shadows: this.shadows });
+    this.specimen = new Specimen(a, this.look, { shadows: this.shadows, quality: o.coarse ? "lite" : "high" });
     this.specimen.reducedMotion = o.reducedMotion;
-    this.scene.add(this.specimen.group);
+    this.studio = new Studio(a, this.shadows, o.theme.dark);
+    this.scene.add(this.studio.group, this.specimen.group);
+    this.scene.background = this.studio.background;
     this.env = deps.environment(r);
-    this.scene.environment = this.env;
-    const top = a.bounds.max[1], span = Math.max(a.bounds.max[0] - a.bounds.min[0], top - a.bounds.min[1]);
-    this.key = new THREE.DirectionalLight(0xffffff, 2);
-    this.key.position.set(span * 0.55, top + span * 0.45, span * 0.9);
-    this.key.target.position.set(0, top / 2, 0);
-    if (this.shadows) {
-      this.key.castShadow = true;
-      this.key.shadow.mapSize.set(2048, 2048);
-      const cam = this.key.shadow.camera;
-      cam.left = -span; cam.right = span; cam.top = span; cam.bottom = -span; cam.near = 0.5; cam.far = span * 4;
-      cam.updateProjectionMatrix();
-      this.key.shadow.bias = -0.0004; this.key.shadow.normalBias = 0.03;
-      const ground = new THREE.Mesh(new THREE.CircleGeometry(span * 2.2, 48).rotateX(-Math.PI / 2), new THREE.ShadowMaterial({ opacity: 0.16 }));
-      ground.receiveShadow = true;
-      this.ground = ground;
-      this.scene.add(ground);
-    }
-    this.fill = new THREE.HemisphereLight(0xffffff, 0x444444, 0.35);
-    this.scene.add(this.key, this.key.target, this.fill);
+    this.scene.environment = this.env?.texture ?? null;
     // Our pointer handlers run before the orbit controls', so a grab can claim the drag first.
     const on = (type: string, f: (e: never) => void, options?: AddEventListenerOptions) => {
       this.canvas.addEventListener(type, f as EventListener, options);
@@ -197,17 +174,17 @@ export class Stage {
     on("pointerup", this.pointerUp);
     on("pointercancel", this.pointerUp);
     on("pointerleave", this.pointerLeave);
-    on("dblclick", this.doubleClick);
     on("webglcontextlost", this.contextLost);
     const doc = o.host.ownerDocument, visibility = () => this.wake();
     doc.addEventListener("visibilitychange", visibility);
     this.unlisten.push(() => doc.removeEventListener("visibilitychange", visibility));
 
     this.controls = deps.controls(this.camera, this.canvas);
-    // Close enough to read one head, never so far that the model is lost.
-    this.controls.minDistance = a.m.headW * 2.5;
-    this.controls.maxDistance = span * 7;
-    this.controls.addEventListener("start", () => { this.pristine = false; this.flight = null; });
+    // Close enough to read the contacts on one module, never so far that the model is lost.
+    const span = Math.max(a.bounds.max[0] - a.bounds.min[0], a.bounds.max[1] - a.bounds.min[1]);
+    this.controls.minDistance = a.m.headW * 1.1;
+    this.controls.maxDistance = span * 9;
+    this.controls.addEventListener("start", () => { this.auto = false; this.flight = null; });
     this.controls.addEventListener("change", () => this.invalidate());
 
     this.resize = new ResizeObserver(() => this.measure());
@@ -252,10 +229,8 @@ export class Stage {
     }
     if (this.flight) {
       const f = this.flight;
-      f.t = Math.min(1, f.t + dt / 520);
-      const k = f.t < 0.5 ? 4 * f.t ** 3 : 1 - (-2 * f.t + 2) ** 3 / 2;
-      this.camera.position.lerpVectors(f.from, f.to, k);
-      this.controls.target.lerpVectors(f.fromTarget, f.toTarget, k);
+      f.t = Math.min(1, f.t + dt / f.ms);
+      along(f.from, f.to, ease(f.t), { position: this.camera.position, target: this.controls.target });
       this.camera.lookAt(this.controls.target);
       if (f.t >= 1) this.flight = null;
       active = true;
@@ -263,12 +238,22 @@ export class Stage {
     if (this.controls.update()) active = true;
     if (this.specimen.step(dt / 1000)) { active = true; this.shadowDirty = true; }
     if (!active) { this.last = 0; return; }
+    this.seatBay();
+    this.clip();
     // The shadow map is redrawn only on frames where something that casts a shadow moved.
     if (this.shadowDirty) { this.renderer.shadowMap.needsUpdate = this.shadows; this.shadowDirty = false; }
     this.renderer.render(this.scene, this.camera);
     this.placeLabels();
     this.raf = requestAnimationFrame(this.tick);
   };
+
+  /** Keep the depth range tight around what is in view: close-ups stay crisp and distant surfaces do not flicker. */
+  private clip() {
+    const d = this.camera.position.distanceTo(this.controls.target), near = Math.max(0.02, d * 0.03), far = d + this.box().getSize(new THREE.Vector3()).length() * 3;
+    if (Math.abs(near - this.camera.near) < this.camera.near * 0.02 && Math.abs(far - this.camera.far) < 1) return;
+    this.camera.near = near; this.camera.far = far;
+    this.camera.updateProjectionMatrix();
+  }
 
   private measure() {
     const w = this.o.host.clientWidth, h = this.o.host.clientHeight;
@@ -279,75 +264,108 @@ export class Stage {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.reserved = this.o.reserved?.() ?? [];
-    if (this.pristine) this.fit(false);
+    if (this.auto) this.reframe(false);
     this.invalidate();
   }
 
   // ---------------------------------------------------------------- camera
 
-  private box(withBay: boolean): THREE.Box3 {
+  /** The whole specimen as it will stand once settled, with the room an open bay or a spread adds. */
+  private box(): THREE.Box3 {
     const b = this.o.arch.bounds, box = new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max));
-    // An open bay lifts everything above it.
-    if (withBay && this.bay) box.max.y += this.room;
+    box.max.y += this.specimen.headroom;
     return box;
   }
 
   private bayBox(): THREE.Box3 {
-    const g = this.bay!.group.position, s = this.bay!.size;
-    return new THREE.Box3(new THREE.Vector3(g.x - 0.2, g.y - s.y - 0.2, g.z - 0.3), new THREE.Vector3(g.x + s.x + 0.2, g.y + 0.6, g.z + 0.3));
+    const g = this.bay!.group.position, s = this.bay!.size, y = this.bayY(true);
+    return new THREE.Box3(new THREE.Vector3(g.x - 0.2, y - s.y - 0.2, g.z - 0.3), new THREE.Vector3(g.x + s.x + 0.2, y + 0.6, g.z + 0.3));
   }
 
-  private fly(box: THREE.Box3, animate: boolean, margin?: number) {
-    if (!this.width || !this.height) return;
-    // Leave room for token and layer labels at the edges, and for the toolbar where it sits above the model.
-    const W = this.width, H = this.height, edges: Inset = { top: 0, bottom: Math.min(0.12, 24 / H), side: Math.min(0.1, 20 / W) };
-    let placed = frame(box, VIEW, this.camera.fov, this.camera.aspect, margin, edges);
-    const half = (placed.span * W) / 2, top = toolbarInset(this.reserved, W / 2 - half, W / 2 + half, H);
-    if (top > 0) placed = frame(box, VIEW, this.camera.fov, this.camera.aspect, margin, { ...edges, top });
-    const { target, position } = placed;
+  /** What to frame for one part: the part with enough of its surroundings to place it, and its detail bay when open. */
+  private partBox(i: number): THREE.Box3 {
+    const a = this.o.arch, m = a.m, part = a.parts[i], c = this.specimen.restCenter(i, new THREE.Vector3()), [w, h, d] = a.size[i];
+    const box = new THREE.Box3();
+    if (part.kind === "head" || part.kind === "mlp" || part.kind === "kv") {
+      const reach = part.kind === "mlp" ? m.mlpW * 0.72 : part.kind === "kv" ? w * 1.3 : m.headW * 2.4;
+      box.set(new THREE.Vector3(c.x - reach, c.y - m.pitch * 0.55, c.z - m.headD), new THREE.Vector3(c.x + reach, c.y + m.pitch * 0.7, c.z + m.headD));
+    } else if (part.kind === "layer") {
+      box.set(new THREE.Vector3(c.x - a.deckW / 2, c.y - m.pitch * 0.6, c.z - m.deckD * 0.6), new THREE.Vector3(c.x + a.deckW / 2, c.y + m.pitch * 1.1, c.z + m.deckD * 0.6));
+    } else {
+      const pad = part.kind === "norm" ? m.spineR * 6 : m.pitch * 0.5;
+      box.set(new THREE.Vector3(c.x - w / 2 - pad, c.y - h / 2 - pad, c.z - d / 2 - pad), new THREE.Vector3(c.x + w / 2 + pad, c.y + h / 2 + pad + (part.kind === "unembed" ? a.barRoom : 0), c.z + d / 2 + pad));
+    }
+    if (this.bay && part.kind === "layer" && this.bay.spec.floor === part.floor) box.union(this.bayBox());
+    return box;
+  }
+
+  /** Where the camera should stand to frame a box from a direction, clear of the toolbar above and the dock below. */
+  private placement(box: THREE.Box3, dir: THREE.Vector3, margin?: number): Pose {
+    // Leave room for token and layer labels at the edges, and for the overlays where they sit over the model.
+    const W = this.width, H = this.height, edges: Inset = { top: 0, bottom: Math.min(0.1, 20 / H), side: Math.min(0.08, 16 / W) };
+    let placed = frame(box, dir, this.camera.fov, this.camera.aspect, margin, edges);
+    const half = (placed.span * W) / 2, top = toolbarInset(this.reserved, W / 2 - half, W / 2 + half, H), bottom = Math.max(edges.bottom, dockInset(this.reserved, W / 2 - half, W / 2 + half, H));
+    if (top > 0 || bottom > edges.bottom) placed = frame(box, dir, this.camera.fov, this.camera.aspect, margin, { ...edges, top, bottom });
+    return placed;
+  }
+
+  private fly(to: Pose, animate: boolean, ms = 520) {
     if (!animate || this.reduced) {
       this.flight = null;
-      this.camera.position.copy(position); this.controls.target.copy(target);
-      this.camera.lookAt(target);
-    } else this.flight = { from: this.camera.position.clone(), to: position, fromTarget: this.controls.target.clone(), toTarget: target, t: 0 };
+      this.camera.position.copy(to.position); this.controls.target.copy(to.target);
+      this.camera.lookAt(to.target);
+    } else this.flight = { from: { position: this.camera.position.clone(), target: this.controls.target.clone() }, to, t: 0, ms };
     this.invalidate();
   }
 
-  private fit(animate: boolean) {
-    this.fly(this.box(true), animate);
+  /** Frame the current subject again from the direction the stage last used. */
+  private reframe(animate: boolean) {
+    if (!this.width || !this.height) return;
+    const whole = this.subject === null;
+    this.fly(this.placement(whole ? this.box() : this.partBox(this.subject!), this.dir, whole ? 1.04 : 1.12), animate);
   }
 
-  /** Frame the whole specimen (and the open detail bay) again. */
+  /** Home: frame the whole specimen (and the open detail bay) from the opening view. */
   resetView() {
-    this.pristine = true;
-    this.fit(true);
+    this.subject = null; this.auto = true;
+    this.dir.copy(VIEWS.home);
+    this.reframe(true);
   }
 
-  /** Bring one part, and its detail bay when open, close. */
+  /** Bring one part close and make it the pivot, keeping the direction the visitor is looking from. */
   focus(part: Part) {
     const i = partIndex(this.o.arch, part);
-    if (i < 0) return;
-    const a = this.o.arch, c = this.specimen.center(i, new THREE.Vector3());
-    const reach = part.kind === "layer" || part.kind === "embed" || part.kind === "unembed" ? a.deckW / 2 : a.m.headW * 4;
-    const box = new THREE.Box3(new THREE.Vector3(c.x - reach, c.y - a.m.pitch * 1.4, c.z - a.m.deckD), new THREE.Vector3(c.x + reach, c.y + a.m.pitch * 1.6, c.z + a.m.deckD));
-    if (this.bay && "floor" in part && this.bay.spec.floor === part.floor) box.union(this.bayBox());
-    this.pristine = false;
-    this.fly(box, true, 1.15);
+    if (i < 0 || !this.width || !this.height) return;
+    this.subject = i; this.auto = true;
+    this.dir.copy(this.camera.position).sub(this.controls.target).normalize();
+    // From straight above or below there is nothing to pivot around; come down to the opening view.
+    if (Math.abs(this.dir.y) > 0.9 || !Number.isFinite(this.dir.x)) this.dir.copy(VIEWS.home);
+    this.reframe(true);
   }
 
   focusBay() {
-    if (!this.bay) return;
-    this.pristine = false;
-    this.fly(this.bayBox(), true, 1.12);
+    if (!this.bay || !this.width || !this.height) return;
+    this.auto = false;
+    this.fly(this.placement(this.bayBox(), VIEWS.front, 1.1), true);
   }
 
-  /** Keyboard zoom: below 1 moves closer. */
+  /** Look at the current subject (the focused part, or the whole model) from a named direction. */
+  view(name: ViewName) {
+    this.auto = true;
+    this.dir.copy(VIEWS[name]);
+    this.reframe(true);
+  }
+
+  /** The part the camera is centered on, or null when it shows the whole model. */
+  get focused(): Part | null { return this.subject === null ? null : this.o.arch.parts[this.subject]; }
+
+  /** Zoom from a button or the keyboard: below 1 moves closer. The pivot stays where it is. */
   zoom(factor: number) {
-    const offset = this.camera.position.clone().sub(this.controls.target), span = this.o.arch.bounds.max[1];
-    offset.setLength(Math.max(this.controls.minDistance ?? 1, Math.min(this.controls.maxDistance ?? span * 7, offset.length() * factor)));
-    this.camera.position.copy(this.controls.target).add(offset);
-    this.pristine = false; this.flight = null;
-    this.invalidate();
+    const from = this.flight?.to ?? { position: this.camera.position, target: this.controls.target };
+    const offset = from.position.clone().sub(from.target);
+    offset.setLength(Math.max(this.controls.minDistance ?? 1, Math.min(this.controls.maxDistance ?? 400, offset.length() * factor)));
+    this.auto = false;
+    this.fly({ position: from.target.clone().add(offset), target: from.target.clone() }, true, 180);
   }
 
   /** Keyboard orbit, in radians. */
@@ -355,29 +373,64 @@ export class Stage {
     const s = new THREE.Spherical().setFromVector3(this.camera.position.clone().sub(this.controls.target));
     s.theta += azimuth; s.phi = Math.max(0.08, Math.min(Math.PI * 0.56, s.phi + polar));
     this.camera.position.copy(this.controls.target).add(new THREE.Vector3().setFromSpherical(s));
-    this.pristine = false; this.flight = null;
+    this.auto = false; this.flight = null;
     this.invalidate();
+  }
+
+  /** Whether a plain drag turns the model or slides the view. Either way the other is on the right button and on Shift. */
+  setDragMode(mode: DragMode) {
+    this.dragMode = mode;
+    if (mode === "pan") this.cancelDrag();
+    this.applyDrag();
+  }
+
+  /** Hold to pan: while Space is down a drag slides the view, whatever the tool. */
+  holdPan(held: boolean) {
+    this.panHeld = held;
+    // A press already under way becomes the camera's too.
+    if (held && this.down) this.down.strayed = true;
+    if (held) this.cancelDrag();
+    this.applyDrag();
+  }
+
+  private get panning() { return this.panHeld || this.dragMode === "pan"; }
+
+  private applyDrag() {
+    const pan = this.panning;
+    this.controls.mouseButtons.LEFT = pan ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+    this.controls.touches.ONE = pan ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE;
+    this.idleCursor();
+  }
+
+  private idleCursor() {
+    this.canvas.style.cursor = this.panning ? "move" : this.tool === "punch" ? "crosshair" : "grab";
   }
 
   // ---------------------------------------------------------------- data from the page
 
+  /** Follow the page's theme. The studio stays a studio; its backdrop is lighter beside a light page. */
   setTheme(theme: Theme) {
-    this.theme = theme;
-    this.specimen.setTheme(theme);
-    this.bay?.setTheme(theme);
-    this.scene.environmentIntensity = theme.dark ? 0.6 : 0.95;
-    this.key.intensity = theme.dark ? 1.5 : 2.1;
-    this.fill.intensity = theme.dark ? 0.2 : 0.4;
-    if (this.ground) (this.ground.material as THREE.ShadowMaterial).opacity = theme.dark ? 0.35 : 0.16;
+    this.look = studioLook(theme);
+    this.specimen.setTheme(this.look);
+    this.bay?.setTheme(this.look);
+    if (this.studio.setTheme(theme.dark)) this.scene.background = this.studio.background;
     this.invalidate();
   }
 
   setTool(tool: Tool) {
     this.tool = tool;
-    this.canvas.style.cursor = tool === "punch" ? "crosshair" : "grab";
+    this.cancelDrag();
+    this.tap = null;
+    this.idleCursor();
     this.hideTip();
-    // The help text under the toolbar changes height with the tool.
+    this.overlaysChanged();
+  }
+
+  /** The toolbar, help text or dock changed size: measure them again so labels and framing keep clear. */
+  overlaysChanged() {
     this.reserved = this.o.reserved?.() ?? [];
+    // A flight already under way is steered to the new framing instead of being cut short.
+    if (this.auto) this.reframe(!!this.flight);
     this.invalidate();
   }
 
@@ -391,10 +444,25 @@ export class Stage {
     this.invalidate();
   }
 
+  /**
+   * The selection changed. While the camera is on a part it stays with the selection: reframed when the
+   * visitor has not moved it, and otherwise carried across by the distance between the two parts, so
+   * their own angle and zoom are kept. Showing the whole model, the camera stays where it is.
+   */
   setSelection(part: Part | null) {
+    const i = part ? partIndex(this.o.arch, part) : -1, before = this.subject === null ? null : this.specimen.restCenter(this.subject, new THREE.Vector3());
     this.selected = part;
-    this.specimen.setSelection(part ? partIndex(this.o.arch, part) : -1);
+    this.specimen.setSelection(i);
     this.specimen.setDrawer(part && "floor" in part ? part.floor : -1);
+    if (this.subject !== null && i < 0) { this.subject = null; this.auto = false; }
+    else if (this.subject !== null && before) {
+      this.subject = i;
+      if (this.auto) this.reframe(true);
+      else {
+        const by = this.specimen.restCenter(i, new THREE.Vector3()).sub(before);
+        if (by.lengthSq() > 1e-8) this.fly({ position: this.camera.position.clone().add(by), target: this.controls.target.clone().add(by) }, true, 360);
+      }
+    }
     this.invalidate();
   }
 
@@ -412,6 +480,25 @@ export class Stage {
   setPoses(poses: Parameters<Specimen["setPoses"]>[0]) {
     this.specimen.setPoses(poses);
     this.shadowDirty = true;
+    this.invalidate();
+  }
+
+  /**
+   * Spread the layers apart for a look between them, from 0 (assembled) to 1. This moves the drawing
+   * only: every part stays selectable and tethered, and the model is not touched.
+   */
+  setSpread(amount: number) {
+    this.specimen.setSpread(amount);
+    this.opened();
+  }
+
+  get spread() { return this.specimen.spread; }
+
+  /** The tower changed height (a bay, a spread, a reset): fit the shadow to it, and the view when the visitor has not moved it. */
+  private opened() {
+    this.studio.frame(this.box());
+    this.shadowDirty = true;
+    if (this.auto) this.reframe(true);
     this.invalidate();
   }
 
@@ -453,31 +540,39 @@ export class Stage {
     if (spec && this.bay && this.bay.spec.key === spec.key && message === this.bayMessage && this.bay.update(spec.plates)) { this.bay.reveal(this.specimen.playheadNow); this.invalidate(); return; }
     if (this.bay) { this.scene.remove(this.bay.group); this.bay.dispose(); this.bay = null; }
     this.bayMessage = message;
-    this.room = 0;
     if (spec) {
-      const a = this.o.arch, m = a.m, bay = new Bay(spec, this.theme, a.deckW), floor = Math.max(-1, Math.min(a.floors - 1, spec.floor));
-      const below = floor < 0 ? m.plinthH : a.pos[partIndex(a, { kind: "layer", floor })][1] + m.deckT / 2 + m.saddleH + m.headH;
-      this.room = bay.size.y + 0.75;
-      bay.group.position.set(-bay.size.x / 2, below + 0.3 + bay.size.y, 0);
+      const a = this.o.arch, bay = new Bay(spec, this.look, a.deckW);
+      bay.group.position.x = -bay.size.x / 2;
       this.bay = bay;
+      this.seatBay(true);
       bay.reveal(this.specimen.playheadNow);
       this.scene.add(bay.group);
-      this.specimen.setGap(floor, this.room);
+      this.specimen.setGap(this.bayFloor, bay.size.y + 0.75);
     } else this.specimen.setGap(null);
-    const plates = this.bay?.labels() ?? [];
+    const bay = this.bay, plates = bay?.labels() ?? [];
     this.replaceLabels("plate", [
-      ...plates.map((l): LabelSpec => ({ text: l.text, className: "stage-label plate", at: (out) => { out.copy(l.at); }, anchor: [0.5, 1], nudge: [0, -2], priority: 50,
-        show: () => this.pixels(l.at, l.width) >= 72 })),
-      ...(this.bay && message ? [{ text: message, className: "stage-label message", anchor: [0.5, 0.5], priority: 100,
-        at: (out) => { const g = this.bay!.group.position, s = this.bay!.size; out.set(g.x + s.x / 2, g.y - s.y / 2, g.z); } } satisfies LabelSpec] : []),
+      ...plates.map((l): LabelSpec => ({ text: l.text, className: "stage-label plate", at: (out) => { out.copy(l.at).add(bay!.group.position); }, anchor: [0.5, 1], nudge: [0, -2], priority: 50,
+        show: () => this.pixels(l.at.clone().add(bay!.group.position), l.width) >= 72 })),
+      ...(bay && message ? [{ text: message, className: "stage-label message", anchor: [0.5, 0.5], priority: 100,
+        at: (out) => { const g = bay.group.position, s = bay.size; out.set(g.x + s.x / 2, g.y - s.y / 2, g.z); } } satisfies LabelSpec] : []),
     ]);
-    this.shadowDirty = true;
-    if (this.pristine) this.fit(true);
-    this.invalidate();
+    this.opened();
   }
 
-  /** Height the tower is opened by for the bay. */
-  private room = 0;
+  /** The layer the bay stands above, kept inside the model; -1 is the dictionary. */
+  private get bayFloor() {
+    return Math.max(-1, Math.min(this.o.arch.floors - 1, this.bay?.spec.floor ?? -1));
+  }
+
+  /** Top of the bay: just above the modules of its layer, wherever an opening or spreading tower has carried them. */
+  private bayY(settled = false): number {
+    const s = this.specimen;
+    return s.moduleTop(this.bayFloor, settled) + 0.3 + this.bay!.size.y;
+  }
+
+  private seatBay(settled = false) {
+    if (this.bay) this.bay.group.position.y = this.bayY(settled);
+  }
 
   get hasBay() { return !!this.bay; }
 
@@ -489,11 +584,12 @@ export class Stage {
     this.invalidate();
   }
 
+  /** Put dragged parts back and close the spread. The model and the camera's angle are left alone. */
   resetLayout() {
+    this.cancelDrag();
     this.specimen.resetLayout();
     this.o.onArranged(0);
-    this.shadowDirty = true;
-    this.invalidate();
+    this.opened();
   }
 
   /** Play the hit or the refusal of a punch made from the keyboard or a button. */
@@ -516,7 +612,7 @@ export class Stage {
     for (let L = 0; L < a.floors; L++) {
       const i = partIndex(a, { kind: "layer", floor: L });
       list.push({ text: String(L + 1), className: "stage-label layer", anchor: [1, 0.5], nudge: [-3, 0], priority: () => (chosen(L) ? 80 : 40),
-        at: (out) => { this.specimen.center(i, out); out.x -= a.deckW / 2 + 0.16; out.z += front; },
+        at: (out) => { this.specimen.center(i, out); out.x -= a.deckW / 2 + 0.36 * (m.headH / 0.3); out.z += front; },
         show: () => { const step = this.layerStep(); return L === 0 || (L + 1) % step === 0 || chosen(L); } });
     }
     const y = m.plinthH + 0.2;
@@ -591,35 +687,79 @@ export class Stage {
 
   // ---------------------------------------------------------------- pointer
 
-  private aim(e: { clientX: number; clientY: number }) {
+  private aim(x: number, y: number) {
     const r = this.canvas.getBoundingClientRect();
-    this.ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera);
+    this.ray.setFromCamera(new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1), this.camera);
     return r;
+  }
+
+  /**
+   * The part at a point of the view. A pointer just beside a part still reaches it, nearest first,
+   * so small modules are not a test of aim; a pointer on a part always gets that part.
+   */
+  private partAt(x: number, y: number, slop: number): number {
+    this.aim(x, y);
+    let i = this.specimen.pick(this.ray);
+    for (let ring = 1; i < 0 && ring <= 2; ring++) for (let k = 0; i < 0 && k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2, r = (slop * ring) / 2;
+      this.aim(x + Math.cos(a) * r, y + Math.sin(a) * r);
+      i = this.specimen.pick(this.ray);
+    }
+    return i;
   }
 
   private pointerDown = (e: PointerEvent) => {
     this.hideTip();
-    if (!e.isPrimary || e.button !== 0) return;
-    this.down = { x: e.clientX, y: e.clientY, pointer: e.pointerId };
-    if (this.tool !== "grab") return;
-    this.aim(e);
+    // A primary pointer starts a new gesture; anything still listed from an interrupted one is stale.
+    if (e.isPrimary) this.pointers.clear();
+    this.pointers.add(e.pointerId);
+    // A second finger makes this a camera gesture: it is not a click, and it lets go of a part being dragged.
+    if (this.pointers.size > 1) { this.down = null; this.tap = null; this.cancelDrag(); return; }
+    if (e.button !== 0) return;
+    // Shift, Control or Command with a press is the camera's, and so is every press while Pan is on or Space is
+    // held: Pan is for moving the view, so its clicks select nothing and change nothing.
+    const aside = e.shiftKey || e.ctrlKey || e.metaKey || this.panning;
+    this.down = { x: e.clientX, y: e.clientY, pointer: e.pointerId, strayed: aside, slop: e.pointerType === "touch" ? SLOP.touch : SLOP.mouse };
+    if (this.tool !== "grab" || aside) return;
+    this.aim(e.clientX, e.clientY);
     const i = this.specimen.pick(this.ray);
     if (i < 0 || !this.specimen.movable(i)) return;
     const center = this.specimen.center(i, new THREE.Vector3()), start = new THREE.Vector3();
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(this.camera.getWorldDirection(new THREE.Vector3()), center);
     if (!this.ray.ray.intersectPlane(plane, start)) return;
-    this.drag = { part: i, plane, start, base: this.specimen.userOffset(i, new THREE.Vector3()), pointer: e.pointerId };
-    this.controls.enabled = false;
+    this.drag = { part: i, plane, start, base: this.specimen.userOffset(i, new THREE.Vector3()), pointer: e.pointerId, moved: false };
+    // The controls keep following the pointer, so a second finger can still pinch, but one finger no longer turns the model.
+    this.controls.enableRotate = false;
     this.canvas.setPointerCapture?.(e.pointerId);
     this.canvas.style.cursor = "grabbing";
     this.o.onSelect(this.o.arch.parts[i]);
   };
 
+  /** Let go of a part being dragged and put it back where the drag found it. */
+  private cancelDrag() {
+    if (!this.drag) return;
+    this.specimen.arrange(this.drag.part, this.drag.base);
+    this.endDrag();
+  }
+
+  private endDrag() {
+    this.drag = null;
+    this.controls.enableRotate = true;
+    this.idleCursor();
+    this.shadowDirty = true;
+    this.o.onArranged(this.specimen.arranged());
+    this.invalidate();
+  }
+
   private pointerMove = (e: PointerEvent) => {
+    // Where the pointer ends up does not matter: a drag that comes back to its start was still a drag.
+    const down = this.down;
+    if (down && e.pointerId === down.pointer && Math.hypot(e.clientX - down.x, e.clientY - down.y) > down.slop) down.strayed = true;
     if (this.drag && e.pointerId === this.drag.pointer) {
-      this.aim(e);
+      this.aim(e.clientX, e.clientY);
       const at = new THREE.Vector3();
       if (this.ray.ray.intersectPlane(this.drag.plane, at)) {
+        this.drag.moved = true;
         this.specimen.arrange(this.drag.part, at.sub(this.drag.start).add(this.drag.base));
         this.shadowDirty = true;
         this.invalidate();
@@ -637,46 +777,62 @@ export class Stage {
     this.hoverFrame = requestAnimationFrame(() => {
       this.hoverFrame = 0;
       if (!this.hoverAt || this.disposed || !this.visible) return;
-      const rect = this.aim({ clientX: this.hoverAt.x, clientY: this.hoverAt.y });
+      const rect = this.aim(this.hoverAt.x, this.hoverAt.y);
       const plate = this.bay?.pick(this.ray);
-      const i = plate ? -1 : this.specimen.pick(this.ray);
+      const i = plate || this.panning ? -1 : this.partAt(this.hoverAt.x, this.hoverAt.y, SLOP.mouse);
       this.specimen.setHover(i);
       if (plate) this.showTip(this.plateTip(plate), this.hoverAt.x - rect.left, this.hoverAt.y - rect.top);
       else if (i >= 0) this.showTip(this.o.describe(this.o.arch.parts[i], this.tool), this.hoverAt.x - rect.left, this.hoverAt.y - rect.top);
       else if (!this.tipPinned) this.hideTip();
-      this.canvas.style.cursor = this.tool === "punch" ? "crosshair" : i >= 0 && this.tool === "explore" ? "pointer" : "grab";
+      if (i >= 0 && this.tool === "explore" && !this.panning) this.canvas.style.cursor = "pointer"; else this.idleCursor();
       this.invalidate();
     });
   }
 
   private pointerUp = (e: PointerEvent) => {
+    this.pointers.delete(e.pointerId);
     const down = this.down;
     this.down = null;
     if (this.drag && e.pointerId === this.drag.pointer) {
-      this.drag = null;
-      this.controls.enabled = true;
-      this.canvas.releasePointerCapture?.(e.pointerId);
-      this.canvas.style.cursor = "grab";
-      this.o.onArranged(this.specimen.arranged());
+      const { part, moved } = this.drag;
+      if (e.type !== "pointerup") { this.cancelDrag(); return; }
+      this.endDrag();
+      // A press on a part that never moved it is a click on it: twice looks closer.
+      if (!moved && !down?.strayed && this.twice(e, part)) this.focus(this.o.arch.parts[part]);
       return;
     }
-    if (e.type !== "pointerup" || !down || down.pointer !== e.pointerId || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
-    const rect = this.aim(e);
+    const touch = e.pointerType === "touch";
+    if (e.type !== "pointerup" || !down || down.pointer !== e.pointerId || down.strayed || Math.hypot(e.clientX - down.x, e.clientY - down.y) > down.slop) return;
+    const rect = this.aim(e.clientX, e.clientY);
     const plate = this.bay?.pick(this.ray);
     if (plate) {
-      this.showTip(this.plateTip(plate), e.clientX - rect.left, e.clientY - rect.top, e.pointerType === "touch");
+      if (this.twice(e, -2)) this.focusBay();
+      else this.showTip(this.plateTip(plate), e.clientX - rect.left, e.clientY - rect.top, touch);
       return;
     }
-    const i = this.specimen.pick(this.ray);
-    if (i < 0) { this.o.onSelect(null); return; }
+    const i = this.partAt(e.clientX, e.clientY, touch ? SLOP.touch : SLOP.mouse), again = this.twice(e, i);
+    if (i < 0) {
+      // Twice on the backdrop is the way home.
+      if (again) this.resetView(); else this.o.onSelect(null);
+      return;
+    }
     const part = this.o.arch.parts[i];
     if (this.tool === "punch") {
       if (this.o.onPunch(part)) this.specimen.kick(i); else this.specimen.refuse(i);
       this.invalidate();
     }
     this.o.onSelect(part);
-    if (e.pointerType === "touch") this.showTip(this.o.describe(part, this.tool), e.clientX - rect.left, e.clientY - rect.top, true);
+    if (again && this.tool !== "punch") this.focus(part);
+    else if (touch) this.showTip(this.o.describe(part, this.tool), e.clientX - rect.left, e.clientY - rect.top, true);
   };
+
+  /** Whether this click is the second of a double click on the same thing. Punch never doubles: each of its clicks is an edit. */
+  private twice(e: PointerEvent, part: number): boolean {
+    const now = performance.now(), before = this.tap;
+    const again = !!before && this.tool !== "punch" && before.part === part && now - before.at < DOUBLE_MS && Math.hypot(e.clientX - before.x, e.clientY - before.y) < 24;
+    this.tap = again ? null : { x: e.clientX, y: e.clientY, at: now, part };
+    return again;
+  }
 
   /** A tile's readout: what the plate is, its shape, and the real number under the pointer. */
   private plateTip(hit: PlateHit): string {
@@ -689,14 +845,6 @@ export class Stage {
     this.specimen.setHover(-1);
     if (!this.tipPinned) this.hideTip();
     this.invalidate();
-  };
-
-  private doubleClick = (e: MouseEvent) => {
-    if (this.tool !== "explore") return;
-    this.aim(e);
-    if (this.bay?.pick(this.ray)) { this.focusBay(); return; }
-    const i = this.specimen.pick(this.ray);
-    if (i >= 0) this.focus(this.o.arch.parts[i]);
   };
 
   private contextLost = (e: Event) => {
@@ -743,11 +891,10 @@ export class Stage {
     this.bay?.dispose();
     this.bay = null;
     this.specimen.dispose();
-    if (this.ground) { this.ground.geometry.dispose(); (this.ground.material as THREE.Material).dispose(); }
-    this.key.shadow.map?.dispose();
-    this.key.dispose(); this.fill.dispose();
+    this.studio.dispose();
+    // The environment's render target is ours to free.
     this.env?.dispose();
-    this.scene.environment = null;
+    this.scene.environment = null; this.scene.background = null;
     this.scene.clear();
     this.renderer.dispose();
     // Browsers cap live WebGL contexts; release this one now instead of waiting for garbage collection.

@@ -8,9 +8,12 @@ import { type Arch, buildArch, type Part, partIndex } from "../src/stage/arch.ts
 import { poseOf } from "../src/stage/intervene.ts";
 import { beatCount } from "../src/stage/playback.ts";
 import { Bay, layoutPlates, plateSize } from "../src/stage/scene/bay.ts";
+import { along, VIEWS } from "../src/stage/scene/camera.ts";
+import { fasciaHeight } from "../src/stage/scene/detail.ts";
 import { Specimen } from "../src/stage/scene/specimen.ts";
 import { frame, Stage } from "../src/stage/scene/stage.ts";
-import { LIGHT } from "../src/stage/theme.ts";
+import { brushedPixels, nameplatePixels, NAMEPLATES, tracePixels } from "../src/stage/scene/textures.ts";
+import { DARK, LIGHT } from "../src/stage/theme.ts";
 
 const settle = (s: Specimen) => { for (let i = 0; i < 2000 && s.step(1 / 60); i++); expect(s.settled).toBe(true); };
 const rayAt = (target: THREE.Vector3, from = new THREE.Vector3(0, 0, 40)) => new THREE.Raycaster(target.clone().add(from), from.clone().negate().normalize());
@@ -19,13 +22,14 @@ const instanced = (s: Specimen) => s.group.children.filter((o): o is THREE.Insta
 it("draws the whole model in a fixed, small number of draw calls", () => {
   for (const [model, heads] of [[QWEN_INFO, 448], [TINY_INFO, 16]] as const) {
     const s = new Specimen(buildArch(model), LIGHT, { shadows: false });
-    // 448 heads and 28 MLPs are instances, not meshes: the budget does not grow with the model.
-    expect(s.drawCalls).toBeLessThanOrEqual(26);
+    // 448 heads and 28 MLPs are instances, not meshes: the budget does not grow with the model. Each kind of
+    // part is a handful of instanced pieces (body, gold, lit insert, cover glass), one draw call apiece.
+    expect(s.drawCalls).toBeLessThanOrEqual(50);
     const counts = instanced(s).map((m) => m.count);
     expect(counts.filter((c) => c === heads).length).toBeGreaterThanOrEqual(2);
     expect(counts).toContain(model.floors);
     expect(counts).toContain(model.floors * model.kvHeads);
-    expect(counts.reduce((a, b) => a + b, 0)).toBeLessThan(model.floors * 80 + 400);
+    expect(counts.reduce((a, b) => a + b, 0)).toBeLessThan(model.floors * 130 + 400);
     s.dispose();
   }
 });
@@ -287,17 +291,28 @@ function harness(arch: Arch, options: { hidden?: boolean; width?: number; coarse
   const labels = { ...element(), ownerDocument: doc }, tip = element();
   const renderer = { render: vi.fn(), dispose: vi.fn(), forceContextLoss: vi.fn(), setSize: vi.fn(), setPixelRatio: vi.fn(), setClearColor: vi.fn(), getPixelRatio: () => 1,
     shadowMap: { enabled: false, type: 0, autoUpdate: true, needsUpdate: false }, info: { render: { calls: 0, triangles: 0 } }, outputColorSpace: "", toneMapping: 0 };
-  const controls = { enabled: true, target: new THREE.Vector3(), update: vi.fn(() => false), dispose: vi.fn(), addEventListener: vi.fn() };
+  const controls = { enabled: true, enableRotate: true, mouseButtons: { LEFT: THREE.MOUSE.ROTATE as number }, touches: { ONE: THREE.TOUCH.ROTATE as number }, target: new THREE.Vector3(), update: vi.fn(() => false), dispose: vi.fn(),
+    addEventListener: vi.fn<(type: string, f: () => void) => void>() };
+  const environment = { texture: new THREE.Texture(), dispose: vi.fn() };
   const events = { select: vi.fn(), punch: vi.fn(() => true), lost: vi.fn(), clock: vi.fn(), arranged: vi.fn() };
   const stage = new Stage({
     host: host as unknown as HTMLElement, labels: labels as unknown as HTMLElement, tip: tip as unknown as HTMLElement, arch, theme: LIGHT, reducedMotion: options.reduced ?? false, coarse: options.coarse ?? false, reserved: () => options.reserved ?? [],
     onSelect: events.select, onPunch: events.punch, describe: () => "part", onLost: events.lost, onClock: events.clock, onArranged: events.arranged,
-    deps: { renderer: () => renderer as unknown as THREE.WebGLRenderer, controls: () => controls, environment: () => null },
+    deps: { renderer: () => renderer as unknown as THREE.WebGLRenderer, controls: () => controls, environment: () => environment },
   });
   let now = 0;
   const run = (n = 1) => { for (let i = 0; i < n; i++) { const pending = [...frames]; frames.clear(); now += 16; for (const [, f] of pending) f(now); } };
   const listening = () => [...canvas.listeners.values()].reduce((n, s) => n + s.size, 0) + [...doc.listeners.values()].reduce((n, s) => n + s.size, 0);
-  return { stage, frames, run, renderer, controls, canvas, doc, host, spans, observers, events, listening, tip };
+  const inner = stage as unknown as { camera: THREE.PerspectiveCamera; scene: THREE.Scene };
+  /** A pointer event on the canvas. A plain left mouse button unless said otherwise. */
+  const fire = (type: string, e: Record<string, unknown>) => { for (const f of [...(canvas.listeners.get(type) ?? [])]) (f as (e: unknown) => void)({ isPrimary: true, button: 0, pointerId: 1, pointerType: "mouse", buttons: 0, type, preventDefault() {}, ...e }); };
+  const click = (at: { clientX: number; clientY: number }, e: Record<string, unknown> = {}) => { fire("pointerdown", { ...at, ...e }); fire("pointerup", { ...at, ...e }); };
+  /** Where a point of the model is on the canvas. */
+  const screen = (v: THREE.Vector3) => { inner.camera.updateMatrixWorld(true); const p = v.clone().project(inner.camera); return { clientX: (p.x * 0.5 + 0.5) * 400, clientY: (-p.y * 0.5 + 0.5) * 600 }; };
+  /** The visitor takes the camera: what the orbit controls report when a drag, wheel or pinch begins. */
+  const takeCamera = () => { for (const [type, f] of controls.addEventListener.mock.calls) if (type === "start") f(); };
+  const looking = () => inner.camera.position.clone().sub(controls.target).normalize();
+  return { stage, frames, run, renderer, controls, canvas, doc, host, spans, observers, events, listening, tip, environment, camera: inner.camera, scene: inner.scene, fire, click, screen, takeCamera, looking };
 }
 
 beforeEach(() => { vi.stubGlobal("devicePixelRatio", 3); });
@@ -456,15 +471,10 @@ it("does not draw while hidden or collapsed to nothing", () => {
 });
 
 it("selects on click, punches once per click in Punch, and reports a refused punch without moving the model", () => {
-  const arch = buildArch(TINY_INFO), h = harness(arch);
+  const arch = buildArch(TINY_INFO), h = harness(arch), { fire } = h;
   h.run(4);
-  const fire = (type: string, e: Record<string, unknown>) => { for (const f of [...(h.canvas.listeners.get(type) ?? [])]) (f as (e: unknown) => void)({ isPrimary: true, button: 0, pointerId: 1, pointerType: "mouse", buttons: 0, type, preventDefault() {}, ...e }); };
-  // The centre of the canvas looks at the middle of the specimen; find a head by projecting it.
   const part: Part = { kind: "head", floor: 2, head: 1 }, i = partIndex(arch, part);
-  const camera = (h.stage as unknown as { camera: THREE.PerspectiveCamera }).camera;
-  camera.updateMatrixWorld(true);
-  const p = h.stage.specimen.center(i, new THREE.Vector3()).project(camera);
-  const at = { clientX: (p.x * 0.5 + 0.5) * 400, clientY: (-p.y * 0.5 + 0.5) * 600 };
+  const at = h.screen(h.stage.specimen.center(i, new THREE.Vector3()));
   fire("pointerdown", at); fire("pointerup", at);
   expect(h.events.select).toHaveBeenLastCalledWith(part);
   expect(h.events.punch).not.toHaveBeenCalled();
@@ -484,14 +494,16 @@ it("selects on click, punches once per click in Punch, and reports a refused pun
   fire("pointerdown", at); fire("pointerup", at);
   h.run(400);
   expect(h.stage.specimen.center(i, new THREE.Vector3()).distanceTo(rest)).toBeLessThan(1e-5);
-  // Grab moves the part with the pointer and never calls the model.
+  // Grab moves the part with the pointer and never calls the model. The controls stay on, so the wheel and a
+  // second finger still zoom, but they stop turning the model under the part.
   h.events.punch.mockClear();
   h.stage.setTool("grab");
   fire("pointerdown", at);
-  expect(h.controls.enabled).toBe(false);
+  expect(h.controls.enabled).toBe(true);
+  expect(h.controls.enableRotate).toBe(false);
   fire("pointermove", { clientX: at.clientX + 60, clientY: at.clientY - 30, buttons: 1 });
   fire("pointerup", { clientX: at.clientX + 60, clientY: at.clientY - 30 });
-  expect(h.controls.enabled).toBe(true);
+  expect(h.controls.enableRotate).toBe(true);
   expect(h.events.arranged).toHaveBeenLastCalledWith(1);
   expect(h.events.punch).not.toHaveBeenCalled();
   h.run(400);
@@ -546,6 +558,35 @@ it("releases its listeners, observers, frames, DOM and GPU context on dispose", 
   h.stage.invalidate();
   expect(h.frames.size).toBe(0);
   expect(h.renderer.dispose).toHaveBeenCalledTimes(1);
+  expect(h.environment.dispose).toHaveBeenCalledTimes(1);
+});
+
+it("frees the studio, its reflections and every generated texture, and replaces the backdrop only when the theme changes", () => {
+  const h = harness(buildArch(TINY_INFO));
+  const freed = new Set<THREE.Texture>(), watch = (t: THREE.Texture) => { t.addEventListener("dispose", () => freed.add(t)); return t; };
+  const surfaces = h.stage.specimen.textures.map(watch), first = watch(h.scene.background as THREE.Texture);
+  expect(surfaces.length).toBeGreaterThanOrEqual(5);
+  expect(h.scene.environment).toBe(h.environment.texture);
+  // The same theme again keeps the backdrop it has.
+  h.stage.setTheme(LIGHT);
+  expect(h.scene.background).toBe(first);
+  h.stage.setTheme(DARK);
+  const second = watch(h.scene.background as THREE.Texture);
+  expect(second).not.toBe(first);
+  expect(freed.has(first)).toBe(true);
+  expect(freed.has(second)).toBe(false);
+  // Lights, floor and shadow catcher go with the stage.
+  const studio = h.scene.children[0], floor = studio.children.filter((o): o is THREE.Mesh => (o as THREE.Mesh).isMesh);
+  expect(floor.length).toBeGreaterThanOrEqual(3);
+  let gone = 0;
+  for (const mesh of floor) { mesh.geometry.addEventListener("dispose", () => { gone++; }); (mesh.material as THREE.Material).addEventListener("dispose", () => { gone++; }); }
+  h.stage.dispose();
+  expect(gone).toBe(floor.length * 2);
+  for (const t of [...surfaces, second]) expect(freed.has(t)).toBe(true);
+  expect(h.environment.dispose).toHaveBeenCalledTimes(1);
+  expect(h.scene.background).toBeNull();
+  expect(h.scene.environment).toBeNull();
+  expect(h.scene.children).toHaveLength(0);
 });
 
 it("refuses to start without WebGL, leaving nothing behind", () => {
@@ -558,4 +599,401 @@ it("refuses to start without WebGL, leaving nothing behind", () => {
     deps: { renderer: () => { throw new Error("Error creating WebGL context."); } } })).toThrow(/WebGL/);
   expect(canvas.removed).toBe(true);
   expect(frames).toHaveLength(0);
+});
+
+// ------------------------------------------------------------------ the instrument: inserts, spread, detail
+
+const triangles = (s: Specimen) => {
+  let n = 0;
+  s.group.traverse((o) => {
+    const m = o as THREE.InstancedMesh;
+    if (!m.isMesh || !m.geometry.getAttribute("normal")) return;
+    n += ((m.geometry.index?.count ?? m.geometry.getAttribute("position").count) / 3) * (m.isInstancedMesh ? m.count : 1);
+  });
+  return n;
+};
+const colorAt = (mesh: THREE.InstancedMesh, i: number) => { const c = new THREE.Color(); mesh.getColorAt(i, c); return [c.r, c.g, c.b].map((v) => +v.toFixed(4)); };
+
+it("lights an insert only for a measurement and leaves the chassis its own material", () => {
+  const arch = buildArch(TINY_INFO), s = new Specimen(arch, DARK, { shadows: false });
+  const heads = instanced(s).filter((m) => m.count === 16), glow = heads.find((m) => (m.material as THREE.MeshBasicMaterial).isMeshBasicMaterial)!;
+  const body = heads.find((m) => (m.material as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial && m.instanceColor)!;
+  const tile = s.group.children.find((o) => (o as THREE.Mesh).isMesh && !(o as THREE.InstancedMesh).isInstancedMesh && ((o as THREE.Mesh).material as THREE.MeshBasicMaterial).isMeshBasicMaterial && (o as THREE.Mesh).geometry.type === "BoxGeometry")!;
+  // Nothing measured: every window is the same dark glass, and nothing on the dictionary is lit.
+  const off = colorAt(glow, 0);
+  for (let i = 0; i < 16; i++) { expect(colorAt(glow, i)).toEqual(off); expect(colorAt(body, i)).toEqual([1, 1, 1]); }
+  expect(Math.max(...off)).toBeLessThan(0.06);
+  s.setTray([0.5, 0.5], 1, 3);
+  expect(tile.visible).toBe(false);
+  // One head pushed for the token, one against, one measured at zero; the rest were not measured.
+  const values = new Float32Array(arch.parts.length).fill(NaN), at = (floor: number, head: number) => partIndex(arch, { kind: "head", floor, head });
+  values[at(1, 0)] = 1; values[at(1, 1)] = -1; values[at(1, 2)] = 0; values[0] = 0.5;
+  s.setValues(values, "signed");
+  const toward = colorAt(glow, 4), against = colorAt(glow, 5);
+  expect(toward[0]).toBeGreaterThan(toward[2] * 2);
+  expect(against[2]).toBeGreaterThan(against[0] * 2);
+  expect(colorAt(glow, 6)).toEqual(off);
+  expect(colorAt(glow, 7)).toEqual(off);
+  expect(tile.visible).toBe(true);
+  // The module bodies never take the data's color.
+  for (let i = 0; i < 16; i++) expect(colorAt(body, i)).toEqual([1, 1, 1]);
+  // Before the replay reaches a head its window is still dark.
+  s.setPlayhead(0);
+  expect(colorAt(glow, 4)).toEqual(off);
+  s.setPlayhead(null);
+  // A part that is switched off dims its body and its window; the measurement does not keep it lit.
+  s.setPoses(arch.parts.map((p) => poseOf({ heads: [{ floor: 1, head: 0, mult: 0 }] }, p, TINY_INFO)));
+  expect(colorAt(body, 4)[0]).toBeLessThan(0.5);
+  expect(colorAt(glow, 4)[0]).toBeLessThan(toward[0] * 0.5);
+  s.dispose();
+});
+
+it("spreads the layers apart with every part still pickable and tethered, and resets the arrangement without undoing a real change", () => {
+  const arch = buildArch(QWEN_INFO), s = new Specimen(arch, LIGHT, { shadows: false }), v = new THREE.Vector3(), m = arch.m;
+  const at = (p: Part) => s.center(partIndex(arch, p), v).clone();
+  const head: Part = { kind: "head", floor: 20, head: 13 }, parts: Part[] = [{ kind: "layer", floor: 0 }, { kind: "layer", floor: 1 }, { kind: "layer", floor: 20 }, { kind: "layer", floor: 27 }, { kind: "unembed" }, { kind: "embed" }];
+  const rest = parts.map(at), seated = at(head).y - at({ kind: "layer", floor: 20 }).y;
+  const glass = s.group.children.find((o) => (o as THREE.Mesh).geometry?.type === "CylinderGeometry" && ((o as THREE.Mesh).material as THREE.Material).transparent) as THREE.Mesh;
+  const closed = new THREE.Box3().setFromObject(glass).max.y;
+  expect(s.tetherCount).toBe(0);
+  s.setSpread(1); settle(s);
+  // Each layer rises in proportion to its place in the stack, by more than a whole pitch per layer; the dictionary stays.
+  const rise = parts.map((p, i) => at(p).y - rest[i].y), step = rise[1];
+  expect(step).toBeGreaterThan(m.pitch);
+  expect(rise.slice(0, 4).map((r) => +(r / step).toFixed(4))).toEqual([0, 1, 20, 27]);
+  expect(rise[4]).toBeGreaterThan(rise[3]);
+  expect(rise[5]).toBe(0);
+  // Modules lift clear of their sockets, each on a tether back to it, and the stream still reaches the output.
+  expect(at(head).y - at({ kind: "layer", floor: 20 }).y).toBeGreaterThan(seated + m.headH * 0.5);
+  expect(s.tetherCount).toBe(arch.floors * (arch.heads + 1));
+  expect(new THREE.Box3().setFromObject(glass).max.y).toBeCloseTo(closed + rise[4], 3);
+  expect(s.headroom).toBeCloseTo(rise[4], 5);
+  // Everything is picked where it now is: a head, an MLP, a socket, and a layer by its drawer front.
+  for (const p of [head, { kind: "mlp", floor: 9 }, { kind: "kv", floor: 27, group: 7 }] as Part[]) expect(arch.parts[s.pick(rayAt(at(p)))]).toEqual(p);
+  const front = at({ kind: "layer", floor: 12 });
+  front.y -= m.deckT / 2 + fasciaHeight(arch) / 2; front.x = -arch.deckW / 2 + 0.6;
+  expect(arch.parts[s.pick(rayAt(front))]).toEqual({ kind: "layer", floor: 12 });
+  // Halfway is half as far.
+  s.setSpread(0.5); settle(s);
+  expect(at({ kind: "layer", floor: 20 }).y - rest[2].y).toBeCloseTo(rise[2] / 2, 4);
+  // A real change and a dragged deck, then Reset layout: the spread and the drag go, the knocked-out head stays out.
+  s.setSpread(0); settle(s);
+  const before = at(head), home = at({ kind: "head", floor: 3, head: 0 });
+  s.setSpread(1);
+  s.setPoses(arch.parts.map((p) => poseOf({ heads: [{ floor: 20, head: 13, mult: 0 }] }, p, QWEN_INFO)));
+  s.arrange(partIndex(arch, { kind: "layer", floor: 3 }), new THREE.Vector3(2, 0, 1)); settle(s);
+  s.resetLayout(); settle(s);
+  expect(s.spread).toBe(0);
+  expect(s.arranged()).toBe(0);
+  expect(s.tetherCount).toBe(0);
+  expect(at({ kind: "head", floor: 3, head: 0 }).distanceTo(home)).toBeLessThan(1e-5);
+  expect(parts.map((p, i) => at(p).distanceTo(rest[i])).every((d) => d < 1e-5)).toBe(true);
+  expect(at(head).z).toBeLessThan(before.z - m.headD * 0.5);
+  s.dispose();
+});
+
+it("draws a lighter specimen for touch devices with the same parts in the same places", () => {
+  const arch = buildArch(QWEN_INFO), high = new Specimen(arch, LIGHT, { shadows: false }), lite = new Specimen(arch, LIGHT, { shadows: false, quality: "lite" });
+  expect(triangles(lite)).toBeLessThan(triangles(high) * 0.55);
+  expect(lite.drawCalls).toBeLessThan(high.drawCalls);
+  const c = new THREE.Vector3();
+  for (const p of [{ kind: "head", floor: 20, head: 13 }, { kind: "mlp", floor: 9 }, { kind: "layer", floor: 27 }] as Part[]) {
+    const i = partIndex(arch, p);
+    expect(lite.center(i, c).distanceTo(high.center(i, new THREE.Vector3()))).toBe(0);
+  }
+  expect(lite.pick(rayAt(lite.center(partIndex(arch, { kind: "head", floor: 20, head: 13 }), c)))).toBe(partIndex(arch, { kind: "head", floor: 20, head: 13 }));
+  // Every shape drawn with a material that reads a baked shade has one; without it the shape would draw black.
+  for (const s of [high, lite]) s.group.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh && (mesh.material as THREE.Material).vertexColors) expect(mesh.geometry.getAttribute("color")).toBeTruthy();
+  });
+  high.dispose(); lite.dispose();
+});
+
+it("engraves each nameplate upright, in its own part of the image, and generates the same surfaces every time", () => {
+  const { color, width, height, rects } = nameplatePixels();
+  // A texture's first row is the bottom of the picture. Read a plate back through its own coordinates, top row first.
+  const read = (name: (typeof NAMEPLATES)[number]) => {
+    const [u0, v0, u1, v1] = rects[name].uv, rows: string[] = [];
+    for (let y = Math.round(v1 * height) - 1; y >= Math.round(v0 * height); y--) {
+      let line = "";
+      for (let x = Math.round(u0 * width); x < Math.round(u1 * width); x++) line += color[(y * width + x) * 4] > 128 ? "#" : ".";
+      rows.push(line);
+    }
+    return rows.filter((r) => r.includes("#"));
+  };
+  for (const name of NAMEPLATES) {
+    const [u0, v0, u1, v1] = rects[name].uv;
+    expect(u0).toBeGreaterThanOrEqual(0); expect(v0).toBeGreaterThanOrEqual(0); expect(u1).toBeLessThanOrEqual(1); expect(v1).toBeLessThanOrEqual(1);
+    expect(rects[name].aspect).toBeCloseTo(((u1 - u0) * width) / ((v1 - v0) * height), 5);
+    const rows = read(name), cell = rows.length / 7, glyph = (n: number) => rows.map((r) => r.slice(Math.round((3 + n * 6) * cell), Math.round((3 + n * 6 + 5) * cell)));
+    // Seven rows of cells per letter, and one letter's width of ink per character.
+    expect(Number.isInteger(cell)).toBe(true);
+    const letters = [...name];
+    // Shapes that only read one way up: L's foot and P's bowl. T's bar is at the top; U's bowl is at the bottom.
+    const full = (r: string) => !r.includes("."), first = (g: string[]) => g[0], last = (g: string[]) => g[g.length - 1];
+    letters.forEach((ch, n) => {
+      const g = glyph(n);
+      if (ch === "L") { expect(full(last(g))).toBe(true); expect(full(first(g))).toBe(false); }
+      if (ch === "T") { expect(full(first(g))).toBe(true); expect(full(last(g))).toBe(false); }
+      if (ch === "P") { expect(first(g).startsWith("#")).toBe(true); expect(last(g).endsWith(".")).toBe(true); expect(last(g).startsWith("#")).toBe(true); }
+      if (ch === "M" || ch === "W") expect(g.filter((r) => r.includes("#")).length).toBe(g.length);
+      if (ch === " ") expect(g.some((r) => r.includes("#"))).toBe(false);
+    });
+    // M and W are each other upside down: the middle of M is inked high, the middle of W low.
+    const middle = (g: string[], from: number, to: number) => g.slice(from, to).filter((r) => r[Math.floor(r.length / 2)] === "#").length;
+    letters.forEach((ch, n) => {
+      const g = glyph(n), third = Math.round(g.length / 3);
+      if (ch === "M") expect(middle(g, 0, third * 2)).toBeGreaterThan(middle(g, third * 2, g.length));
+      if (ch === "W") expect(middle(g, third, g.length)).toBeGreaterThan(middle(g, 0, third));
+    });
+  }
+  // Longer text is a wider plate, and no two plates share a row of the image.
+  expect(rects["WORDS OUT"].aspect).toBeGreaterThan(rects["WORDS IN"].aspect);
+  expect(rects["WORDS IN"].aspect).toBeGreaterThan(rects.MLP.aspect);
+  const bands = NAMEPLATES.map((n) => [rects[n].uv[1], rects[n].uv[3]]).sort((a, b) => a[0] - b[0]);
+  for (let i = 1; i < bands.length; i++) expect(bands[i][0]).toBeGreaterThanOrEqual(bands[i - 1][1]);
+  expect(Array.from(brushedPixels(64))).toEqual(Array.from(brushedPixels(64)));
+  expect(Array.from(tracePixels(64).color)).toEqual(Array.from(tracePixels(64).color));
+  // The board's bare pads are metal and its mask is not.
+  const surface = tracePixels(64).surface, metal = Array.from({ length: 64 * 64 }, (_, i) => surface[i * 4 + 2]);
+  expect(metal.some((v) => v === 255)).toBe(true);
+  expect(metal.filter((v) => v === 0).length).toBeGreaterThan(metal.length / 2);
+});
+
+// ------------------------------------------------------------------ navigation
+
+it("turns around the pivot on a flight between views instead of cutting through the model", () => {
+  const pose = (x: number, y: number, z: number, t = new THREE.Vector3(1, 2, 3)) => ({ position: new THREE.Vector3(x, y, z).add(t), target: t.clone() });
+  const out = { position: new THREE.Vector3(), target: new THREE.Vector3() };
+  // Front to back: halfway there the camera is beside the model, still its full distance away.
+  along(pose(0, 0, 10), pose(0, 0, -10), 0.5, out);
+  expect(out.position.distanceTo(out.target)).toBeCloseTo(10, 5);
+  expect(Math.abs(out.position.x - 1)).toBeCloseTo(10, 5);
+  // The short way round, across the back, not the long way across the front.
+  const a = pose(Math.sin(3), 0, Math.cos(3)), b = pose(Math.sin(-3), 0, Math.cos(-3));
+  expect(along(a, b, 0.5, out).position.z - 3).toBeLessThan(-0.99);
+  // A flight ends exactly where it was sent, and a moving pivot is carried in a straight line.
+  const to = pose(4, 3, -2, new THREE.Vector3(-5, 0, 2));
+  along(pose(0, 1, 6), to, 1, out);
+  expect(out.position.distanceTo(to.position)).toBeLessThan(1e-6);
+  expect(along(pose(0, 1, 6), to, 0.5, out).target.distanceTo(new THREE.Vector3(-2, 1, 2.5))).toBeLessThan(1e-9);
+});
+
+it("focuses on a part as the pivot from the visitor's own angle, turns to named views around it, and comes home", () => {
+  const arch = buildArch(QWEN_INFO), h = harness(arch), { camera } = h, part: Part = { kind: "head", floor: 20, head: 13 }, i = partIndex(arch, part);
+  h.run(4);
+  const home = { position: camera.position.clone(), target: h.controls.target.clone() }, far = home.position.distanceTo(home.target);
+  // Selecting from the overview leaves the camera where it is.
+  h.stage.setSelection(part); h.run(400);
+  expect(camera.position.distanceTo(home.position)).toBeLessThan(1e-9);
+  expect(h.stage.focused).toBeNull();
+  h.stage.orbit(-0.5, -0.1);
+  const angle = h.looking();
+  h.stage.focus(part); h.run(400);
+  const center = h.stage.specimen.restCenter(i, new THREE.Vector3());
+  expect(h.stage.focused).toEqual(part);
+  expect(h.controls.target.distanceTo(center)).toBeLessThan(arch.m.pitch * 0.5);
+  expect(camera.position.distanceTo(h.controls.target)).toBeLessThan(far / 5);
+  expect(h.looking().angleTo(angle)).toBeLessThan(1e-4);
+  // The part is in view, with neighbors for context.
+  const p = h.screen(center);
+  expect(Math.abs(p.clientX - 200)).toBeLessThan(60);
+  expect(Math.abs(p.clientY - 300)).toBeLessThan(90);
+  // A named view turns around the same part.
+  h.stage.view("front"); h.run(400);
+  expect(h.looking().angleTo(VIEWS.front)).toBeLessThan(1e-4);
+  expect(h.controls.target.distanceTo(center)).toBeLessThan(arch.m.pitch * 0.5);
+  h.stage.view("top"); h.run(400);
+  expect(h.looking().y).toBeGreaterThan(0.95);
+  // Buttons zoom about the pivot.
+  const near = camera.position.distanceTo(h.controls.target), pivot = h.controls.target.clone();
+  h.stage.zoom(2); h.run(100);
+  expect(camera.position.distanceTo(h.controls.target)).toBeCloseTo(near * 2, 4);
+  expect(h.controls.target.distanceTo(pivot)).toBeLessThan(1e-9);
+  // Home is the whole model from the opening view, exactly as it started.
+  h.stage.resetView(); h.run(400);
+  expect(h.stage.focused).toBeNull();
+  expect(camera.position.distanceTo(home.position)).toBeLessThan(1e-4);
+  expect(h.controls.target.distanceTo(home.target)).toBeLessThan(1e-4);
+  h.stage.dispose();
+});
+
+it("carries the camera with the selection once focused, and never moves a camera the visitor has placed when data arrives", () => {
+  const arch = buildArch(QWEN_INFO), h = harness(arch), { camera } = h, rest = (p: Part) => h.stage.specimen.restCenter(partIndex(arch, p), new THREE.Vector3());
+  const a: Part = { kind: "head", floor: 20, head: 13 }, b: Part = { kind: "head", floor: 21, head: 13 };
+  const plates = [plate({ id: "a", title: "A", band: 0, rows: 2, cols: 2, data: [1, 2, 3, 4] })];
+  h.run(4);
+  h.stage.setSelection(a); h.stage.focus(a); h.run(400);
+  // Untouched since the focus: stepping to the next layer frames that part the same way.
+  h.stage.setSelection(b); h.run(400);
+  expect(h.controls.target.distanceTo(rest(b))).toBeLessThan(arch.m.pitch * 0.5);
+  // The visitor turns and zooms; stepping back then moves the camera by exactly the distance between the parts.
+  h.takeCamera();
+  camera.position.add(new THREE.Vector3(0.7, 0.2, -0.4));
+  const before = { position: camera.position.clone(), target: h.controls.target.clone() }, from = rest(b);
+  h.stage.setSelection(a); h.run(400);
+  const by = rest(a).sub(from);
+  expect(by.length()).toBeGreaterThan(arch.m.pitch * 0.9);
+  expect(camera.position.distanceTo(before.position.clone().add(by))).toBeLessThan(1e-4);
+  expect(h.controls.target.distanceTo(before.target.clone().add(by))).toBeLessThan(1e-4);
+  // Measurements, a detail bay, a spread and a resize all leave that camera alone.
+  const placed = { position: camera.position.clone(), target: h.controls.target.clone() };
+  h.stage.setValues(new Float32Array(arch.parts.length), "signed");
+  h.stage.setBay({ key: "k", floor: 20, plates });
+  h.stage.setSpread(0.6);
+  h.stage.overlaysChanged();
+  h.run(600);
+  expect(camera.position.distanceTo(placed.position)).toBeLessThan(1e-9);
+  expect(h.controls.target.distanceTo(placed.target)).toBeLessThan(1e-9);
+  // Deselecting keeps the view too.
+  h.stage.setSelection(null); h.run(100);
+  expect(camera.position.distanceTo(placed.position)).toBeLessThan(1e-9);
+  h.stage.dispose();
+  // A camera nobody has moved does follow the model as it grows: the bay and the spread stay in frame.
+  const fresh = harness(arch), v = new THREE.Vector3();
+  fresh.run(4);
+  const start = fresh.camera.position.distanceTo(fresh.controls.target);
+  fresh.stage.setSelection({ kind: "layer", floor: 20 });
+  fresh.stage.setBay({ key: "k", floor: 20, plates });
+  fresh.stage.setSpread(1);
+  fresh.run(900);
+  expect(fresh.camera.position.distanceTo(fresh.controls.target)).toBeGreaterThan(start * 1.5);
+  fresh.camera.updateMatrixWorld(true);
+  const top = fresh.stage.specimen.center(arch.parts.length - 1, v).project(fresh.camera);
+  expect(Math.abs(top.y)).toBeLessThan(1);
+  // The bay rides with its layer.
+  const bay = (fresh.stage as unknown as { bay: Bay }).bay.group.position.y;
+  expect(bay).toBeGreaterThan(fresh.stage.specimen.center(partIndex(arch, { kind: "layer", floor: 20 }), v).y);
+  expect(bay).toBeLessThan(fresh.stage.specimen.center(partIndex(arch, { kind: "layer", floor: 21 }), v).y);
+  fresh.stage.dispose();
+});
+
+it("focuses on a double click, goes home on a double click of the backdrop, and never doubles in Punch", () => {
+  const arch = buildArch(TINY_INFO), h = harness(arch), part: Part = { kind: "head", floor: 2, head: 1 };
+  let t = 1000;
+  vi.spyOn(performance, "now").mockImplementation(() => t);
+  h.run(4);
+  const at = h.screen(h.stage.specimen.center(partIndex(arch, part), new THREE.Vector3())), empty = { clientX: 200, clientY: 6 };
+  // Two slow clicks are two selections.
+  h.click(at); t += 900; h.click(at);
+  expect(h.events.select).toHaveBeenCalledTimes(2);
+  expect(h.stage.focused).toBeNull();
+  t += 900; h.click(at); t += 150; h.click(at);
+  expect(h.stage.focused).toEqual(part);
+  h.run(400);
+  // The backdrop: one click deselects, a second one fits the whole model.
+  t += 900; h.click(empty);
+  expect(h.events.select).toHaveBeenLastCalledWith(null);
+  h.stage.setSelection(part); h.stage.focus(part); h.run(400);
+  t += 900; h.click(empty); t += 150; h.click(empty); h.run(400);
+  expect(h.stage.focused).toBeNull();
+  // In Punch every click is an edit, so two quick ones are two edits and no camera move.
+  h.stage.setTool("punch");
+  const again = h.screen(h.stage.specimen.center(partIndex(arch, part), new THREE.Vector3())), pose = h.camera.position.clone();
+  t += 900; h.click(again); t += 100; h.click(again); h.run(400);
+  expect(h.events.punch).toHaveBeenCalledTimes(2);
+  expect(h.stage.focused).toBeNull();
+  expect(h.camera.position.distanceTo(pose)).toBeLessThan(1e-9);
+  h.stage.dispose();
+  vi.restoreAllMocks();
+});
+
+it("reaches a part from a few pixels beside it and nothing from farther away", () => {
+  const arch = buildArch(TINY_INFO), h = harness(arch);
+  h.run(4);
+  // The output block's left end, against the backdrop: step off it to the left until the ray misses.
+  const crown = arch.parts.length - 1, edge = h.stage.specimen.center(crown, new THREE.Vector3());
+  edge.x -= arch.size[crown][0] / 2; edge.y += arch.size[crown][1] * 0.2; edge.z += arch.size[crown][2] / 2;
+  const on = h.screen(edge), ray = new THREE.Raycaster(), miss = (dx: number) => {
+    ray.setFromCamera(new THREE.Vector2(((on.clientX + dx) / 400) * 2 - 1, -(on.clientY / 600) * 2 + 1), h.camera);
+    return h.stage.specimen.pick(ray) < 0;
+  };
+  let off = -1;
+  while (!miss(off) && off > -40) off--;
+  expect(miss(off - 3)).toBe(true);
+  h.click({ clientX: on.clientX + off - 3, clientY: on.clientY });
+  expect(h.events.select).toHaveBeenLastCalledWith({ kind: "unembed" });
+  // A finger is given more room than a mouse.
+  h.click({ clientX: on.clientX + off - 9, clientY: on.clientY });
+  expect(h.events.select).toHaveBeenLastCalledWith(null);
+  h.click({ clientX: on.clientX + off - 9, clientY: on.clientY }, { pointerType: "touch" });
+  expect(h.events.select).toHaveBeenLastCalledWith({ kind: "unembed" });
+  expect(miss(off - 30)).toBe(true);
+  h.click({ clientX: on.clientX + off - 30, clientY: on.clientY }, { pointerType: "touch" });
+  expect(h.events.select).toHaveBeenLastCalledWith(null);
+  h.stage.dispose();
+});
+
+it("never turns a camera gesture into an edit: Pan, Space, modifiers, drags that return, and second fingers", () => {
+  const arch = buildArch(TINY_INFO), h = harness(arch), { fire, click } = h, part: Part = { kind: "head", floor: 2, head: 1 }, i = partIndex(arch, part);
+  h.run(4);
+  const at = h.screen(h.stage.specimen.center(i, new THREE.Vector3())), away = { clientX: at.clientX + 50, clientY: at.clientY + 20 };
+  const quiet = () => { expect(h.events.punch).not.toHaveBeenCalled(); expect(h.events.select).not.toHaveBeenCalled(); };
+  h.stage.setTool("punch");
+  // Pan is on: a plain click on a head selects nothing and punches nothing, with a mouse or a finger.
+  h.stage.setDragMode("pan");
+  expect(h.controls.mouseButtons.LEFT).toBe(THREE.MOUSE.PAN);
+  expect(h.controls.touches.ONE).toBe(THREE.TOUCH.PAN);
+  click(at); click(at, { pointerType: "touch" });
+  quiet();
+  h.stage.setDragMode("turn");
+  expect(h.controls.mouseButtons.LEFT).toBe(THREE.MOUSE.ROTATE);
+  expect(h.controls.touches.ONE).toBe(THREE.TOUCH.ROTATE);
+  // Space held, before the press or during it, and Shift, Control or Command: the camera's.
+  h.stage.holdPan(true); click(at); h.stage.holdPan(false);
+  fire("pointerdown", at); h.stage.holdPan(true); fire("pointerup", at); h.stage.holdPan(false);
+  for (const key of ["shiftKey", "ctrlKey", "metaKey"]) click(at, { [key]: true });
+  quiet();
+  // A drag that wanders off and comes back to where it started was a drag, on a desktop and on a phone.
+  for (const pointerType of ["mouse", "touch"]) {
+    fire("pointerdown", { ...at, pointerType });
+    fire("pointermove", { ...away, pointerType, buttons: 1 });
+    fire("pointermove", { ...at, pointerType, buttons: 1 });
+    fire("pointerup", { ...at, pointerType });
+  }
+  quiet();
+  // A pinch: the second finger makes it a camera gesture whichever finger lifts first, and a cancelled press is nothing.
+  for (const first of [1, 2]) {
+    fire("pointerdown", { ...at, pointerType: "touch", pointerId: 1 });
+    fire("pointerdown", { ...away, pointerType: "touch", pointerId: 2, isPrimary: false });
+    fire("pointerup", { ...(first === 1 ? at : away), pointerType: "touch", pointerId: first, isPrimary: first === 1 });
+    fire("pointerup", { ...(first === 1 ? away : at), pointerType: "touch", pointerId: 3 - first, isPrimary: first === 2 });
+  }
+  fire("pointerdown", { ...at, pointerType: "touch" }); fire("pointercancel", { ...at, pointerType: "touch" });
+  fire("pointerdown", { ...at, button: 2 }); fire("pointerup", { ...at, button: 2 });
+  quiet();
+  // And a deliberate click still punches, once, with a small tremor allowed.
+  fire("pointerdown", at); fire("pointermove", { clientX: at.clientX + 2, clientY: at.clientY - 2, buttons: 1 }); fire("pointerup", { clientX: at.clientX + 2, clientY: at.clientY - 2 });
+  expect(h.events.punch).toHaveBeenCalledTimes(1);
+  expect(h.events.punch).toHaveBeenCalledWith(part);
+  click(at, { pointerType: "touch" });
+  expect(h.events.punch).toHaveBeenCalledTimes(2);
+  h.run(400);
+
+  // Grab: a second finger lets go of the part and puts it back, and Pan keeps parts where they are.
+  h.events.select.mockClear(); h.events.arranged.mockClear();
+  h.stage.setTool("grab");
+  const rest = h.stage.specimen.center(i, new THREE.Vector3()).clone(), grip = h.screen(rest);
+  fire("pointerdown", { ...grip, pointerType: "touch", pointerId: 1 });
+  expect(h.controls.enableRotate).toBe(false);
+  fire("pointermove", { clientX: grip.clientX + 60, clientY: grip.clientY - 30, pointerType: "touch", pointerId: 1 });
+  h.run(400);
+  expect(h.stage.specimen.center(i, new THREE.Vector3()).distanceTo(rest)).toBeGreaterThan(0.2);
+  fire("pointerdown", { ...away, pointerType: "touch", pointerId: 2, isPrimary: false });
+  expect(h.controls.enableRotate).toBe(true);
+  fire("pointermove", { clientX: grip.clientX + 90, clientY: grip.clientY, pointerType: "touch", pointerId: 1 });
+  fire("pointerup", { ...away, pointerType: "touch", pointerId: 2, isPrimary: false });
+  fire("pointerup", { clientX: grip.clientX + 90, clientY: grip.clientY, pointerType: "touch", pointerId: 1 });
+  h.run(400);
+  expect(h.stage.specimen.center(i, new THREE.Vector3()).distanceTo(rest)).toBeLessThan(1e-5);
+  expect(h.events.arranged).toHaveBeenLastCalledWith(0);
+  h.stage.setDragMode("pan");
+  fire("pointerdown", grip); fire("pointermove", { clientX: grip.clientX + 60, clientY: grip.clientY, buttons: 1 }); fire("pointerup", { clientX: grip.clientX + 60, clientY: grip.clientY });
+  h.run(400);
+  expect(h.controls.enableRotate).toBe(true);
+  expect(h.stage.specimen.center(i, new THREE.Vector3()).distanceTo(rest)).toBeLessThan(1e-5);
+  expect(h.stage.specimen.arranged()).toBe(0);
+  expect(h.events.punch).toHaveBeenCalledTimes(2);
+  h.stage.dispose();
 });

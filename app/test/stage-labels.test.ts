@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { isolate } from "../src/stage/isolate.ts";
-import { type Box, declutter, overlaps, placeBox, toolbarInset } from "../src/stage/labels.ts";
+import { escapeIntent } from "../src/stage/keys.ts";
+import { type Box, declutter, dockInset, overlaps, placeBox, toolbarInset } from "../src/stage/labels.ts";
 
 it("keeps a label on its point when there is room and inside the view when there is not", () => {
   // Centered above the point.
@@ -65,6 +66,32 @@ function node(tag: string, attrs: Record<string, string> = {}, children: FakeNod
   for (const c of children) c.parentElement = el;
   return el;
 }
+
+it("reserves the bottom of the view only where the breadcrumb and dock sit under the model", () => {
+  const tools = { left: 12, top: 10, width: 190, height: 34 }, crumb = { left: 12, top: 354, width: 230, height: 36 }, dock = { left: 500, top: 354, width: 288, height: 36 };
+  // A wide stage: the model stands between the two corners, and neither end of the bottom row costs it anything.
+  expect(dockInset([tools, crumb, dock], 300, 480, 400)).toBe(0);
+  // The dock reaches under the model: the model is framed above it. The toolbar at the top is not the dock's business.
+  expect(dockInset([tools, crumb, dock], 300, 520, 400)).toBeCloseTo((400 - 354 + 8) / 400, 6);
+  expect(toolbarInset([tools, crumb, dock], 300, 520, 400)).toBe(0);
+  expect(toolbarInset([tools, crumb, dock], 100, 520, 400)).toBeCloseTo((44 + 8) / 400, 6);
+  // Wrapped onto two rows in a narrow stage, the higher row sets the line, up to the cap.
+  expect(dockInset([{ ...crumb, top: 312 }, { ...dock, left: 12 }], 40, 300, 400)).toBeCloseTo((400 - 312 + 8) / 400, 6);
+  expect(dockInset([{ left: 0, top: 210, width: 300, height: 190 }], 40, 300, 400)).toBe(0.3);
+  expect(dockInset([dock], 0, 800, 0)).toBe(0);
+});
+
+it("lets Escape close a menu or leave a text field before it closes the full view", () => {
+  // A select: the first Escape belongs to its menu, the second closes the view.
+  expect(escapeIntent({ tagName: "SELECT" }, false, false)).toBe("menu");
+  expect(escapeIntent({ tagName: "SELECT" }, true, false)).toBe("close");
+  // The question box keeps its text and gives up the focus; an input method cancelling a candidate is left alone.
+  expect(escapeIntent({ tagName: "TEXTAREA" }, false, false)).toBe("leave");
+  expect(escapeIntent({ tagName: "TEXTAREA" }, false, true)).toBe("wait");
+  expect(escapeIntent({ tagName: "INPUT", type: "text" }, false, false)).toBe("leave");
+  // Sliders, buttons and the stage itself close it at once.
+  for (const target of [{ tagName: "INPUT", type: "range" }, { tagName: "BUTTON" }, { tagName: "DIV" }]) expect(escapeIntent(target, false, false)).toBe("close");
+});
 
 it("makes the page behind the full view inert and restores it exactly", () => {
   const bench = node("DIV"), sibling = node("P");

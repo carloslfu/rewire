@@ -28,3 +28,9 @@ Final review passed against the built app with the production CSP: real Paris/Fl
 ## [2026-11-17 03:27] decide | records/decisions/2026-11-16-3d-model-view.md
 Final Chrome review verified the revised full-view controls, phone labels, twenty tensor stages and restoration behavior. Keep 2D as the default and load 3D on request.
 
+## [2026-11-17 13:41] capture | records/measurements/2026-11-17-3d-materials-navigation
+Recorded final release gate and built-app visual, navigation, inference, training and recovery checks.
+
+## [2026-11-17 13:41] decide | records/decisions/2026-11-17-3d-materials-navigation
+Adopt detailed materials, studio lighting and direct camera controls; preserve real intervention semantics.
+

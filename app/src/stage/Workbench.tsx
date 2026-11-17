@@ -7,12 +7,15 @@ import { onThemeChange } from "../ui/color.ts";
 import { useNarrow } from "../ui/useNarrow.ts";
 import { type Arch, groupHeads, movePart, type Part, partKey } from "./arch.ts";
 import { isolate } from "./isolate.ts";
+import { escapeIntent } from "./keys.ts";
+import { type DockPanel, NavDock } from "./NavDock.tsx";
 import type { Clock } from "./playback.ts";
-import type { Stage, Tool } from "./scene/stage.ts";
+import type { DragMode, Stage, Tool, ViewName } from "./scene/stage.ts";
 import { readTheme } from "./theme.ts";
 import { ViewToggle } from "./ViewToggle.tsx";
 
 const TOOL_NAME: Record<Tool, string> = { explore: "Explore", grab: "Grab", punch: "Punch" };
+const VIEW_KEYS: Record<string, ViewName> = { 1: "home", 2: "front", 3: "side", 4: "top" };
 
 export interface WorkbenchProps {
   arch: Arch;
@@ -51,6 +54,11 @@ export function Workbench(p: WorkbenchProps) {
   const [tool, setTool] = useState<Tool>("explore");
   const [expanded, setExpanded] = useState(false);
   const [arranged, setArranged] = useState(0);
+  const [drag, setDrag] = useState<DragMode>("turn");
+  const [spread, setSpread] = useState(0);
+  const [panel, setPanel] = useState<DockPanel>(null);
+  // The select whose menu the last Escape closed. A second Escape there closes the full view.
+  const escaped = useRef<EventTarget | null>(null);
   // The stage outlives renders; it always calls the newest handlers.
   const latest = useRef(p);
   latest.current = p;
@@ -68,6 +76,7 @@ export function Workbench(p: WorkbenchProps) {
     };
     setState("loading");
     setArranged(0);
+    setSpread(0);
     import("./scene/stage.ts").then(({ Stage }) => {
       if (cancelled || !host.current || !labels.current || !tip.current) return;
       try {
@@ -85,7 +94,7 @@ export function Workbench(p: WorkbenchProps) {
             const view = host.current;
             if (!view) return [];
             const origin = view.getBoundingClientRect();
-            return Array.from(view.querySelectorAll(".stage-toolbar > *, .stage-hint"), (el) => {
+            return Array.from(view.querySelectorAll(".stage-toolbar > *, .stage-hint, .stage-crumb, .stage-dock"), (el) => {
               const r = el.getBoundingClientRect();
               return { left: r.left - origin.left, top: r.top - origin.top, width: r.width, height: r.height };
             });
@@ -111,9 +120,14 @@ export function Workbench(p: WorkbenchProps) {
 
   useEffect(() => { stage?.setTool(tool); }, [stage, tool]);
   useEffect(() => { stage?.setSelection(selected); }, [stage, selected]);
+  useEffect(() => { stage?.setDragMode(drag); }, [stage, drag]);
+  useEffect(() => { stage?.setSpread(spread); }, [stage, spread]);
   // Docked, the controls share one scroll area under the stage: bring a newly selected part's controls into it.
   const selectedKey = selected ? partKey(selected) : "";
   useEffect(() => { if (selectedKey && lower.current) lower.current.scrollTop = 0; }, [selectedKey]);
+  // The breadcrumb and the dock change size with the selection and the spread; labels and framing keep clear of them.
+  const spreading = spread > 0;
+  useEffect(() => { stage?.overlaysChanged(); }, [stage, selectedKey, spreading, expanded, narrow]);
   useEffect(() => stage ? onThemeChange(() => stage.setTheme(readTheme())) : undefined, [stage]);
   useEffect(() => {
     if (!stage) return;
@@ -133,7 +147,7 @@ export function Workbench(p: WorkbenchProps) {
   useEffect(() => { if (!p.tools.includes(tool)) setTool("explore"); }, [p.tools, tool]);
 
   const help: Record<Tool, string> = {
-    explore: "Drag to turn the model. Scroll or pinch to zoom. Click a part to select it.",
+    explore: "Drag to turn the model. Scroll or pinch to zoom. Click a part to select it, and double-click to focus on it.",
     grab: "Drag a part to move it. This rearranges the drawing only. The model does not change.",
     punch: p.punchHelp ?? "",
   };
@@ -141,7 +155,15 @@ export function Workbench(p: WorkbenchProps) {
 
   const frameKeys = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!expanded) return;
-    if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); collapse(); return; }
+    if (e.key === "Escape" && !e.defaultPrevented) {
+      // Escape first belongs to what has focus: it closes an open menu, or steps out of a text field.
+      const from = e.target as HTMLInputElement, intent = escapeIntent(from, escaped.current === from, e.nativeEvent.isComposing);
+      escaped.current = intent === "menu" ? from : null;
+      if (intent === "leave") { e.preventDefault(); host.current?.focus(); }
+      else if (intent === "close") { e.preventDefault(); collapse(); }
+      return;
+    }
+    escaped.current = null;
     if (e.key !== "Tab") return;
     const items = [...e.currentTarget.querySelectorAll<HTMLElement>("button, a[href], input, select, textarea, summary, [tabindex]")]
       .filter((el) => el.tabIndex >= 0 && !el.matches(":disabled") && el.getClientRects().length > 0);
@@ -150,7 +172,11 @@ export function Workbench(p: WorkbenchProps) {
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
   };
 
+  const resetLayout = () => { setSpread(0); stage?.resetLayout(); };
+
   const stageKeys = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // An open panel takes Escape before the full view does, wherever in the stage the focus is.
+    if (e.key === "Escape" && panel) { e.preventDefault(); setPanel(null); return; }
     if (e.target !== e.currentTarget || e.altKey || e.metaKey || e.ctrlKey) return;
     const k = e.key;
     if (k.startsWith("Arrow")) {
@@ -160,10 +186,18 @@ export function Workbench(p: WorkbenchProps) {
       if (next) p.onSelect(next);
     } else if (k === "+" || k === "=") { e.preventDefault(); stage?.zoom(0.8); }
     else if (k === "-" || k === "_") { e.preventDefault(); stage?.zoom(1.25); }
-    else if (k === "0") { e.preventDefault(); stage?.resetView(); }
-    else if (k === "Enter" && selected) { e.preventDefault(); stage?.focus(selected); }
+    else if (k === "0" || k === "Home") { e.preventDefault(); stage?.resetView(); }
+    else if (k === "f" || k === "F" || k === "Enter") { e.preventDefault(); if (selected) stage?.focus(selected); else if (k !== "Enter") stage?.resetView(); }
+    else if (VIEW_KEYS[k]) { e.preventDefault(); stage?.view(VIEW_KEYS[k]); }
+    else if (k === "e" || k === "E") { e.preventDefault(); setSpread((now) => (now > 0 ? 0 : 1)); }
+    else if (k === "?") { e.preventDefault(); setPanel((now) => (now === "help" ? null : "help")); }
+    else if (k === " ") { e.preventDefault(); if (!e.repeat) stage?.holdPan(true); }
     else if ((k === "p" || k === "P") && selected && p.tools.includes("punch")) { e.preventDefault(); stage?.react(selected, p.onPunch(selected)); }
   };
+  const stageKeyUp = (e: React.KeyboardEvent<HTMLDivElement>) => { if (e.key === " ") stage?.holdPan(false); };
+
+  const dock = <NavDock arch={arch} stage={stage} selected={selected} onSelect={p.onSelect} drag={drag} onDrag={setDrag}
+    spread={spread} onSpread={setSpread} panel={panel} onPanel={setPanel} punch={p.tools.includes("punch")} />;
 
   return <div ref={root} className={`stage-bench${expanded ? " expanded" : ""}`} role={expanded ? "dialog" : undefined} aria-modal={expanded || undefined}
     aria-label={expanded ? `${p.title}, full view` : undefined} onKeyDown={frameKeys}>
@@ -182,7 +216,7 @@ export function Workbench(p: WorkbenchProps) {
       {p.rail && (expanded || narrow) && <aside className="stage-rail" aria-label={p.railTitle}>
         {narrow ? <details><summary>{p.railTitle}</summary>{p.rail}</details> : p.rail}
       </aside>}
-      <div className="stage-view" ref={host} tabIndex={0} role="group" aria-describedby={hint} onKeyDown={stageKeys}
+      <div className="stage-view" ref={host} tabIndex={0} role="group" aria-describedby={hint} onKeyDown={stageKeys} onKeyUp={stageKeyUp} onBlur={() => stage?.holdPan(false)}
         aria-label={`3D model of ${arch.model.name}: ${arch.floors} layers, each with ${arch.heads} attention heads and one MLP. Arrow keys move between parts.`}>
         <div className="stage-labels" ref={labels} aria-hidden="true" />
         <div className="stage-top">
@@ -191,12 +225,12 @@ export function Workbench(p: WorkbenchProps) {
               {p.tools.map((t) => <button key={t} type="button" aria-pressed={tool === t} onClick={() => setTool(t)}>{TOOL_NAME[t]}</button>)}
             </div>
             <div className="stage-resets">
-              <button type="button" className="btn" disabled={!stage} onClick={() => stage?.resetView()}>Reset view</button>
-              <button type="button" className="btn" disabled={!stage || !arranged} onClick={() => stage?.resetLayout()}>Reset layout</button>
+              <button type="button" className="btn" disabled={!stage || (!arranged && !spread)} title="Put moved parts back and close the spread. The model is not changed." onClick={resetLayout}>Reset layout</button>
             </div>
           </div>
           <p className="stage-hint" id={hint}><strong>{TOOL_NAME[tool]}.</strong> {help[tool]}</p>
         </div>
+        {!narrow && dock}
         <div className="stage-tip" ref={tip} aria-hidden="true" hidden />
         {state === "loading" && <p className="stage-state" role="status">Opening the 3D model…</p>}
         {state === "lost" && <div className="stage-state" role="alert">
@@ -205,6 +239,7 @@ export function Workbench(p: WorkbenchProps) {
             <button type="button" className="btn quiet" onClick={() => store.set({ scopeView: "2d" })}>Use the 2D view</button></div>
         </div>}
       </div>
+      {narrow && <div className="stage-dockbar">{dock}</div>}
       <div className="stage-lower" ref={lower}>
         <div className="stage-controls">
           <PartPicker arch={arch} selected={selected} onSelect={p.onSelect} />
@@ -250,6 +285,7 @@ export function RealNote({ real, drawing, punch = false }: { real: string; drawi
     <summary>What is real in this picture?</summary>
     <p className="note"><strong>Real.</strong> {real}</p>
     <p className="note"><strong>A drawing.</strong> {drawing}</p>
-    <p className="note">Keyboard, with the model focused: arrow keys move between parts, Enter looks closer{punch ? ", P punches the selected part" : ""}, Shift with the arrows turns the model, plus and minus zoom, and 0 resets the view.</p>
+    <p className="note">The metal, ceramic, glass, screws, contacts and studio lighting are part of the drawing too. No shape stands for real hardware or for an individual parameter. A window is lit only by a measurement; a dark window has none.</p>
+    <p className="note">Keyboard, with the model focused: arrow keys move between parts, F or Enter focuses the selected part, Home or 0 fits the whole model{punch ? ", P punches the selected part" : ""}, Shift with the arrows turns the model, and plus and minus zoom. The ? button on the stage lists every control.</p>
   </details>;
 }

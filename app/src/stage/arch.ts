@@ -19,9 +19,9 @@ export interface Metrics {
   spineSlot: number; spineR: number; mlpW: number; plinthH: number; saddleH: number; crownH: number;
 }
 
-const LARGE: Metrics = { headW: 0.4, headH: 0.3, headD: 0.5, headGap: 0.06, groupGap: 0.2, pitch: 0.66, deckT: 0.06, deckD: 1.2,
+const LARGE: Metrics = { headW: 0.4, headH: 0.3, headD: 0.5, headGap: 0.06, groupGap: 0.2, pitch: 0.66, deckT: 0.06, deckD: 1.8,
   margin: 0.25, spineSlot: 1.1, spineR: 0.15, mlpW: 2, plinthH: 0.5, saddleH: 0.05, crownH: 0.3 };
-const SMALL: Metrics = { headW: 1, headH: 0.62, headD: 1, headGap: 0.14, groupGap: 0.44, pitch: 1.55, deckT: 0.1, deckD: 2,
+const SMALL: Metrics = { headW: 1, headH: 0.62, headD: 1, headGap: 0.14, groupGap: 0.44, pitch: 1.55, deckT: 0.1, deckD: 2.6,
   margin: 0.4, spineSlot: 1.6, spineR: 0.22, mlpW: 3.2, plinthH: 0.6, saddleH: 0.08, crownH: 0.4 };
 
 export interface Arch {

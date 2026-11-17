@@ -698,28 +698,87 @@ html:has(dialog[open]) { overflow: hidden; }
 .stage-status { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 0 20px 8px; font-size: 11px; color: var(--muted); min-height: 30px; }
 .stage-status .btn { flex-shrink: 0; margin-left: auto; }
 .stage-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.stage-view { position: relative; flex: 1 1 0; min-height: 240px; overflow: hidden; border-block: 1px solid var(--line); background: var(--bg); touch-action: none; }
-.stage-view:focus-visible { outline-offset: -3px; }
+/* The stage is a photo studio under either theme: a dark seamless backdrop, a little lighter beside a light page.
+   The colors here match the backdrop the canvas draws, so nothing flashes before the first frame. */
+.stage-view { --studio-center: #4e5157; --studio-edge: #1e2024; --stage-ink: #f3f3f6; --stage-muted: #d2d4da; --stage-faint: #bfc1c9;
+  position: relative; flex: 1 1 0; min-height: 240px; overflow: hidden; border-block: 1px solid var(--line); touch-action: none;
+  container: stage / size; background: radial-gradient(ellipse 67% 53% at 50% 44%, var(--studio-center), var(--studio-edge)); }
+:root[data-theme="dark"] .stage-view { --studio-center: #2f3136; --studio-edge: #0d0e10; --stage-muted: #c3c5cc; --stage-faint: #a3a5ae; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .stage-view { --studio-center: #2f3136; --studio-edge: #0d0e10; --stage-muted: #c3c5cc; --stage-faint: #a3a5ae; }
+}
+.stage-view:focus-visible { outline-color: #8ab4ff; outline-offset: -3px; }
 .stage-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 .stage-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 /* Labels are positioned by the stage, which keeps them inside the view and apart from each other. */
-.stage-label { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11px; line-height: 1.25; color: var(--muted); font-variant-numeric: tabular-nums; }
-.stage-label.layer { font-size: 10px; color: var(--faint); }
-.stage-label.caption { font-weight: 600; color: var(--fg); }
+.stage-label { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11px; line-height: 1.25; color: var(--stage-muted); font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgb(0 0 0 / .75); }
+.stage-label.layer { font-size: 10px; color: var(--stage-faint); }
+.stage-label.caption { font-weight: 600; color: var(--stage-ink); }
 .stage-label.token { font-family: var(--mono); font-size: 10px; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
 .stage-label.bar { font-family: var(--mono); font-size: 10px; }
-.stage-label.plate { padding: 1px 5px; font-size: 10px; color: var(--fg); background: color-mix(in oklab, var(--panel) 82%, transparent); border-radius: 3px; }
-.stage-label.current { padding: 1px 5px; color: var(--fg); font-weight: 600; background: color-mix(in oklab, var(--panel) 86%, transparent); border-radius: 3px; }
-.stage-label.message { width: 200px; white-space: normal; text-align: center; font-size: 12px; padding: 9px 11px; color: var(--muted); background: var(--panel); border: 1px dashed var(--line); border-radius: 6px; }
+.stage-label.plate { padding: 1px 5px; font-size: 10px; color: var(--stage-ink); background: rgb(14 15 18 / .74); border-radius: 3px; text-shadow: none; }
+.stage-label.current { padding: 1px 5px; color: var(--stage-ink); font-weight: 600; background: rgb(14 15 18 / .78); border-radius: 3px; text-shadow: none; }
+.stage-label.message { width: 200px; white-space: normal; text-align: center; font-size: 12px; padding: 9px 11px; color: var(--stage-muted); background: rgb(20 21 25 / .92); border: 1px dashed rgb(255 255 255 / .3); border-radius: 6px; text-shadow: none; }
 .stage-top { position: absolute; top: 10px; left: 12px; right: 12px; display: grid; gap: 6px; justify-items: start; pointer-events: none; }
 .stage-toolbar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 10px; width: 100%; }
 .stage-toolbar > * { pointer-events: auto; }
 .stage-toolbar .seg button { min-height: 32px; }
 .stage-resets { display: flex; gap: 6px; }
 .stage-resets .btn { font-size: 12px; min-height: 32px; padding: 4px 10px; }
-.stage-hint { max-width: min(100%, 380px); padding: 5px 8px; font-size: 12px; line-height: 1.4; color: var(--muted); background: color-mix(in oklab, var(--panel) 88%, transparent); border-radius: 6px; }
-.stage-hint strong { color: var(--fg); font-weight: 600; }
-.stage-tip { position: absolute; left: 0; top: 0; z-index: 2; max-width: 260px; padding: 6px 9px; font-size: 12px; line-height: 1.4; white-space: pre-line; color: var(--bg); background: var(--fg); border-radius: 6px; pointer-events: none; }
+.stage-hint { max-width: min(100%, 400px); padding: 5px 8px; font-size: 12px; line-height: 1.4; color: var(--stage-muted); background: rgb(14 15 18 / .62); border-radius: 6px; }
+.stage-hint strong { color: var(--stage-ink); font-weight: 600; }
+.stage-tip { position: absolute; left: 0; top: 0; z-index: 2; max-width: 260px; padding: 6px 9px; font-size: 12px; line-height: 1.4; white-space: pre-line; color: #f3f3f6; background: rgb(16 17 20 / .95); border: 1px solid rgb(255 255 255 / .18); border-radius: 6px; pointer-events: none; }
+/* Where you are, and the camera: one row along the bottom, out of the model's way in the corners. */
+.stage-bottom { position: absolute; left: 12px; right: 12px; bottom: 10px; z-index: 1; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 6px 12px; pointer-events: none; }
+.stage-bottom > * { pointer-events: auto; }
+.stage-crumb, .stage-dock { display: inline-flex; align-items: center; gap: 2px; min-height: 36px; max-width: 100%; padding: 2px; background: color-mix(in oklab, var(--panel) 95%, transparent); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 2px 10px rgb(0 0 0 / .3); }
+.stage-crumb { padding-left: 4px; font-size: 12px; }
+.stage-dock { margin-left: auto; }
+.crumb { min-width: 0; min-height: 30px; padding: 2px 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
+.crumb[aria-current] { color: var(--fg); font-weight: 600; }
+.crumb.here { display: inline-flex; align-items: center; }
+.crumb-sep { color: var(--faint); }
+.crumb-steps { display: inline-flex; flex-shrink: 0; gap: 2px; margin-left: 4px; padding-left: 4px; border-left: 1px solid var(--line); }
+.dock-btn { position: relative; flex-shrink: 0; width: 32px; height: 30px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--fg); font-size: 14px; font-weight: 600; }
+.dock-btn:hover:not(:disabled) { background: var(--soft); }
+.dock-btn:disabled { opacity: .38; }
+.dock-btn[aria-pressed="true"], .dock-btn[aria-expanded="true"] { background: var(--fg); color: var(--bg); }
+/* Each action names itself above its button, at once, for a pointer or the keyboard. */
+.dock-btn::after { content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 4; padding: 4px 7px; font-size: 11px; font-weight: 500; white-space: nowrap; color: #f3f3f6; background: rgb(16 17 20 / .96); border: 1px solid rgb(255 255 255 / .18); border-radius: 5px; opacity: 0; pointer-events: none; }
+.crumb-steps .dock-btn::after { right: auto; left: 0; }
+.dock-btn:focus-visible::after { opacity: 1; }
+@media (hover: hover) { .dock-btn:hover::after { opacity: 1; } }
+.dock-sep { flex-shrink: 0; width: 1px; height: 18px; margin: 0 3px; background: var(--line); }
+.dock-word { display: none; }
+.dock-range { display: inline-flex; align-items: center; margin: 0 4px; }
+.dock-range input { width: 84px; min-height: 28px; accent-color: var(--fg); }
+.stage-pop { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 3; width: min(340px, 100%); max-height: calc(100cqh - 76px); overflow-y: auto; padding: 12px 14px; font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgb(0 0 0 / .4); }
+.stage-pop .pop-title { margin-bottom: 8px; font-weight: 600; }
+.pop-views { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pop-views .btn { min-height: 34px; padding: 4px 10px; font-size: 12px; justify-content: space-between; }
+.stage-pop kbd { padding: 1px 5px; font: 11px var(--mono); color: var(--muted); background: var(--soft); border: 1px solid var(--line); border-radius: 4px; }
+.stage-pop dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+.stage-pop dt { font-weight: 600; }
+.stage-pop dd { margin: 0; line-height: 1.45; color: var(--muted); }
+.stage-pop .note { margin-top: 10px; font-size: 11px; }
+/* On a phone the dock sits under the stage instead of over it, so the model keeps the whole view. */
+.stage-dockbar { padding: 8px max(12px, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); background: var(--panel); }
+.stage-dockbar .stage-bottom { position: relative; left: auto; right: auto; bottom: auto; }
+.stage-dockbar .stage-crumb, .stage-dockbar .stage-dock { box-shadow: none; width: 100%; }
+.stage-dockbar .stage-crumb { justify-content: space-between; }
+.stage-dockbar .stage-crumb .crumb-steps { margin-left: auto; }
+.stage-dockbar .crumb-steps .dock-btn { width: 44px; height: 40px; }
+/* Two even rows of four, each action named: there is no pointer here to hover for a tooltip. */
+.stage-dockbar .stage-dock { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-left: 0; padding: 4px; }
+.stage-dockbar .stage-dock > .dock-btn { width: auto; height: 50px; grid-template-rows: 18px auto; align-content: center; gap: 3px; }
+.stage-dockbar .dock-word { display: block; font-size: 11px; font-weight: 500; line-height: 1.1; white-space: nowrap; }
+.stage-dockbar .dock-glyph { line-height: 18px; }
+.stage-dockbar .dock-sep, .stage-dockbar .dock-btn::after { display: none; }
+.stage-dockbar .dock-range { grid-column: 1 / -1; gap: 10px; margin: 0; padding: 2px 8px; color: var(--muted); }
+.stage-dockbar .dock-range input { flex: 1; width: auto; min-height: 40px; }
+.stage-dockbar .stage-pop { left: 0; width: auto; }
+.stage-dockbar .stage-pop { max-height: 60dvh; }
 .stage-state { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; font-size: 13px; color: var(--muted); background: color-mix(in oklab, var(--bg) 90%, transparent); }
 .stage-state .row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .lab-scope > .stage-state { position: static; height: 100%; }
@@ -732,8 +791,8 @@ html:has(dialog[open]) { overflow: hidden; }
 .stage-transport { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; }
 .stage-transport > .note { margin-top: 4px; font-size: 11px; }
 .stage-transport > .seg { margin-top: 8px; }
-.stage-transport .training-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.stage-transport .training-actions .num { margin-left: auto; color: var(--muted); }
+.stage-transport .training-actions, .stage-question .training-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.stage-transport .training-actions .num, .stage-question .training-actions .num { margin-left: auto; color: var(--muted); }
 .stage-transport .training-status { min-height: 0; margin-top: 6px; }
 .stage-transport .lesson-loss svg { height: 64px; margin-top: 8px; }
 .stage-token { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
@@ -786,6 +845,7 @@ html:has(.stage-bench.expanded) { overflow: hidden; }
 .stage-bench.expanded .stage-main { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr) minmax(280px, 380px); grid-template-rows: minmax(0, 1fr) auto; border-top: 1px solid var(--line); }
 .stage-bench.expanded .stage-rail { grid-column: 1; grid-row: 1 / -1; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; border-right: 1px solid var(--line); background: var(--panel); }
 .stage-bench.expanded .stage-view { grid-column: 2; grid-row: 1; border-block: 0; }
+.stage-bench.expanded .stage-bottom { left: 16px; right: 16px; bottom: 14px; }
 .stage-bench.expanded .stage-lower { display: contents; }
 .stage-bench.expanded .stage-controls { grid-column: 2; grid-row: 2; padding: 10px 24px 14px; border-top: 1px solid var(--line); background: var(--panel); }
 .stage-bench.expanded .stage-side { grid-column: 3; grid-row: 1 / -1; overflow-y: auto; overscroll-behavior: contain; padding: 8px 24px 24px; border-left: 1px solid var(--line); background: var(--panel); }

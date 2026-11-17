@@ -66,7 +66,7 @@ export class Bay {
   private readonly lines: THREE.LineSegments;
 
   constructor(readonly spec: BaySpec, private theme: Theme, maxWidth: number) {
-    this.frame = new THREE.MeshStandardMaterial({ metalness: 0.5, roughness: 0.45 });
+    this.frame = new THREE.MeshStandardMaterial({ metalness: 0.9, roughness: 0.5 });
     const { at, width, height } = layoutPlates(spec.plates, maxWidth, spec.sizes);
     this.size.set(Math.max(width, 2.4), Math.max(height, 1));
     const links: number[] = [];
@@ -146,12 +146,11 @@ export class Bay {
     return { plate: p.plate, row: Math.min(p.rows - 1, Math.max(0, Math.floor((1 - hit.uv.y) * p.rows))), col: Math.min(p.cols - 1, Math.max(0, Math.floor(hit.uv.x * p.cols))) };
   }
 
-  /** Title anchors, just above each plate, in world space. */
+  /** Title anchors, just above each plate, relative to the bay's own position (the bay moves with the tower). */
   labels(): { id: string; text: string; at: THREE.Vector3; width: number }[] {
-    this.group.updateMatrixWorld(true);
     return this.plates.map(({ plate, mesh }) => {
-      const h = (mesh.geometry as THREE.PlaneGeometry).parameters.height, w = (mesh.geometry as THREE.PlaneGeometry).parameters.width;
-      return { id: plate.id, text: plate.title, at: mesh.localToWorld(new THREE.Vector3(0, h / 2 + 0.07, 0)), width: w };
+      const { width, height } = (mesh.geometry as THREE.PlaneGeometry).parameters;
+      return { id: plate.id, text: plate.title, at: new THREE.Vector3(mesh.position.x, mesh.position.y + height / 2 + 0.07, mesh.position.z), width };
     });
   }
 

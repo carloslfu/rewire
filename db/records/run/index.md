@@ -2,11 +2,12 @@
 type: index
 scope: type-folder
 folder: records/run
-updated: 2026-11-17T03:27:39.924203Z
+updated: 2026-11-17T13:41:19.395358Z
 ---
 
 # records/run
 
+- [[records/run/2026/11/2026-11-17-3d-materials-navigation]] — 3D materials and navigation release gate and Chrome evidence
 - [[records/run/2026/11/2026-11-16-3d-chrome]] — Final release gate and live Chrome evidence for the interactive 3D workbench
 - [[records/run/2026/11/2026-11-16-3d-model-view]] — 3D model view release gate, new suite listing and bundle sizes
 - [[records/run/2026/11/2026-11-04-unicode-decoding]] — Unicode token rendering release checks and Chrome observations

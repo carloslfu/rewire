@@ -95,6 +95,6 @@ export default function TeachStage({ weights, reference, step, running, losses, 
       <button type="button" className="linkish" disabled={busy} onClick={() => store.set({ teach: false, tiny: true })}>Train every weight from scratch in Grow</button>
     </section>
     <RealNote real="Qwen's 28 layers with 16 attention heads and one MLP each. The three plates are the adapter's actual A and B matrices and each rank's size, refreshed from training every 10 steps."
-      drawing="The shapes and positions. Teaching measures no activations here, so nothing else lights up. Frozen layers are drawn pale because their weights do not change." />
+      drawing="The shapes and positions. Teaching measures no activations here, so nothing else lights up. Frozen layers are drawn dimmed because their weights do not change." />
   </Workbench>;
 }

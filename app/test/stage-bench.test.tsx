@@ -96,6 +96,34 @@ it("shows a selected part's real controls and measured value, and locks them whi
   expect(text(renderToString(<Dismantle />))).toContain("This reply used earlier settings.");
 });
 
+it("names every camera action, says where you are, and opens no empty bay before there is something to show", () => {
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, focus: { kind: "head", floor: 20, head: 13 } });
+  const html = renderToString(<Dismantle />), t = text(html);
+  // Each dock button has an accessible name, a tooltip with its key, and a word for screens with no pointer.
+  for (const [name, word] of [["Fit the whole model", "Fit"], ["Focus on the selected part", "Focus"], ["Zoom out", "Zoom out"], ["Zoom in", "Zoom in"], ["Spread the layers apart", "Spread"], ["Views", "Views"], ["How to move around the model", "Help"]]) {
+    const button = new RegExp(`<button[^>]*aria-label="${name}"[^>]*>.*?</button>`).exec(html)?.[0] ?? "";
+    expect(button).toContain("data-tip=");
+    expect(button).toContain(`>${word}</span>`);
+  }
+  expect(html).toMatch(/aria-label="Pan: drags slide the view and clicks do nothing"[^>]*aria-pressed="false"/);
+  expect(html).toContain('role="toolbar" aria-label="Camera and layout"');
+  // The breadcrumb reads from the model down to the part, with steps to the layers on either side.
+  expect(/<nav class="stage-crumb"[^>]*>(.*?)<\/nav>/.exec(html)![1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()).toBe("Model › Layer 21 › Head 14");
+  expect(html).toMatch(/aria-label="Up one layer"[^>]*>/);
+  expect(html).not.toMatch(/aria-label="Up one layer"[^>]*disabled=""/);
+  // Nothing has been moved, so there is nothing to reset. The old Reset view is the dock's Fit.
+  expect(buttons(html).get("Reset layout")).toEqual([true]);
+  expect(buttons(html).has("Reset view")).toBe(false);
+  // No question yet: the reason is given beside the stage, where it does not cover the model.
+  expect(t).toContain("Ask a question and select a token to measure this layer.");
+  expect(t).toContain("No shape stands for real hardware or for an individual parameter.");
+  // At the top of the stack there is no layer above to step to.
+  store.set({ focus: { kind: "word" } });
+  const top = renderToString(<Dismantle />);
+  expect(/<nav class="stage-crumb"[^>]*>(.*?)<\/nav>/.exec(top)![1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()).toBe("Model");
+  expect(top).toMatch(/aria-label="Focus on the selected part"[^>]*disabled=""/);
+});
+
 it("offers the 3D view from the flat scope and falls back to it when WebGL is unavailable", () => {
   let html = renderToString(<Lab.LabScope />);
   expect(html).toContain('aria-label="Model view"');

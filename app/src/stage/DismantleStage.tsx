@@ -96,8 +96,9 @@ export default function DismantleStage() {
     : !c.reply.done ? "Waiting for the reply to finish."
     : mode !== "live" ? "Measurements need the model to be ready."
     : !plates ? (detail.state === "unavailable" ? S.noDetail : "Measuring every step for this token…") : "";
-  const bay = useMemo((): BaySpec | null => (floor < 0 ? null
-    : { key: `${model.id}.layer.${floor}`, floor, plates: waiting ? [] : plates ?? [], message: waiting || undefined }), [floor, model.id, plates, waiting]);
+  // The tower opens only for real plates. Until then the reason is given beside the stage, and the model stays whole.
+  const bay = useMemo((): BaySpec | null => (floor < 0 || waiting || !plates ? null
+    : { key: `${model.id}.layer.${floor}`, floor, plates }), [floor, model.id, plates, waiting]);
 
   // ------------------------------------------------------------ data into the stage
   const context = useMemo(() => (c ? [...c.reply.read, ...c.reply.toks.slice(0, c.ref.index).map((x) => x.id)] : []), [c]);
@@ -228,7 +229,7 @@ export default function DismantleStage() {
         <button type="button" className="btn quiet" disabled={!!reason || !partChanged(chips, part)} onClick={() => void chipsWith((spec) => restored(spec, part))}>{restoreLabel(part)}</button>
         <button type="button" className="btn quiet" disabled={!stage} onClick={() => stage?.focus(part)}>Look closer</button>
       </div>
-      <p className="note">{bay?.message ?? `The plates beside layer ${part.floor + 1} are its measured values for ${c ? `“${wq}” in the ${c.ref.side === "normal" ? "original" : "changed"} reply` : "this token"}. Hover a tile to read its number.`}</p>
+      <p className="note">{waiting || `The plates beside layer ${part.floor + 1} are its measured values for ${c ? `“${wq}” in the ${c.ref.side === "normal" ? "original" : "changed"} reply` : "this token"}. Hover a tile to read its number.`}</p>
     </> : selected ? <section className="stage-info">
       <div className="section-heading"><h3>{partName(model, selected)}</h3><button type="button" className="btn quiet" onClick={() => select(null)}>Close</button></div>
       <p className="note">{selected.kind === "embed" ? S.def(model).dictionary : selected.kind === "kv" ? `Heads ${groupHeads(model, selected.group).map((h) => h + 1).join(" and ")} ask their own questions but read the same keys and values. This pairing is part of the model's design.`
@@ -240,12 +241,12 @@ export default function DismantleStage() {
       </div>
     </section> : <section className="stage-info">
       <h3>Select a part</h3>
-      <p className="note">Click a head, an MLP or a layer to open its controls here. Orange pushed toward the selected token and blue pushed against it.</p>
+      <p className="note">Click a head, an MLP or a layer to open its controls here. A window lit orange pushed toward the selected token and one lit blue pushed against it.</p>
       {marked && st && <button type="button" className="btn" onClick={() => select(marked)}>Find marked part</button>}
     </section>}
     <LearnedControl disabled={busy || mode !== "live"} />
     <MoreExperiments disabled={busy || mode !== "live"} />
-    <RealNote punch real={`${model.floors} layers, ${model.heads} attention heads and one MLP in each, and heads paired on shared keys and values. Colors are measured direct pushes. Plates are measured values. Candidate bars are real probabilities. Punch and the strength controls change the running model.`}
+    <RealNote punch real={`${model.floors} layers, ${model.heads} attention heads and one MLP in each, and heads paired on shared keys and values. The color of each lit window is a measured direct push. Plates are measured values. Candidate bars are real probabilities. Punch and the strength controls change the running model.`}
       drawing={`The shapes, sizes and positions. A model has no physical form. The dictionary tiles and MLP fins stand in for ${model.vocab.toLocaleString("en-US")} rows and ${model.units.toLocaleString("en-US")} neurons; they are not drawn one by one.`} />
   </Workbench>;
 }

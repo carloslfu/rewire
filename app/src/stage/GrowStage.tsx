@@ -126,7 +126,7 @@ export default function GrowStage({ params, reference, intact, step, running, ac
           {floor >= 0 && <button type="button" className="btn quiet" disabled={!intact || disabled} onClick={() => controls.mutate("erase", floor)}>Erase in this layer</button>}
           <button type="button" className="btn quiet" disabled={!stage} onClick={() => stage?.focus(selected)}>Look closer</button>
         </div>
-      </> : <><h3>Select a part</h3><p className="note">Each part is colored by how much its own weights {difference ? "have moved since the start" : "weigh now"}. Click one to see its matrices.</p></>}
+      </> : <><h3>Select a part</h3><p className="note">Each part's window is lit by how much its own weights {difference ? "have moved since the start" : "weigh now"}. Click one to see its matrices.</p></>}
     </section>
     <section className="stage-info damage-bench">
       <h3>Break what it learned</h3>
@@ -136,7 +136,7 @@ export default function GrowStage({ params, reference, intact, step, running, ac
         <button type="button" className="btn" disabled={!intact || disabled} onClick={() => controls.mutate("erase")}>Erase weights</button></div>
       <p className="note">{controls.mutation ? `${controls.mutation}. Each experiment starts from the intact copy.` : "These rewrite the actual matrix weights used to generate text. The intact copy stays available."}</p>
     </section>
-    <RealNote punch real={`Four layers, four attention heads and one MLP in each, with heads paired on shared keys and values, exactly as configured. Every color is computed from that part's slice of the ${layout(cfg).total.toLocaleString("en-US")} parameters. Plates are the real matrices. Punch, Scramble and Erase rewrite those weights.`}
+    <RealNote punch real={`Four layers, four attention heads and one MLP in each, with heads paired on shared keys and values, exactly as configured. The color of every lit window is computed from that part's slice of the ${layout(cfg).total.toLocaleString("en-US")} parameters. Plates are the real matrices. Punch, Scramble and Erase rewrite those weights.`}
       drawing="The shapes and positions. Training measures no activations here, so there is no token replay on this bench. Open the model in the full lab to follow a letter through it." />
   </Workbench>;
 }
