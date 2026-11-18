@@ -121,3 +121,11 @@
 }
 @media (max-width: 360px) { .work-tabs { gap: 10px; padding-inline: 10px; } }
 @media (min-width: 700px) and (max-height: 500px) { .work-tabs { position: static; } }
+
+.workspace-content .turn { scroll-margin-block-start: 8px; }
+@media (max-width: 900px) {
+  .work-pane .turn { scroll-margin-block-start: calc(var(--app-header-height, 72px) + 52px); }
+}
+@media (min-width: 700px) and (max-height: 500px) {
+  .work-pane .turn { scroll-margin-block-start: 8px; }
+}

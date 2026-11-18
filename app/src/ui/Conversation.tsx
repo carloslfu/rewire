@@ -38,7 +38,7 @@ export function Conversation() {
           const token = replySegments(turns[index].normal)[0];
           if (token && store.get().word?.turn !== index) chooseWord({ turn: index, side: "normal", index: token.from });
           const heading = document.getElementById(`sample-${id}`);
-          heading?.scrollIntoView({ block: "nearest" });
+          heading?.closest("article")?.scrollIntoView({ block: "start" });
           heading?.focus({ preventScroll: true });
         }}><option value="">Choose a question ({turns.length})</option>{turns.map((turn, k) =>
           <option key={turn.id} value={turn.id}>{k + 1}. {turn.user}</option>)}</select></label>}
