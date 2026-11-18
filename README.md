@@ -12,14 +12,13 @@ and earlier development decisions are in `db/`.
 
 ## The experience
 
-The lab has three benches. **Dismantle** starts with your own question and keeps a live visualizer
-beside the conversation on desktop. On mobile, open it with Show model. Cut layers, change individual
+The lab has three benches. **Dismantle** opens on the whole 3D model. Questions and experiments sit beside it on desktop and below it on phones. Cut layers, change individual
 heads, zero selected weights, or reduce weight precision. Original and changed replies share the same
 sampling seed. Changes persist into new questions; Restore removes them. The model loads automatically.
 Sample questions use the same live inference path as freeform chat. Unsupported devices or loading
 failures show an honest unavailable state; there is no recorded fallback.
 
-The visualizer measures one selected token. **Follow output**, in both the 2D and 3D views, selects
+The visualizer measures one selected token. **Follow output** selects
 the newest token of the reply being written: the changed reply in Push, falling back to the original
 while the changed one is empty, and always an original token in Change from original. Choosing a
 token yourself (in a reply, with Previous and Next, or by picking a candidate) pauses it. Paused, your token stays selected across new questions, Continue and model
@@ -27,8 +26,7 @@ changes, and moves only if it stops existing: to the nearest token of the same r
 sample's original reply, then the nearest remaining sample. With nothing selected, the first token
 written is selected once and kept. Only you turn following on or off, with one exception: clearing
 the samples, opening a guided example and switching between Qwen and the tiny model start a new
-experiment, which follows again. Switching between Push and Change from original, or between 2D and
-3D, keeps the setting. A 3D Replay holds the selection while it lasts: Back to live turns following
+experiment, which follows again. Switching between Push and Change from original keeps the setting. A 3D Replay holds the selection while it lasts: Back to live turns following
 on, and a replay that ends any other way leaves following as you had set it before. Choosing a token
 or using a candidate during a replay is your own pause, the same as in live output: it stays paused
 on your token when the replay ends, and only Back to live or the toggle follows again.
@@ -50,7 +48,7 @@ weights and 16 neuron pushes at once. One more than that is refused before anyth
 active, with a message naming the limit, and the control that would add it is disabled with the same
 reason. Nothing is dropped silently. A hidden word is hidden by its position in the prompt, so with
 several samples its chip names the word only where every sample has the same word at that position,
-and the position otherwise. Every change control, in the inspector, the 2D view and the 3D bench, is
+and the position otherwise. Every change control in the inspector and the 3D bench is
 enabled by one rule: the model is ready, no reply is being written and Qwen is not being taught.
 While samples are updating, a further change restarts the update.
 
@@ -107,18 +105,31 @@ source of facts. The visualizer reports measured contributions, not a complete c
 
 ## The model in 3D
 
-Every bench has a **2D / 3D** switch above its visualizer. 2D is the flat diagram described above and
-stays the default. 3D draws the same model as a laboratory instrument you can turn, zoom and take
-apart: one deck per layer in a four-post rack, its attention heads seated in pairs on the socket for
+All three benches open directly on the model. The 3D instrument has one deck per layer in a four-post rack, its attention heads seated in pairs on the socket for
 the keys and values they share, its MLP under a finned heatsink, and the two points where their
 output joins the residual stream, a glass tube running from the dictionary below to the output above.
 It is lit as a product photograph: brushed aluminum, dark ceramic, gold contacts and copper bus bars
 under studio softboxes, on a dark seamless backdrop in both themes. Choose **Full screen** in the 3D
 view to give the model the whole screen. Camera controls float over the model. Open the question,
 lesson or part details when you need them. Replay or training controls stay within reach at the bottom.
-Leaving full screen returns you to the same 3D session. Three.js
-loads only when the 3D view is opened. If the browser cannot create a WebGL context, the benches stay
-in 2D. Touch-first devices get simpler shapes and materials and no shadow pass.
+Leaving full screen returns you to the same model, camera and editor. The renderer loads on demand.
+If WebGL is unavailable, you can retry the renderer and use the named part controls. Inference
+and training have their own device requirements. Touch-first devices use lighter geometry and materials.
+
+### Capability inventory
+
+| Workflow | Where to do it in the 3D workspace |
+| --- | --- |
+| Ask and compare independent questions | Open **Questions**. Each sample keeps its prompt, original answer and changed answer together. Jump to a sample, edit and regenerate it, remove and undo, stop or continue a reply, or clear the set. |
+| Read the actual input and output | Expand the input for a sample to see prompt markers, token IDs and positions. Select a reply token to see its measured effect on the model. **Inspect selected token** opens the measurements and candidate table, including model and draw probabilities, candidate substitution and undo. |
+| Navigate the architecture | Rotate, pan, zoom, spread, fit, focus or change camera view. Tap a part or choose its layer and component in **Inspect part**. Grab rearranges the display. Punch applies the part's supported intervention. Keyboard and named controls provide alternatives to precise pointing. |
+| Inspect and intervene | Inspect attention and head signals, MLP and neuron contributions, residuals, input dictionary, output and normalization. Adjust strengths, cut or restore layers and heads, turn a signal, change precision, zero weights, swap dictionary entries or hide a prompt position. Chips track changes across all samples. |
+| Compare computations | Follow live output, pause on a token, step between tokens and switch between direct pushes and the change from original. Inspect layer totals, signs, unavailable values and comparison retries. |
+| Run guided experiments | Choose an example or open the experiment list. Follow its target in the model, inspect or modify the indicated part, then compare the measured answers. |
+| Replay the whole model | Use **Replay answer** below the scene or the replay action on a finished reply. Choose the whole answer or one token, step through layers, pause, change pace, restart or return to live output. A token's result appears at the output step. |
+| Teach the loaded Qwen model | In **Lesson**, edit examples and held-out questions, set training steps and learning rate, train, continue or stop, and compare before/after answers. In **Inspect part**, inspect adapter A and B, individual values, movement and loss. Carry the adapter into Dismantle. |
+| Grow a model from noise | In **Training**, edit the corpus and tests, train, stop and continue, compare generation with the intact copy, damage or restore weights, adopt retrained weights, inspect one gradient step and open the trained model in Dismantle. Inspect individual matrices, coordinates and whole-model changes in **Inspect part**. |
+| Use a phone or full screen | The model appears on entry. Below it, switch between the editor, **Inspect part** and **Camera**. **↑ Model** takes you back from a long editor. **Full screen** keeps playback within reach and opens the same editor and part controls as overlays. |
 
 Three tools keep looking, arranging and changing apart:
 
@@ -143,7 +154,7 @@ Moving around:
   move a camera you have placed.
 - The dock at the bottom right holds Fit, Focus, zoom, Pan, Spread, Views (three-quarter, front, side,
   top, around the part in focus) and a help panel listing every mouse, trackpad, touch and keyboard
-  control. On a phone, open **Camera** in full screen to see each action by name. In the docked view
+  control. On a phone, open **Camera** to see each action by name. In the docked view
   the same controls sit under the stage.
 - **Pan** makes plain drags slide the view. While it is on, or Space is held, clicks select nothing and
   change nothing. A press that ever travelled, a second finger, or a modifier key is always the
@@ -175,7 +186,7 @@ What is measured and what is drawn:
   individual parameter. The dictionary tiles and MLP fins stand in for 151,669 rows and 3,072 neurons
   and are not drawn one by one.
 - In Dismantle, the lit windows on each module, the strips on the sockets and the rings on the stream
-  are colored by the selected token's direct pushes, the same numbers as the 2D tower. The chassis
+  are colored by the selected token's direct pushes, measured during inference. The chassis
   keeps its own material, and a window with no measurement stays dark. Once a token is measured,
   selecting a layer opens the tower above it and stands that layer's measured values there as plates,
   in computation order, from the same inspection pass the detail panel uses: the stream in, its
@@ -189,11 +200,11 @@ What is measured and what is drawn:
   the sampling temperature, keeps the first of them that reach 0.8 of that mass (top-p), and draws
   among those kept, so a piece's chance in the draw is its share of the kept candidates and a
   candidate past the cut has none. With one candidate kept the draw is certain, 100%, whatever the
-  model gave it. The 2D view shows those odds where the draw is the subject, and says so: the
+  model gave it. The token inspector makes the sampling odds explicit. Its
   candidate table has a Draw column (the chance after the cut, or cut for a dropped candidate) beside
   a Model column (temperature 1, whole vocabulary, in the same two-decimal bounded form as the 3D
   bars, while a certain draw reads exactly 100%); the detail panel lists Chance in the draw beside
-  Model's probability; and the tower's Words out figure is described as in the draw. A piece you
+  Model's probability; and the selected piece names how it was chosen. A piece you
   picked is never called drawn: it reads Selection: Your choice, with what the
   draw would have given it. Candidates past the cut and outside the list can still be used; that is
   your intervention, and is labelled as one. The written piece always has a bar,
@@ -249,8 +260,7 @@ different thing: there the model really writes the changed answers again.)
 
 - Replay answer is enabled once the selected reply is finished and the model is idle. Until then the
   strip says what it is waiting for: a question, the end of the reply being written, or the end of a
-  sample update. Each finished reply also has its own entry: Replay beside the reply in the 3D view,
-  and Replay in 3D under the reply in the conversation, which opens the 3D view and starts there.
+  sample update. Each finished reply also has a replay action in Questions that starts with that reply.
   Stale replies are not offered.
 - The scope is **Whole answer** or **This token**. Replay only this token starts on the selected token
   and stops at its end. You can switch scope during playback. Speed is kept between replays;
@@ -288,8 +298,7 @@ different thing: there the model really writes the changed answers again.)
 - **Back to live** ends the replay and follows the newest output. A replay also ends by itself, never
   moving the selection again and keeping a token you chose during it, when the model starts writing (a new question, Continue, a picked
   candidate), when the model changes (a control, Punch, Restore), when a sample is edited, removed,
-  restored or cleared, when you switch models, benches or to the 2D view, or when the model sheet is
-  closed on a phone. It pauses, and stays paused until you resume, when the tab is hidden, the stage
+  restored or cleared, or when you switch models or benches. It pauses, and stays paused until you resume, when the tab is hidden, the stage
   scrolls out of sight or the 3D view has to be reloaded. It never starts playing by itself.
 
 ### Sharing the GPU
@@ -302,7 +311,7 @@ gives the browser room to draw the model between tokens; it cannot guarantee a f
 browser and the driver decide the order, and a single token's forward pass is not split. The numbers
 are identical either way: only when a step is queued changes. Stop, a newer model version and a
 replaced job are checked before every step, including after each rest, and a comparison now stops on
-Stop as well. Replies are slower while the 3D view is open; the 2D view runs at full speed. A replay
+Stop as well. Replies give the visible 3D scene time to render between steps. A replay
 needs the model idle, so it never competes with generation.
 
 ## Love and evil candidates
@@ -370,7 +379,7 @@ exploratory study on one quantized checkpoint and one device, without an indepen
 
 ## Play with vector geometry
 
-Ask a question, then choose **Turn a signal** or click a head in the tower.
+Ask a question, then choose **Turn a signal** or select an attention head in the model.
 **Rotate** turns its projected output from −180° to 180° without changing its length. At 90° it is
 perpendicular to the original; at 180° it reverses. **Remove overlap** subtracts the component parallel
 to the stream entering that layer. **Scramble coordinates** permutes the same numbers into a different

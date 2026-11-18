@@ -1,4 +1,4 @@
-import { chipsWith, openStep, setFocus, stepData } from "../state/actions.ts";
+import { chipsWith, exploreModel, openStep, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { guideAddress, guideTarget, stepCopy, type StepData } from "../path/steps.ts";
 import { signed } from "./color.ts";
@@ -32,7 +32,7 @@ export function GuidedStep({ st }: { st: StepData }) {
     <summary>Instructions and test notes</summary>
     <ol className="guide-instructions">
       <li><strong>Test a question.</strong> Use a suggested question, edit it, or write your own.</li>
-      <li><strong>Find {guideAddress(st)}.</strong> It has a dotted marker in the model. {guide.action}</li>
+      <li><strong>Find {guideAddress(st)}.</strong> Choose Find marked part to focus on it in the model. {guide.action}</li>
       <li><strong>Compare the replies.</strong> Try another question, then restore the original to check the effect.</li>
     </ol>
     <details className="example-evidence"><summary>What happened in our tests?</summary>
@@ -40,7 +40,7 @@ export function GuidedStep({ st }: { st: StepData }) {
       <p>{copy.why}</p>
     </details>
     </details>
-    <button className="btn" onClick={() => setFocus(target)}>Find marked part</button>
+    <button className="btn" onClick={() => exploreModel(target)}>Find marked part</button>
     {!turns.length && <p className="note guide-pending">Test your question first. You make the change yourself.</p>}
   </section>;
 }
@@ -60,7 +60,7 @@ export function SuggestedQuestions() {
   </div>;
 }
 
-/** The intervention lives at its actual MLP, reached by clicking the marked cell. */
+/** The intervention lives at its actual MLP, reached by selecting the marked part of the model. */
 export function NeuronControl({ floor }: { floor: number }) {
   const st = stepData(useStore((s) => s.step));
   const chips = useStore((s) => s.chips);

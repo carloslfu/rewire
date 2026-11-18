@@ -14,7 +14,7 @@ import { fmt, NO_NUMBER, pct, signed } from "../src/ui/color.ts";
 let store: typeof import("../src/state/store.ts").store;
 let initial: typeof import("../src/state/store.ts").initial;
 let Detail: typeof import("../src/ui/Detail.tsx").Detail;
-let Tower: typeof import("../src/ui/Tower.tsx").Tower;
+let Bench: typeof import("../src/stage/DismantleStage.tsx").default;
 
 beforeEach(async () => {
   vi.resetModules();
@@ -24,7 +24,7 @@ beforeEach(async () => {
   ({ store, initial } = await import("../src/state/store.ts"));
   store.set(initial);
   ({ Detail } = await import("../src/ui/Detail.tsx"));
-  ({ Tower } = await import("../src/ui/Tower.tsx"));
+  Bench = (await import("../src/stage/DismantleStage.tsx")).default;
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -88,7 +88,7 @@ const certain: Tok = { id: 100, lp1: Math.log(0.86), concept: 0, cut: 1, pushes,
 const show = (tok: Tok) => store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, word: { turn: 0, side: "normal", index: 0 }, follow: false,
   turns: [{ id: 1, user: "Q", temperature: 0.7, normal: { read: [5, 6], toks: [tok], ended: true, done: true, changes: {}, source: "live" } }] });
 
-it("shows a certain draw as certain in the inspector, the candidate table and the 2D tower, beside the model's own probability", () => {
+it("shows a certain draw as certain in the inspector, the candidate table and Words out on the 3D bench, beside the model's own probability", () => {
   show(certain);
   const panel = text(renderToString(<Detail />));
   expect(panel).toContain("Chance in the draw 100% at temperature 0.7, the only candidate the top-p cut kept");
@@ -102,11 +102,14 @@ it("shows a certain draw as certain in the inspector, the candidate table and th
   expect(rows[1][0]).toContain("dropped");
   expect(rows[1][1]).toMatch(/^2\. … cut 8\.00% Use this word/);
   expect(panel).toContain("The top-p cut (0.8) kept the top 1 of 3; the rest had no chance, though you can still use one yourself.");
-  // Words out in the 2D tower says the same thing.
-  const tower = renderToString(<Tower />);
-  expect(tower).toMatch(/aria-label="Words out: &quot;…&quot;, 100% in the draw"/);
-  expect(text(tower)).toContain('"…" 100%');
+  // Words out on the 3D bench says the same thing, and lists the model's own probabilities as numbers, never the draw's odds.
   store.set({ focus: { kind: "words-out" } });
+  const bench = text(renderToString(<Bench />));
+  expect(bench).toContain("Words out");
+  expect(bench).toContain("Wrote “…”: 100% in the draw.");
+  expect(bench).toContain("… (written) 86.00%");
+  expect(bench).toContain("… 8.00%");
+  expect(bench).not.toContain("94%");
   expect(text(renderToString(<Detail />))).toContain("drawn from 1 candidate after the cut.");
 });
 
@@ -115,7 +118,8 @@ it("renormalises several kept candidates and never mixes the two measures", () =
   const panel = text(renderToString(<Detail />));
   expect(panel).toContain("Chance in the draw 75% at temperature 0.7, among the 2 candidates the top-p cut kept");
   expect(panel).toContain("Model's probability 50.00% at temperature 1");
-  expect(text(renderToString(<Tower />))).toContain('"…" 75%');
+  store.set({ focus: { kind: "words-out" } });
+  expect(text(renderToString(<Bench />))).toContain("Wrote “…”: 75% in the draw.");
 });
 
 it("never calls a picked piece a draw, and still says what the draw would have done with it", () => {
@@ -127,8 +131,9 @@ it("never calls a picked piece a draw, and still says what the draw would have d
   expect(panel).toContain("Chance in the draw none: the top-p cut dropped it");
   expect(panel).toContain("you picked in place of the model's draw");
   expect(panel).not.toContain("It was drawn from the candidates below");
-  expect(renderToString(<Tower />)).toMatch(/aria-label="Words out: &quot;…&quot;, your choice"/);
   store.set({ focus: { kind: "words-out" } });
+  expect(text(renderToString(<Bench />))).toContain("Wrote “…”: your choice in place of the draw.");
+  expect(text(renderToString(<Bench />))).not.toContain("in the draw.");
   expect(text(renderToString(<Detail />))).toContain("your choice in place of the draw. The draw would have chosen among 1 candidate.");
   // Picked from outside the top 20: no chance in the draw, and its real probability from the model.
   store.set({ focus: { kind: "word" } });
@@ -177,11 +182,15 @@ it("names a value that is not a number instead of printing one", () => {
   expect(fmt(Number.NaN)).toBe(NO_NUMBER);
   expect(pct(Number.NaN)).toBe("unavailable");
   expect(pct(1)).toBe("100%");
-  // A direct push that is not a number leaves its cell uncolored and is read out as such; the others keep their scale.
+  // A direct push that is not a number is named as unavailable where the parts are listed, and the others keep
+  // their numbers and their scale. A layer's sum is not made from only some of its heads.
   const broken = pushes.slice(); broken[1] = Number.NaN; broken[2] = 0.5;
   show({ ...certain, pushes: broken });
-  const tower = renderToString(<Tower />);
-  expect(tower).not.toContain("NaN");
-  expect(tower).toContain("is not a number");
-  expect(tower).toContain("+0.50");
+  store.set({ focus: { kind: "floor", floor: 0 } });
+  const bench = renderToString(<Bench />);
+  expect(bench).not.toContain("NaN");
+  expect(bench).toContain("<option value=\"h0\">Attention head 1 · unavailable</option>");
+  expect(bench).toContain("<option value=\"h1\">Attention head 2 · +0.50</option>");
+  expect(text(bench)).toContain("16 attention heads, summed unavailable MLP +0.00 Layer total unavailable");
+  expect(text(/<div class="legend-values num"[^>]*>(.*?)<\/div>/.exec(bench)![1]).trim()).toBe("−0.50 0 +0.50");
 });

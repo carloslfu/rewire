@@ -37,6 +37,8 @@ export function outputIdentity(s: Pick<State, "model" | "version" | "turns" | "w
 
 /** Why Replay answer is not available yet, in the visitor's words. Empty when it is. */
 export function replayWait(s: Live): string {
+  // A replay is drawn on the 3D model. Without the drawing there is nothing to walk a reply through.
+  if (!store.get().stage3d) return "Replay needs the 3D drawing, which could not start here. Try again on the model.";
   if (!s.turns.length) return s.busy ? "Replay is ready when this reply is finished." : "Ask a question first. Once the reply is finished you can replay it here.";
   if (s.replay) return s.replay.status === "running" ? "Replay is ready when the sample update is finished." : "Retry the sample update or restore the originals, then replay.";
   if (s.busy) return "Replay is ready when this reply is finished.";
@@ -79,6 +81,7 @@ store.subscribe(() => { if (session.sync() && store.get().sheet) session.pause()
  */
 export function startReplay(scope: Scope, of?: { sample: number; side: Side }): boolean {
   const s = store.get();
+  if (!s.stage3d) return false;
   let word = s.word;
   if (of) {
     const turn = s.turns.findIndex((t) => t.id === of.sample), t = s.turns[turn];

@@ -177,7 +177,7 @@ export function settledSelection(s: Selection, near?: number): Pick<State, "word
   return { word: same ? s.word : word, view };
 }
 
-/** Pushes the tower shows: each part's push, or changed minus normal on the same word. */
+/** Pushes the model's lit windows show: each part's push, or changed minus normal on the same word. */
 export function towerValues(c: Chosen | null, view: "push" | "difference"): Float32Array | null {
   if (!c) return null;
   if (view === "push") return c.tok.pushes;

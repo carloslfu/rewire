@@ -9,6 +9,7 @@ import type { Tok } from "../src/model/types.ts";
 import { pushIndex, pushLength } from "../src/stage/arch.ts";
 import { QWEN_INFO } from "../src/model/info.ts";
 import { afterDamage, afterTraining, continueNote, copyLabel, isDamaged, type Lineage, whileTraining } from "../src/tiny/lineage.ts";
+import { S } from "../src/strings.ts";
 
 let store: typeof import("../src/state/store.ts").store;
 let initial: typeof import("../src/state/store.ts").initial;
@@ -106,7 +107,7 @@ it("shows a selected part's real controls and measured value, and locks them whi
   expect(text(renderToString(<Dismantle />))).toContain("This reply used earlier settings.");
 });
 
-it("offers the same Follow output control in 2D and 3D, usable and explained before and after output", () => {
+it("offers one Follow output control on the model the page mounts, usable and explained before and after output", () => {
   /** The toggle, the hint it is described by, and whether it is disabled. */
   const control = (html: string) => {
     const all = [...html.matchAll(/<button([^>]*class="follow-toggle"[^>]*)>(.*?)<\/button>/g)];
@@ -199,6 +200,7 @@ it("shows Replay as its own mode: what is playing, where it is, what each contro
   expect(b.has("Replay answer")).toBe(false);
   expect(html).not.toContain("follow-toggle");
   expect(t).toContain("Token 1 of 2 · Original reply");
+  expect(html).toContain('<strong title="Awaiting output">…</strong>');
   expect(store.get()).toMatchObject({ follow: false, word: { turn: 0, side: "normal", index: 0 } });
   // One primary control. While playing it pauses.
   expect(html.match(/class="btn primary[^"]*"/g)).toHaveLength(1);
@@ -280,21 +282,21 @@ it("shows Replay as its own mode: what is playing, where it is, what each contro
   expect(html).toMatch(/class="follow-toggle"[^>]*aria-pressed="true"/);
 });
 
-it("offers Replay in 3D on each finished reply in the conversation, and not while the model is writing or 3D is unavailable", () => {
+it("offers a replay on each finished reply in the conversation, and not while the model is writing or the 3D drawing could not start", () => {
   const changed = { ...sample().normal, toks: [tok(200), tok(151645)], changes: { heads: [{ floor: 20, head: 13, mult: 0 }] } };
   store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [{ ...sample(), changed }], fork: 0 });
   let b = buttons(renderToString(<Talk.Conversation />));
-  expect(b.get("Replay in 3D")).toEqual([false, false]);
+  expect(b.get(S.replayIn3d)).toEqual([false, false]);
   store.set({ busy: true });
-  expect(buttons(renderToString(<Talk.Conversation />)).has("Replay in 3D")).toBe(false);
+  expect(buttons(renderToString(<Talk.Conversation />)).has(S.replayIn3d)).toBe(false);
   store.set({ busy: false, replay: { turn: 0, status: "stopped" } });
-  expect(buttons(renderToString(<Talk.Conversation />)).has("Replay in 3D")).toBe(false);
+  expect(buttons(renderToString(<Talk.Conversation />)).has(S.replayIn3d)).toBe(false);
   store.set({ replay: null, stage3d: false });
-  expect(buttons(renderToString(<Talk.Conversation />)).has("Replay in 3D")).toBe(false);
+  expect(buttons(renderToString(<Talk.Conversation />)).has(S.replayIn3d)).toBe(false);
   // A stale reply is not offered; its current sibling still is.
   store.set({ stage3d: true, turns: [{ ...sample(), changed: { ...changed, stale: true } }] });
   b = buttons(renderToString(<Talk.Conversation />));
-  expect(b.get("Replay in 3D")).toEqual([false]);
+  expect(b.get(S.replayIn3d)).toEqual([false]);
 });
 
 it("names every camera action, says where you are, and opens no empty bay before there is something to show", () => {
@@ -325,23 +327,118 @@ it("names every camera action, says where you are, and opens no empty bay before
   expect(top).toMatch(/aria-label="Focus on the selected part"[^>]*disabled=""/);
 });
 
-it("offers the 3D view from the flat scope and falls back to it when WebGL is unavailable", () => {
+it("is the one drawing of the model: no 2D view to fall back to, and a failed start says so and keeps named parts, real controls and readings", async () => {
+  const { startsStage } = await import("../src/stage/Workbench.tsx");
+  const readout = (html: string) => text(/<p class="stage-readout" role="status">(.*?)<\/p>/.exec(html)![1]).trim();
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [sample()], word: { turn: 0, side: "normal", index: 0 }, follow: false, focus: { kind: "head", floor: 20, head: 13 } });
+  // What the page mounts is the 3D bench itself. Nothing offers another view, and nothing draws a flat diagram.
   let html = renderToString(<Lab.LabScope />);
-  expect(html).toContain('aria-label="Model view"');
-  expect(buttons(html).get("3D")).toEqual([false]);
-  expect(html).toContain('class="tower');
-  // After a failed start the switch is disabled and the flat tower stays, whatever view was asked for.
-  store.set({ stage3d: false, scopeView: "3d" });
+  expect(html).toContain('class="stage-bench"');
+  expect(html).not.toMatch(/aria-label="Model view"|class="tower|stage-recovery/);
+  for (const other of ["2D", "3D", "Use the 2D view"]) expect(buttons(html).has(other)).toBe(false);
+  expect(text(html)).toContain("Opening the 3D model…");
+  expect(readout(html)).toMatch(/^Every part is lit\. Direct pushes add up to \+1\.25/);
+  expect(html).toContain('class="stage-legend"');
+
+  // The drawing could not start: no WebGL, or its code did not load. The bench stays and says so.
+  store.set({ stage3d: false });
   html = renderToString(<Lab.LabScope />);
-  expect(buttons(html).get("3D")).toEqual([true]);
-  expect(html).toContain('class="tower');
-  expect(html).not.toContain("stage-bench");
+  const b = buttons(html), t = text(html);
+  expect(html).toContain('class="stage-bench undrawn"');
+  const said = text(/<div class="stage-state stage-recovery" role="alert">(.*?)<\/div><\/div>/.exec(html)![1]);
+  expect(said).toContain("The 3D model could not start in this browser.");
+  expect(said).toContain("The model itself is not affected. Every part can still be selected by name, and its controls and measurements are real and work without the drawing.");
+  expect(said).toContain("There is no other drawing of the model.");
+  expect(b.get("Try again")).toEqual([false]);
+  expect(b.get("Select a part by name")).toEqual([false]);
+  expect(t).not.toContain("Opening the 3D model");
+  // Tools and the camera act on a drawing. Without one they are not offered as if they worked.
+  for (const gone of ["Explore", "Grab", "Punch", "Reset layout", "2D", "Use the 2D view"]) expect(b.has(gone)).toBe(false);
+  expect(html).not.toContain('role="toolbar" aria-label="Camera and layout"');
+  expect(html).toContain('aria-label="Parts of Qwen3-0.6B, without the 3D drawing: 28 layers, each with 16 attention heads and one MLP. Arrow keys move between parts."');
+  // Every part is still selectable by name, each with its own measured number for the selected token.
+  expect(html.match(/<option value="\d+"[^>]*>Layer \d+[^<]*<\/option>/g)).toHaveLength(28);
+  for (const named of [/<option value="out">Words out<\/option>/, /<option value="norm">Final normalization<\/option>/, /<option value="in">Words in · \+0\.00<\/option>/,
+    /<option value="20"[^>]*>Layer 21 · \+1\.50<\/option>/, /<option value="h13"[^>]*>Attention head 14 · \+1\.50<\/option>/, /<option value="mlp">MLP · \+0\.00<\/option>/, /<option value="k7">Keys and values of heads 15 to 16<\/option>/]) expect(html).toMatch(named);
+  // The selected part's real controls and readings are all here, in numbers.
+  expect(t).toContain("Attention head 14 · Layer 21");
+  expect(t).toContain("+1.50 direct push for");
+  expect(t).toContain("16 attention heads, summed +1.50 MLP +0.00 Layer total +1.50");
+  for (const control of ["Knock out", "Off", "Cut layer 1"]) expect(b.get(control)).toEqual([false]);
+  // Nothing claims to be lit or colored, and the same total is given as a number.
+  expect(readout(html)).toMatch(/^Every part has a number\. Direct pushes add up to \+1\.25 for “.+”\.$/);
+  expect(html).not.toContain('class="stage-legend"');
+  expect(t).toContain("Numbers show");
+  expect(t).not.toContain("Colors show");
+  // A replay is drawn on the model, so it waits and says why.
+  expect(b.get("Replay answer")).toEqual([true]);
+  expect(t).toContain("Replay needs the 3D drawing, which could not start here. Try again on the model.");
+  expect(t).not.toContain("—");
+
+  // The other two benches found out from the first: they say the same, and keep their own controls and numbers.
+  const reference = initialLesson({ width: 1024, units: 3072 });
+  const teach = renderToString(<Teach weights={null} reference={reference} step={0} running={false} losses={[]} run={null} active
+    controls={{ busy: false, phase: "idle", ready: true, validation: "", status: "", error: "", revision: 0, train() {}, halt() {}, dismantle() {} }} />);
+  const total = layout({ ...TINY, vocab: VOCAB }).total, params = Float32Array.from({ length: total }, (_, i) => Math.sin(i) * 0.02);
+  const grow = renderToString(<Grow params={params} reference={params} intact={params} step={1200} running={false} active
+    controls={{ disabled: false, unavailable: false, validText: true, status: "", loss: null, mutation: "", damage: null, strength: 0.25, setStrength() {}, teach() {}, stop() {},
+      mutate() {}, restore() {}, keepLabel: "Keep learning", continueNote: "", retrained: 0, intactStep: 0, adopt() {} }} />);
+  for (const bench of [teach, grow]) {
+    expect(bench).toContain('class="stage-state stage-recovery" role="alert"');
+    expect(buttons(bench).get("Try again")).toEqual([false]);
+    for (const gone of ["Explore", "Grab", "Punch", "2D"]) expect(buttons(bench).has(gone)).toBe(false);
+  }
+  expect(buttons(teach).get("Teach Qwen")).toEqual([false]);
+  expect(teach).toMatch(/<option value="27"[^>]*>Layer 28 · holds the adapter<\/option>/);
+  expect(teach).toMatch(/<option value="mlp"[^>]*>MLP · the adapter learns here<\/option>/);
+  for (const control of ["Start over from noise", "Scramble weights", "Erase weights"]) expect(buttons(grow).get(control)).toEqual([false]);
+  expect(grow).toMatch(/<option value="3">Layer 4 · 0\.00000<\/option>/);
+
+  // A stage that could not start is started again only by a newer request than the last one answered: Try
+  // again, never a render or a return to the bench. One that can start always does.
+  expect(startsStage(true, 0, 0)).toBe(true);
+  expect(startsStage(false, 0, 0)).toBe(false);
+  expect(startsStage(false, 0, 1)).toBe(true);
+  expect(startsStage(false, 1, 1)).toBe(false);
+});
+
+it("goes from the inspector back to this same model at the same part, with no second model nested in the inspector", async () => {
+  const { Inspector } = await import("../src/ui/Inspector.tsx");
+  const actions = await import("../src/state/actions.ts");
+  const crumb = (html: string) => /<nav class="stage-crumb"[^>]*>(.*?)<\/nav>/.exec(html)![1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [sample()], word: { turn: 0, side: "normal", index: 0 }, follow: false });
+  actions.setFocus({ kind: "head", floor: 20, head: 13 });
+  expect(store.get()).toMatchObject({ sheet: true, inspectView: "word", stageFocus: null });
+  let html = renderToString(<Inspector />);
+  // One panel, about the part. The model itself is not drawn a second time inside it.
+  expect(buttons(html).get("Explore the full model")).toEqual([false]);
+  expect(buttons(html).has("Hide the full model")).toBe(false);
+  expect(html).not.toMatch(/aria-label="The tower"|class="tower|inspection-grid|full-model|stage-bench/);
+  expect(html.match(/aria-label="Details"/g)).toHaveLength(1);
+  expect(html).toContain('title="Close this panel and go to Attention head 14 · Layer 21 in the 3D model"');
+  // Pressing it closes the inspector and asks the bench for that part. The selection is shared, so the bench already has it.
+  actions.exploreModel();
+  expect(store.get()).toMatchObject({ sheet: false, focus: { kind: "head", floor: 20, head: 13 }, stageFocus: { n: 1 } });
+  const bench = renderToString(<Dismantle />);
+  expect(crumb(bench)).toBe("Model › Layer 21 › Head 14");
+  expect(text(bench)).toContain("Attention head 14 · Layer 21");
+  // Each press is a new request, so asking again from the same part is answered again.
+  actions.exploreModel();
+  expect(store.get().stageFocus).toEqual({ n: 2 });
+  // From a panel about no one part, it goes to the whole model. Opening a panel never asks the stage by itself.
+  store.set({ stageFocus: null });
+  actions.setFocus({ kind: "word" });
+  expect(store.get().stageFocus).toBeNull();
+  html = renderToString(<Inspector />);
+  expect(html).toContain('title="Close this panel and go to the whole 3D model"');
+  // The token's own details are one press from the bench, and open this same inspector.
+  expect(buttons(renderToString(<Dismantle />)).has("Details and candidates for “…” →")).toBe(true);
 });
 
 it("keeps Teach's training controls in the 3D bench and never offers Punch there", () => {
   const reference = initialLesson({ width: 1024, units: 3072 });
   const controls = { busy: false, phase: "idle" as const, ready: false, validation: "", status: "", error: "", revision: 0, train() {}, halt() {}, dismantle() {} };
-  const props = { weights: null, reference, step: 0, running: false, losses: [], run: null, examples: [{ prompt: "Q", answer: "A" }], active: true };
+  const props = { weights: null, reference, step: 0, running: false, losses: [], run: null, active: true };
   let b = buttons(renderToString(<Teach {...props} controls={controls} />));
   expect(b.get("Teach Qwen")).toEqual([true]);
   expect(b.has("Punch")).toBe(false);
@@ -399,7 +496,7 @@ it("says what training a damaged copy does before it is pressed, and replaces th
   const total = layout({ ...TINY, vocab: VOCAB }).total, params = Float32Array.from({ length: total }, (_, i) => Math.sin(i) * 0.02);
   const damaged = params.map((x, i) => (i % 7 ? x : 0));
   const base = { disabled: false, unavailable: false, validText: true, status: "", loss: null, strength: 0.25, setStrength() {}, teach() {}, stop() {},
-    mutate() {}, restore() {}, adopt() {}, prompt: "red star = ", setPrompt() {}, test() {}, result: null, baseline: null, damage: { kind: "erase" as const, floor: 1 } };
+    mutate() {}, restore() {}, adopt() {}, damage: { kind: "erase" as const, floor: 1 } };
   const props = { params: damaged, reference: params, intact: params, running: false, active: true };
   // The bench is told by the lineage what to call things, so the page and the 3D bench cannot disagree.
   const erased = afterDamage({ intact: { params, step: 1200, corpus: "red star = warm\n", run: { samples: [], losses: [] } }, damage: "", retrained: 0 }, "Layer 2: weights erased");
@@ -459,7 +556,7 @@ it("states no total in the difference view while the comparison is being measure
   expect(text(html)).not.toContain("—");
 });
 
-it("enables every change control by one rule in the inspector, the 2D view and the 3D bench", async () => {
+it("enables every change control by one rule in the inspector, on the change chips and on the 3D bench", async () => {
   const { Detail } = await import("../src/ui/Detail.tsx");
   const Panels = await import("../src/ui/Panels.tsx");
   const chips = { heads: [{ floor: 20, head: 13, mult: 0 }] };
@@ -625,19 +722,20 @@ it("gives no total and does not say every part is lit when some of a token's pus
 
 it("offers full screen on every bench, on a desktop and on a phone, and starts docked with one set of training controls", () => {
   const reference = initialLesson({ width: 1024, units: 3072 });
-  const teach = { weights: null, reference, step: 0, running: false, losses: [], run: null, examples: [{ prompt: "Q", answer: "A" }], active: true,
+  const teach = { weights: null, reference, step: 0, running: false, losses: [], run: null, active: true,
     controls: { busy: false, phase: "idle" as const, ready: true, validation: "", status: "", error: "", revision: 0, train() {}, halt() {}, dismantle() {} } };
   const grow = { params: null, reference: null, intact: null, step: 0, running: false, active: true,
     controls: { disabled: false, unavailable: false, validText: true, status: "", loss: null, mutation: "", damage: null, strength: 0.25, setStrength() {}, teach() {}, stop() {},
-      mutate() {}, restore() {}, keepLabel: "Keep learning", continueNote: "", retrained: 0, intactStep: 0, adopt() {}, prompt: "red star = ", setPrompt() {}, test() {}, result: null, baseline: null } };
+      mutate() {}, restore() {}, keepLabel: "Keep learning", continueNote: "", retrained: 0, intactStep: 0, adopt() {} } };
   for (const phone of [false, true]) {
     vi.stubGlobal("matchMedia", () => ({ matches: phone, addEventListener() {}, removeEventListener() {} }));
     const benches = [renderToString(<Dismantle />), renderToString(<Teach {...teach} />), renderToString(<Grow {...grow} />)];
     for (const html of benches) {
       expect(buttons(html).get("Full screen")).toEqual([false]);
-      // Docked until asked: no dialog, no panels over the stage, and the 2D switch still in reach.
+      // Docked until asked: no dialog and no panels over the stage. There is no other view to switch to.
       expect(html).not.toMatch(/role="dialog"|stage-panel-head|immersive|training-bar/);
-      expect(buttons(html).get("2D")).toEqual([false]);
+      for (const other of ["2D", "3D"]) expect(buttons(html).has(other)).toBe(false);
+      expect(html).not.toContain('aria-label="Model view"');
     }
     // The bar along the bottom of full screen is a second home for the training controls, never a second copy.
     if (!phone) {

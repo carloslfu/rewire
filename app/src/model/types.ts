@@ -7,7 +7,7 @@ export interface Cand {
   id: number;
   /**
    * The draw's odds: a softmax at the sampling temperature over the listed top 20 only, before the
-   * top-p cut (`Tok.cut` says how many the draw kept). The 2D candidate table shows these.
+   * top-p cut (`Tok.cut` says how many the draw kept). The inspector's candidate table shows these.
    */
   p: number;
   /**
@@ -90,7 +90,7 @@ export interface Turn {
 
 export type Side = "normal" | "changed";
 
-/** The word whose numbers the tower and panels show. */
+/** The word whose numbers the model and the panels show. */
 export interface WordRef {
   turn: number;
   side: Side;

@@ -55,7 +55,7 @@ export default defineConfig(({ command }) => ({
   base: command === "build" ? "/rewire/" : "/",
   plugins: [react(), localWeights()],
   worker: { format: "es" },
-  // Three.js arrives in its own chunk, fetched only when a visitor opens the 3D view.
+  // Three.js and the scene arrive in their own chunk. The bench around them is part of the page, so it works when that chunk cannot load.
   build: { target: "es2022", sourcemap: true, chunkSizeWarningLimit: 700 },
   server: { port: 5178 },
 }));

@@ -49,7 +49,7 @@ afterEach(() => vi.unstubAllGlobals());
 const head = { kind: "head", floor: 20, head: 13 } as const, mlp = { kind: "mlp", floor: 9 } as const, layer = { kind: "layer", floor: 2 } as const;
 const changedJobs = () => mock.write.mock.calls.map((c) => c[0] as { conv: number; changes: ChangeSpec }).filter((j) => j.conv === 1);
 
-it("writes the same change spec as the 2D strength control for every kind of part", () => {
+it("writes the same change spec as the strength control for every kind of part", () => {
   const before: ChangeSpec = { bits: 2, heads: [{ floor: 1, head: 1, mult: 5 }] };
   expect(canonical(I.punched(before, head))).toBe(canonical(D.withMult(before, "head", 20, 13, 0)));
   expect(canonical(I.punched(before, mlp))).toBe(canonical(D.withMult(before, "memory", 9, 0, 0)));
@@ -156,6 +156,30 @@ it("maps 3D parts to the inspector's panels and back", () => {
   expect(I.partOf({ kind: "bits" })).toBeNull();
 });
 
+it("keeps one selection between the stage and the inspector for every kind of part", () => {
+  const norm = { kind: "norm" } as const, kv = { kind: "kv", floor: 4, group: 1 } as const, embed = { kind: "embed" } as const, out = { kind: "unembed" } as const;
+  // Every part has a panel, and stays selected while that panel is the one on show. Parts that share a panel
+  // (the final normalization with Words out, shared keys and values with their layer) are not swapped for each other.
+  for (const p of [head, mlp, layer, embed, out, norm, kv]) expect(I.sameFocus(p, I.focusOf(p)!)).toBe(true);
+  expect(I.focusOf(norm)).toEqual({ kind: "words-out" });
+  expect(I.sameFocus(out, I.focusOf(norm)!)).toBe(true);
+  // The inspector moves to another part: the stage's part no longer matches, and the panel names the new one.
+  expect(I.sameFocus(head, { kind: "head", floor: 20, head: 12 })).toBe(false);
+  expect(I.sameFocus(kv, { kind: "floor", floor: 5 })).toBe(false);
+  expect(I.partOf({ kind: "floor", floor: 5 })).toEqual({ kind: "layer", floor: 5 });
+  // A prompt word opened from a reply is the dictionary's panel at one position: Words in, at any position and side.
+  expect(I.partOf({ kind: "words-in", position: 3, side: "changed" })).toEqual(embed);
+  expect(I.sameFocus(embed, { kind: "words-in", position: 3 })).toBe(true);
+  expect(I.sameFocus(embed, { kind: "dictionary" })).toBe(true);
+  // Panels about no one part (a word, the weights' precision, what the model reads) select nothing, and nothing stays nothing.
+  for (const focus of [{ kind: "word" }, { kind: "bits" }, { kind: "reads" }] as const) {
+    expect(I.sameFocus(null, focus)).toBe(true);
+    expect(I.sameFocus(head, focus)).toBe(false);
+    expect(I.partOf(focus)).toBeNull();
+  }
+  expect(I.sameFocus(null, { kind: "memory", floor: 9 })).toBe(false);
+});
+
 it("a punch runs one real changed generation, and a second punch restores the original answers", async () => {
   await actions.send("Capital of France?");
   expect(store.get().turns).toHaveLength(1);
@@ -210,6 +234,6 @@ it("refuses to edit while a reply is being written, while teaching, or before th
   expect(I.blocked(store.get())).toMatch(/ready/);
   await actions.chipsWith((spec) => I.punched(spec, head));
   expect(store.get().chips).toEqual({});
-  // An update that is replaying samples can be redirected by a newer edit, as in the 2D lab.
+  // An update that is replaying samples can be redirected by a newer edit, as from the inspector.
   expect(I.blocked({ mode: "live", busy: true, replay: { turn: 0, status: "running" }, teachingBusy: false })).toBeNull();
 });

@@ -322,10 +322,10 @@ function harness(arch: Arch, options: { hidden?: boolean; width?: number; height
   const controls = { enabled: true, enableRotate: true, mouseButtons: { LEFT: THREE.MOUSE.ROTATE as number }, touches: { ONE: THREE.TOUCH.ROTATE as number }, target: new THREE.Vector3(), update: vi.fn(() => false), dispose: vi.fn(),
     addEventListener: vi.fn<(type: string, f: () => void) => void>() };
   const environment = { texture: new THREE.Texture(), dispose: vi.fn() };
-  const events = { select: vi.fn(), punch: vi.fn(() => true), lost: vi.fn(), hidden: vi.fn(), arranged: vi.fn() };
+  const events = { select: vi.fn(), punch: vi.fn(() => true), lost: vi.fn(), hidden: vi.fn(), arranged: vi.fn(), tile: vi.fn() };
   const stage = new Stage({
     host: host as unknown as HTMLElement, labels: labels as unknown as HTMLElement, tip: tip as unknown as HTMLElement, arch, theme: LIGHT, reducedMotion: options.reduced ?? false, coarse: options.coarse ?? false, reserved: () => options.reserved ?? [],
-    onSelect: events.select, onPunch: events.punch, describe: options.describe ?? (() => "part"), onLost: events.lost, onHidden: events.hidden, onArranged: events.arranged,
+    onSelect: events.select, onPunch: events.punch, describe: options.describe ?? (() => "part"), onLost: events.lost, onHidden: events.hidden, onArranged: events.arranged, onTile: events.tile,
     deps: { renderer: () => renderer as unknown as THREE.WebGLRenderer, controls: () => controls, environment: () => environment },
   });
   let now = 0;
@@ -1440,6 +1440,92 @@ it("reads the tip again when what it describes changes under a pointer that has 
   expect(h.tip.textContent).toContain("0.250");
   h.stage.setBay({ key: "tiny.layer.1", floor: 1, plates: tiles(0.75) });
   expect(h.tip.hidden).toBe(true);
+  h.stage.dispose();
+});
+
+it("outlines the tile of the number being read on its plate, and reports a tapped tile by its plate and source cell", () => {
+  const arch = buildArch(TINY_INFO), h = harness(arch);
+  h.run(400);
+  // One plate cell for cell, and one pooled two to a tile whose largest value is the second cell of its block.
+  const pooledData = new Float32Array(16); pooledData[12] = 1; pooledData[13] = 9;
+  const exactPlate = plate({ id: "f1.q", title: "Queries", band: 0, rows: 2, cols: 2, data: Float32Array.from([1, 2, 3, 4]) });
+  const pooledPlate = plate({ id: "f1.down", title: "MLP down", band: 0, rows: 2, cols: 8, maxCols: 4, data: pooledData });
+  expect([pooledPlate.rows, pooledPlate.cols, pooledPlate.pool]).toEqual([2, 4, [1, 2]]);
+  const both = [exactPlate, pooledPlate];
+  h.stage.setBay({ key: "tiny.layer.1", floor: 1, plates: both });
+  h.run(400);
+  const parts = () => {
+    const bay = (h.stage as unknown as { bay: Bay }).bay;
+    const meshes = bay.group.children.filter((o) => ((o as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined)?.map) as THREE.Mesh[];
+    return { bay, meshes, marker: bay.group.children.filter((o) => (o as THREE.LineSegments).isLineSegments).at(-1) as THREE.LineSegments };
+  };
+  /** Where a tile of a plate is, in the bay's own coordinates. */
+  const tileAt = (mesh: THREE.Mesh, rows: number, cols: number, r: number, c: number) => {
+    const { width, height } = (mesh.geometry as THREE.PlaneGeometry).parameters;
+    return new THREE.Vector3(mesh.position.x - width / 2 + ((c + 0.5) / cols) * width, mesh.position.y + height / 2 - ((r + 0.5) / rows) * height, mesh.position.z);
+  };
+  /** The middle of the outline's square: its first four segments. */
+  const outlined = (marker: THREE.LineSegments) => {
+    const p = marker.geometry.getAttribute("position"), box = new THREE.Box3();
+    for (let i = 0; i < 8; i++) box.expandByPoint(new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i)));
+    return box.getCenter(new THREE.Vector3());
+  };
+  const titles = () => h.spans.filter((x) => !x.removed && x.className.startsWith("stage-label plate")).map((x) => [x.textContent, x.className.includes("current")]);
+  // Nothing is outlined until a number is being read.
+  expect(h.stage.markedTile).toBeNull();
+  expect(parts().marker.visible).toBe(false);
+  expect(titles()).toEqual([["Queries", false], ["MLP down", false]]);
+
+  // The number's place in the plate's own tensor finds its tile: cell [2, 6] of 2 by 8 is in the third tile of the second row.
+  h.stage.markTile({ plate: "f1.down", index: 13 });
+  let now = parts();
+  expect(h.stage.markedTile).toEqual({ plate: "f1.down", index: 13 });
+  expect(now.marker.visible).toBe(true);
+  const want = tileAt(now.meshes[1], 2, 4, 1, 2), got = outlined(now.marker);
+  expect([got.x, got.y]).toEqual([expect.closeTo(want.x, 5), expect.closeTo(want.y, 5)]);
+  // Its plate is named in full view, so the matrix chosen in the inspector can be found on the stage.
+  expect(titles()).toEqual([["Queries", false], ["MLP down", true]]);
+  // New numbers of the same shape keep the outline. A bay rebuilt for another layer gets it again.
+  h.stage.setBay({ key: "tiny.layer.1", floor: 1, plates: both });
+  expect(h.stage.markedTile).toEqual({ plate: "f1.down", index: 13 });
+  h.stage.setBay({ key: "tiny.layer.2", floor: 2, plates: both }); h.run(400);
+  now = parts();
+  expect(h.stage.markedTile).toEqual({ plate: "f1.down", index: 13 });
+  expect(outlined(now.marker).x).toBeCloseTo(tileAt(now.meshes[1], 2, 4, 1, 2).x, 5);
+  // A bay without that plate outlines nothing, and does not forget: the plate's return brings the outline back.
+  h.stage.setBay({ key: "tiny.layer.3", floor: 3, plates: [exactPlate] }); h.run(400);
+  expect(h.stage.markedTile).toBeNull();
+  expect(titles()).toEqual([["Queries", false]]);
+  h.stage.setBay({ key: "tiny.layer.2", floor: 2, plates: both }); h.run(400);
+  expect(h.stage.markedTile).toEqual({ plate: "f1.down", index: 13 });
+  // A cell the plate does not have is not drawn somewhere else, and null clears the outline.
+  h.stage.markTile({ plate: "f1.q", index: 99 });
+  expect(h.stage.markedTile).toBeNull();
+  h.stage.markTile({ plate: "f1.q", index: 2 });
+  now = parts();
+  expect(outlined(now.marker).y).toBeCloseTo(tileAt(now.meshes[0], 2, 2, 1, 0).y, 5);
+  expect(titles()).toEqual([["Queries", true], ["MLP down", false]]);
+  h.stage.markTile(null);
+  expect(h.stage.markedTile).toBeNull();
+  expect(parts().marker.visible).toBe(false);
+  expect(titles()).toEqual([["Queries", false], ["MLP down", false]]);
+
+  // A tap on a tile reports its plate and the source cell the tile shows. A finger gets the same as a pointer.
+  h.scene.updateMatrixWorld(true);
+  now = parts();
+  const world = (v: THREE.Vector3) => now.bay.group.localToWorld(v.clone());
+  h.click(h.screen(world(tileAt(now.meshes[0], 2, 2, 1, 0))), { pointerType: "touch" });
+  expect(h.events.tile).toHaveBeenLastCalledWith("f1.q", 2);
+  expect(h.tip.textContent).toContain("Queries");
+  // A pooled tile stands for two cells and reports the one its value was read from: the larger, not the first.
+  let t = 1000;
+  vi.spyOn(performance, "now").mockImplementation(() => (t += 900));
+  h.click(h.screen(world(tileAt(now.meshes[1], 2, 4, 1, 2))));
+  expect(h.events.tile).toHaveBeenLastCalledWith("f1.down", 13);
+  expect(h.events.tile).toHaveBeenCalledTimes(2);
+  // A tile is not a part: selecting nothing is not reported for it, and the model is not changed.
+  expect(h.events.select).not.toHaveBeenCalled();
+  expect(h.events.punch).not.toHaveBeenCalled();
   h.stage.dispose();
 });
 

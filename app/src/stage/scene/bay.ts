@@ -1,7 +1,7 @@
 // The detail bay: a selected layer's real tensors or weight matrices as upright plates, in the order
 // the computation uses them. Every tile is a number from the model; hovering reads it back.
 import * as THREE from "three";
-import { paint, type Plate } from "../adapters.ts";
+import { paint, type Plate, tileOf } from "../adapters.ts";
 import { plateLit } from "../playback.ts";
 import { mix, ramp, type Theme } from "../theme.ts";
 
@@ -64,6 +64,9 @@ export class Bay {
   private plates: { plate: Plate; mesh: THREE.Mesh; texture: THREE.DataTexture; rows: number; cols: number }[] = [];
   private readonly frame: THREE.MeshStandardMaterial;
   private readonly lines: THREE.LineSegments;
+  /** A square around the tile being read, with a line across its plate each way so a sliver of a tile can still be found. */
+  private readonly marker = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffc65c, toneMapped: false, depthTest: false }));
+  private markedAt: { plate: string; index: number } | null = null;
 
   constructor(readonly spec: BaySpec, private theme: Theme, maxWidth: number) {
     this.frame = new THREE.MeshStandardMaterial({ metalness: 0.9, roughness: 0.5 });
@@ -87,7 +90,9 @@ export class Bay {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(links), 3));
     this.lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ toneMapped: false }));
-    this.group.add(this.lines);
+    this.marker.visible = false;
+    this.marker.renderOrder = 2;
+    this.group.add(this.lines, this.marker);
     this.setTheme(theme);
   }
 
@@ -144,6 +149,33 @@ export class Bay {
     if (!hit?.uv) return null;
     const p = this.plates.find((x) => x.mesh === hit.object)!;
     return { plate: p.plate, row: Math.min(p.rows - 1, Math.max(0, Math.floor((1 - hit.uv.y) * p.rows))), col: Math.min(p.cols - 1, Math.max(0, Math.floor(hit.uv.x * p.cols))) };
+  }
+
+  /**
+   * Outline the tile that draws one number of a plate: the number the inspector is reading, by its
+   * place in the plate's source tensor. Null, or a plate that is not in this bay, shows no outline.
+   */
+  mark(at: { plate: string; index: number } | null) {
+    this.markedAt = at;
+    const p = at ? this.plates.find((x) => x.plate.id === at.plate) : undefined, tile = p && at ? tileOf(p.plate, at.index) : null;
+    this.marker.visible = !!p && !!tile;
+    if (!p || !tile) return;
+    const { width, height } = (p.mesh.geometry as THREE.PlaneGeometry).parameters, w = width / p.cols, h = height / p.rows;
+    const left = p.mesh.position.x - width / 2, top = p.mesh.position.y + height / 2, z = p.mesh.position.z + 0.012;
+    const cx = left + (tile.col + 0.5) * w, cy = top - (tile.row + 0.5) * h, hw = Math.max(w, 0.05) / 2, hh = Math.max(h, 0.05) / 2;
+    const segments = [
+      cx - hw, cy - hh, z, cx + hw, cy - hh, z, cx + hw, cy - hh, z, cx + hw, cy + hh, z,
+      cx + hw, cy + hh, z, cx - hw, cy + hh, z, cx - hw, cy + hh, z, cx - hw, cy - hh, z,
+      left - 0.04, cy, z, cx - hw, cy, z, cx + hw, cy, z, left + width + 0.04, cy, z,
+      cx, top + 0.04, z, cx, cy + hh, z, cx, cy - hh, z, cx, top - height - 0.04, z,
+    ];
+    this.marker.geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(segments), 3));
+    this.marker.geometry.computeBoundingSphere();
+  }
+
+  /** The plate and source cell outlined now. Null when nothing is marked or its plate is not in this bay. */
+  get marked(): { plate: string; index: number } | null {
+    return this.marker.visible ? this.markedAt : null;
   }
 
   /** Title anchors, just above each plate, relative to the bay's own position (the bay moves with the tower). */

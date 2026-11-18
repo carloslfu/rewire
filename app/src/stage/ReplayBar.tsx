@@ -38,7 +38,8 @@ export function ReplayBar() {
   const mode = useStore((s) => s.mode);
   const id = useId();
   const narrow = useNarrow();
-  const compact = useContext(Immersive) && narrow;
+  const immersive = useContext(Immersive);
+  const compact = narrow;
   const main = useRef<HTMLButtonElement>(null);
   /** Set when a button here changes the mode, so the focus goes to the button that took its place. */
   const moved = useRef(false);
@@ -65,23 +66,31 @@ export function ReplayBar() {
     if (c && index !== undefined) chooseWord({ ...c.ref, index });
   };
 
+  const waitingForOutput = replaying && rp.step < rp.beats;
   const token = c ? <div className="token-navigation" role="group" aria-label={replaying ? "Token in the replay" : "Selected token"}>
     <button type="button" className="btn quiet" aria-label="Previous token" title={replaying ? "Previous token. Pauses the replay." : "Previous token"} disabled={at <= 0} onClick={() => move(-1)}>‹</button>
-    <strong title={wq}>“{wq}”</strong>
+    <strong title={waitingForOutput ? "Awaiting output" : wq}>{waitingForOutput ? "…" : `“${wq}”`}</strong>
     <button type="button" className="btn quiet" aria-label="Next token" title={replaying ? "Next token. Pauses the replay." : "Next token"} disabled={at < 0 || at >= visible.length - 1} onClick={() => move(1)}>›</button>
     <span className="note">Token {at + 1} of {visible.length} · {c.ref.side === "normal" ? (model.id === "tiny" ? "Reply" : "Original reply") : "Changed reply"}</span>
   </div> : <p className="note replay-empty">{update ? "Updating samples…" : busy ? "Writing the reply…" : mode === "live" ? "Ask a question to light up the model." : "The model lights up once it is ready and you ask a question."}</p>;
 
-  if (!replaying) return <section className="replay-bar" aria-label="Live output and replay">
-    <div className="replay-head">
-      <span className="replay-mode live">Live output</span>
-      {token}
-      <button ref={main} type="button" className="btn primary replay-enter" disabled={!!wait} aria-describedby={`${id}-how`}
-        title={wait ? undefined : "Play this reply back through the model from its first token. Nothing is generated again."} onClick={() => enter("answer")}><Icon name="play" />Replay answer</button>
-    </div>
+  const playAnswer = <button ref={main} type="button" className="btn primary replay-enter" disabled={!!wait} aria-describedby={`${id}-how`}
+    title={wait || "Play this reply from its first token"} onClick={() => enter("answer")}><Icon name="play" />Replay answer</button>;
+  const liveControls = <>
     <div className="replay-follow"><FollowControl /></div>
     <p className="note replay-how" id={`${id}-how`}>{wait || <><span className="replay-what">Walks this reply through the whole model, token by token.</span> <button type="button" className="linkish" onClick={() => enter("token")}>Replay only this token</button></>}</p>
-  </section>;
+  </>;
+  if (!replaying) {
+    if (narrow && !immersive) return <section className="live-mobile" aria-label="Live output and replay">
+      <details><summary>Live output{c && <small>Token {at + 1} of {visible.length}</small>}</summary>
+        <div className="mobile-live-options">{token}{liveControls}</div>
+      </details>{playAnswer}
+    </section>;
+    return <section className="replay-bar" aria-label="Live output and replay">
+      <div className="replay-head"><span className="replay-mode live">Live output</span>{token}{playAnswer}</div>
+      {liveControls}
+    </section>;
+  }
 
   const whole = rp.step >= rp.beats, beat = beatAt(model, rp.step - 1);
   // A total is given only when every push is a number. Otherwise the readout says the measurement is incomplete.

@@ -58,7 +58,7 @@ export const S = {
   sameNumbers: "Same words and nearly the same probabilities: this change barely matters for this reply.",
   underlineNote: "Underlined: words the changed model finds unlikely.",
   reply: "Reply",
-  replyWords: "Arrow keys move between word pieces; Enter shows what went into one.",
+  replyWords: "Use the arrow keys to move between pieces. Enter selects one in the model. Choose Inspect selected token for details.",
   contextFull: "This sample has reached the model's context limit here.",
   contextLimit: (n: number, piece: string) => `Reached the model's context limit at ${n} ${piece}s. There is no room to continue it.`,
   pickStopped: "The pick was stopped before it was written.",
@@ -89,20 +89,18 @@ export const S = {
     { v: 5, label: "×5" },
   ],
 
-  // tower
-  tower: "Model layers",
-  towerFor: (w: string) => `Selected token: "${w}"`,
+  // what the model's lit windows show for the selected token
   towerNone: "Select a word or word piece in a reply to see which parts contribute toward or against it.",
   viewPush: "Push",
   viewDiff: "Change from original",
-  diffNote: "Each cell shows how its contribution changed for this original token: changed model minus original, on this sample's own prompt and original preceding tokens.",
+  diffNote: "Each lit window shows how its part's contribution changed for this original token: changed model minus original, on this sample's own prompt and original preceding tokens.",
   diffNone: "Change a layer, attention head or MLP to compare with the original.",
 
-  // the visual replay of a finished reply, in the 3D view
-  replayIn3d: "Replay in 3D",
-  replayIn3dTitle: "Open the 3D model and walk this reply through it, token by token. Nothing is generated again.",
+  // the visual replay of a finished reply, on the 3D model
+  replayIn3d: "Replay this answer",
+  replayIn3dTitle: "Follow this recorded answer through every layer, one token at a time.",
 
-  // follow output (the same control and words in the 2D and 3D views)
+  // follow output
   follow: "Follow output",
   followTitle: (on: boolean) => on ? "Following generated tokens. Choose a token yourself to pause."
     : "Return to the newest generated token and keep following as more are written.",
@@ -116,7 +114,6 @@ export const S = {
   headN: (n: number) => `Attention head ${n}`,
   memoryBlock: "MLP",
   attentionHeads: "Attention heads",
-  towerAnatomy: (m: ModelInfo) => `${m.heads} attention heads and one MLP (feed-forward network) per layer. Select a cell to inspect or change it.`,
   bitsLabel: (b: number) => `${b} bits`,
   summary: (a: number, b: number, w: string) => `Layers ${a} to ${b} push hardest toward "${w}".`,
   pushTo: (v: number, w: string) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)} toward "${w}"`,

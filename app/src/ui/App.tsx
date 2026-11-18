@@ -1,5 +1,5 @@
 // The lab: freeform inference beside an always-on instrument, plus real training from noise.
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { applyChips, backToQwen, clearSamples, freshStart, onPieces, stepData, stopReply } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
@@ -8,13 +8,23 @@ import { Chips, Composer, PathList, StepCard, WhatsReal } from "./Panels.tsx";
 import { Inspector } from "./Inspector.tsx";
 import { Modal } from "./Modal.tsx";
 import { LabScope } from "./Lab.tsx";
-import { useNarrow } from "./useNarrow.ts";
+import { ModelWorkspace } from "./ModelWorkspace.tsx";
 import { ExampleSelector } from "./Examples.tsx";
 
 const Tiny = lazy(() => import("../tiny/TinyView.tsx"));
 const Teach = lazy(() => import("../teach/TeachView.tsx"));
 
 export function App() {
+  const header = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (!header.current) return;
+    const element = header.current;
+    const resize = () => document.documentElement.style.setProperty("--app-header-height", `${element.offsetHeight}px`);
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(element);
+    return () => { observer.disconnect(); document.documentElement.style.removeProperty("--app-header-height"); };
+  }, []);
   const tiny = useStore((s) => s.tiny);
   const teach = useStore((s) => s.teach);
   const teachingBusy = useStore((s) => s.teachingBusy);
@@ -29,28 +39,36 @@ export function App() {
   const [about, setAbout] = useState(false);
   const [trainingVisited, setTrainingVisited] = useState(false);
   const [teachVisited, setTeachVisited] = useState(false);
-  const [scope, setScope] = useState(false);
-  const narrow = useNarrow();
   useEffect(() => onPieces(() => setTick((t) => t + 1)), []);
-  // "Replay in 3D" on a reply: on a phone the model is a sheet, so open it.
-  useEffect(() => { if (replayRequest) setScope(true); }, [replayRequest]);
+  useEffect(() => {
+    if (!replayRequest) return;
+    const scene = document.getElementById("chat-scope");
+    if (scene && scene.getBoundingClientRect().bottom < 150) scene.scrollIntoView({ block: "start" });
+  }, [replayRequest]);
   useEffect(() => { if (tiny) setTrainingVisited(true); }, [tiny]);
   useEffect(() => { if (teach) setTeachVisited(true); }, [teach]);
   useEffect(() => {
     if (teach || tiny) history.replaceState(null, "", teach ? "#teach" : "#grow");
     else if (["#teach", "#grow"].includes(location.hash)) history.replaceState(null, "", location.pathname + location.search);
   }, [teach, tiny]);
-  const train = () => { if(store.get().busy) stopReply(); setScope(false); store.set({ tiny: true, teach: false, sheet: false, pathOpen: false }); };
+  const train = () => { if(store.get().busy) stopReply(); store.set({ tiny: true, teach: false, sheet: false, pathOpen: false }); };
   const teaching = async () => {
-    if(store.get().busy) stopReply(); setScope(false);
+    if(store.get().busy) stopReply();
     if (store.get().model.id === "tiny") await backToQwen();
     store.set({ teach: true, tiny: false, sheet: false, pathOpen: false });
   };
 
+  const skipId = teach ? "teaching" : tiny ? "training" : "composer";
   return (
     <>
-      <a className="skip" href={teach ? "#teaching" : tiny ? "#training" : "#composer"}>{teach || tiny ? "Skip to training" : "Skip to questions"}</a>
-      <header className="top">
+      <a className="skip" href={`#${skipId}`} onClick={event => {
+        const field = document.getElementById(skipId);
+        if (!field) return;
+        event.preventDefault();
+        field.closest(".model-workspace")?.querySelector<HTMLButtonElement>(".work-tab-work")?.click();
+        requestAnimationFrame(() => field.focus());
+      }}>{teach || tiny ? "Skip to training" : "Skip to questions"}</a>
+      <header className="top" ref={header}>
         <span className="name">{S.title}</span>
         <span className="orient">A language model laboratory</span>
         <nav className="top-actions" aria-label="Main">
@@ -70,35 +88,37 @@ export function App() {
       </header>
       <div className="sr-only" aria-live="polite">{busy ? "" : announce}</div>
       {!tiny && !teach && <FinishedReplies />}
-      <div hidden={tiny || teach} className={`lab-layout${scope ? " mobile-scope-open" : ""}`}>
-        <main className="workspace" id="conversation" aria-label="Independent samples">
-          <div className="conversation-tools">
-            <span>{model.id === "tiny" ? "Your tiny model · text completion" : "Qwen3-0.6B · 28 layers"}</span>
-            {turns.length > 0 && <button type="button" className="btn quiet" onClick={() => {
-              if (model.id === "tiny") freshStart(); else clearSamples();
-            }}>{model.id === "tiny" ? "New text" : "Clear samples"}</button>}
-          </div>
-          <button className="btn mobile-scope-toggle" aria-expanded={scope} aria-controls="chat-scope" onClick={() => setScope(!scope)}>{scope ? "Hide model" : "Show model"}</button>
-          <ExampleSelector />
-          {stepData(step)?.guide && <StepCard />}
-          {!turns.length && !busy && !stepData(step)?.guide && <div className="empty-chat lab-heading">
-            <p className="eyebrow">Dismantle a model</p>
-            <h1>{model.id === "tiny" ? "Meet the brain you grew." : "Pull it apart.\nSee what survives."}</h1>
-            <p>{model.id === "tiny" ? "Give it a few letters. Inspect what it learned, cut a connection, and try again." : "Ask anything. Cut a layer. Zero real weights. Follow every word through the machinery."}</p>
-          </div>}
-          {!turns.length && busy && <p className="opening" role="status">Reading your question…</p>}
-          <Conversation />
-          {error && <div className="error-message" role="alert"><p>{error}</p><button type="button" className="btn quiet" onClick={() => store.set({ error: null })}>Dismiss</button></div>}
-          {step !== null && !stepData(step)?.guide && <StepCard />}
-          <section className="chat-entry" aria-label={model.id === "tiny" ? "Continue your text" : "Test a question"}>
-            <Chips />
-            <Composer />
-          </section>
-          <div className="lab-onramp"><button className="linkish" onClick={() => store.set({ pathOpen: true })}>Explore experiments</button><button className="linkish" onClick={() => void teaching()}>Teach this model something new</button><button className="linkish" onClick={train}>Grow your own model</button></div>
-        </main>
-        {!narrow && <aside id="chat-scope" className="lab-scope" aria-label="Live model visualizer"><LabScope /></aside>}
+      <div hidden={tiny || teach}>
+        <ModelWorkspace id="chat-scope" label="Live model visualizer" workLabel="Questions" stage={<LabScope />}>
+          <main className="workspace" id="conversation" aria-label="Independent samples">
+            {stepData(step)?.guide && <StepCard />}
+            {!turns.length && !busy && !stepData(step)?.guide && <div className="lab-heading">
+              <h1>{model.id === "tiny" ? "Try the model you grew" : "Ask the model"}</h1>
+              <p>{model.id === "tiny" ? "Enter a few letters to see what it learned." : "Compare questions here. Select a word to follow it through the model."}</p>
+            </div>}
+            {!turns.length && busy && <p className="opening" role="status">Reading your question…</p>}
+            <section className="chat-entry" aria-label={model.id === "tiny" ? "Continue your text" : "Test a question"}>
+              <Chips />
+              <Composer />
+            </section>
+            {model.id === "qwen" && <details className="work-examples">
+              <summary>Guided experiments</summary>
+              <ExampleSelector />
+              <button type="button" className="linkish" onClick={() => store.set({ pathOpen: true })}>Explore all experiments</button>
+            </details>}
+            {turns.length > 0 && <div className="conversation-tools">
+              <strong>{model.id === "tiny" ? "Generated text" : `${turns.length} ${turns.length === 1 ? "sample" : "samples"}`}</strong>
+              <button type="button" className="btn quiet" onClick={() => {
+                if (model.id === "tiny") freshStart(); else clearSamples();
+              }}>{model.id === "tiny" ? "New text" : "Clear samples"}</button>
+            </div>}
+            <Conversation />
+            {error && <div className="error-message" role="alert"><p>{error}</p><button type="button" className="btn quiet" onClick={() => store.set({ error: null })}>Dismiss</button></div>}
+            {step !== null && !stepData(step)?.guide && <StepCard />}
+            <div className="lab-onramp">{model.id === "tiny" && <button className="linkish" onClick={() => store.set({ pathOpen: true })}>Explore experiments</button>}<button className="linkish" onClick={() => void teaching()}>Teach this model something new</button><button className="linkish" onClick={train}>Grow your own model</button></div>
+          </main>
+        </ModelWorkspace>
       </div>
-      {narrow && <Modal open={scope && !tiny && !teach} onClose={() => setScope(false)} title="Live model" className="mobile-model"><div id="chat-scope"><LabScope /></div></Modal>}
       {(teach || teachVisited) && <div hidden={!teach}><Suspense fallback={<p className="workspace opening" role="status">Opening Teach…</p>}><Teach /></Suspense></div>}
       {(tiny || trainingVisited) && <div hidden={!tiny}>
         <Suspense fallback={<p className="workspace opening" role="status">Opening training…</p>}><Tiny /></Suspense>

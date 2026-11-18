@@ -159,7 +159,7 @@ export function layerChildren(arch: Arch, floor: number): number[] {
   return Array.from({ length: per - 1 }, (_, i) => base + 1 + i);
 }
 
-/** Keyboard movement across the same grid as the 2D tower: rows are layers, columns are heads and then the MLP. */
+/** Keyboard movement across the model as a grid: rows are layers, columns are heads and then the MLP. */
 export function movePart(model: Pick<ModelInfo, "floors" | "heads" | "kvHeads">, from: Part | null, key: string): Part | null {
   const col = (p: Part) => p.kind === "head" ? p.head : p.kind === "mlp" ? model.heads : -1;
   const at = (floor: number, c: number): Part => c < 0 ? { kind: "layer", floor } : c >= model.heads ? { kind: "mlp", floor } : { kind: "head", floor, head: c };

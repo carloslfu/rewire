@@ -47,6 +47,8 @@ export interface StageOptions {
   onHidden?: () => void;
   /** Number of parts dragged away from their sockets. */
   onArranged: (count: number) => void;
+  /** A tile of the detail bay was clicked or tapped: its plate, and the place in that plate's source tensor of the number the tile shows. */
+  onTile?: (plate: string, index: number) => void;
   /** Areas of the view taken by the toolbar, the help text and the camera dock, in view pixels. Labels and the framing keep clear of them. */
   reserved?: () => Box[];
   deps?: Partial<StageDeps>;
@@ -112,6 +114,7 @@ export class Stage {
   private readonly unlisten: (() => void)[] = [];
   private bay: Bay | null = null;
   private bayMessage = "";
+  private tile: { plate: string; index: number } | null = null;
   private labels: Label[] = [];
   private tool: Tool = "explore";
   private dragMode: DragMode = "turn";
@@ -612,14 +615,38 @@ export class Stage {
       this.scene.add(bay.group);
       this.specimen.setGap(this.bayFloor, bay.size.y + 0.75);
     } else this.specimen.setGap(null);
-    const bay = this.bay, plates = bay?.labels() ?? [];
+    this.bay?.mark(this.tile);
+    this.labelPlates();
+    this.opened();
+  }
+
+  /** Plate titles, with the plate whose number is being read named in full view, and the bay's message when it has no plates. */
+  private labelPlates() {
+    const bay = this.bay, plates = bay?.labels() ?? [], message = this.bayMessage, read = bay?.marked?.plate;
     this.replaceLabels("plate", [
-      ...plates.map((l): LabelSpec => ({ text: l.text, className: "stage-label plate", at: (out) => { out.copy(l.at).add(bay!.group.position); }, anchor: [0.5, 1], nudge: [0, -2], priority: 50,
-        show: () => this.pixels(l.at.clone().add(bay!.group.position), l.width) >= 72 })),
+      ...plates.map((l): LabelSpec => ({ text: l.text, className: `stage-label plate${l.id === read ? " current" : ""}`, at: (out) => { out.copy(l.at).add(bay!.group.position); }, anchor: [0.5, 1], nudge: [0, -2],
+        priority: l.id === read ? 85 : 50, show: () => l.id === read || this.pixels(l.at.clone().add(bay!.group.position), l.width) >= 72 })),
       ...(bay && message ? [{ text: message, className: "stage-label message", anchor: [0.5, 0.5], priority: 100,
         at: (out) => { const g = bay.group.position, s = bay.size; out.set(g.x + s.x / 2, g.y - s.y / 2, g.z); } } satisfies LabelSpec] : []),
     ]);
-    this.opened();
+  }
+
+  /**
+   * The number the inspector is reading, by its plate and its place in that plate's source tensor. Its
+   * tile is outlined while that plate is on the stage, and again whenever the bay is rebuilt. Null clears it.
+   */
+  markTile(at: { plate: string; index: number } | null) {
+    if (at?.plate === this.tile?.plate && at?.index === this.tile?.index) return;
+    const before = this.bay?.marked?.plate;
+    this.tile = at;
+    this.bay?.mark(at);
+    if (this.bay?.marked?.plate !== before) this.labelPlates();
+    this.invalidate();
+  }
+
+  /** The plate and source cell outlined on the stage now, or null when its plate is not shown. */
+  get markedTile(): { plate: string; index: number } | null {
+    return this.bay?.marked ?? null;
   }
 
   /** The layer the bay stands above, kept inside the model; -1 is the dictionary. */
@@ -921,7 +948,11 @@ export class Stage {
     const plate = this.bay?.pick(this.ray);
     if (plate) {
       if (this.twice(e, -2)) this.focusBay();
-      else this.showTip(this.plateTip(plate), e.clientX - rect.left, e.clientY - rect.top, touch, PLATE);
+      else {
+        this.showTip(this.plateTip(plate), e.clientX - rect.left, e.clientY - rect.top, touch, PLATE);
+        // The tile's number goes to the inspector too, where it can be read exactly and stepped from with keys.
+        this.o.onTile?.(plate.plate.id, plate.plate.origin(plate.row, plate.col).index);
+      }
       return;
     }
     const i = this.partAt(e.clientX, e.clientY, touch ? SLOP.touch : SLOP.mouse), again = this.twice(e, i);

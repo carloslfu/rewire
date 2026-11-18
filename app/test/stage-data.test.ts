@@ -127,7 +127,7 @@ it("shows tiny-model matrices as their real weights or their real change", () =>
   expect(d.values[5 * 128 + 2]).toBeCloseTo(0.75, 6);
   expect(d.scale).toBeCloseTo(0.75, 6);
   // The readout names the cell the value was read from (column 8), not the first cell of its block (column 7).
-  expect(d.origin(5, 2)).toEqual({ row: 5, col: 7, count: 3 });
+  expect(d.origin(5, 2)).toEqual({ row: 5, col: 7, index: 5 * 384 + 7, count: 3 });
   expect(d.describe(5, 2)).toBe("W_down[6, 8]: 0.750, the largest of the 3 cells from W_down[6, 7] to W_down[6, 9]");
   expect(q.describe(0, 0)).toBe("W_q[1, 1]: 0.000");
   // Without a reference the plate holds the weights themselves, cell for cell.
@@ -174,7 +174,7 @@ it("pools large tensors by keeping the strongest value, sign included", () => {
   expect(big.describe(1, 3)).not.toContain("largest");
   // A block of equal values is credited to its first cell, and masked scores read as minus infinity.
   const flat = plate({ id: "z", title: "Z", band: 0, rows: 1, cols: 4, data: [0, 0, Number.NEGATIVE_INFINITY, 2], maxCols: 2 });
-  expect(flat.origin(0, 0)).toEqual({ row: 0, col: 0, count: 2 });
+  expect(flat.origin(0, 0)).toEqual({ row: 0, col: 0, index: 0, count: 2 });
   expect(flat.describe(0, 1)).toBe("3: −∞, the largest of the 2 cells from 3 to 4");
   expect(flat.scale).toBe(2);
 });
@@ -273,7 +273,7 @@ it("reads the taught adapter's real matrices, rank by rank", () => {
   expect(b.values[2 * 128 + 87]).toBe(-0.5);
   // The trained weight is B[11, 6]. Its tile covers B[9..16, 6] and the readout says exactly that.
   expect(b.describe(5, 1)).toBe("B[11, 6]: 3.000, the largest of the 8 cells from B[9, 6] to B[16, 6]");
-  expect(b.origin(2, 87)).toEqual({ row: 2, col: 700, count: 8 });
+  expect(b.origin(2, 87)).toEqual({ row: 2, col: 700, index: 2 * 1024 + 700, count: 8 });
   expect(a.describe(2, 0)).toBe("A[3, 10]: 0.250, the largest of the 16 cells from A[3, 1] to A[3, 16]");
   expect(Array.from(rank.values)).toEqual(Array.from(strength));
   // Weights now, rather than change: A shows its random start, B the same learned values.
@@ -293,7 +293,7 @@ it("paints values with the page's ramps and never emits an invalid color", () =>
   expect(ramp(LIGHT, 1, "signed")).toEqual(LIGHT.pos);
   expect(ramp(LIGHT, 1, "size")).toEqual(LIGHT.changed);
   expect(ramp(DARK, Number.NaN, "signed")).toEqual(unlit(DARK));
-  // Small values stay visible, with the same curve as the 2D tower.
+  // Small values stay visible, with the same curve as the page's own diverging colors.
   expect(ramp(LIGHT, 0.1, "signed")[0]).toBeCloseTo(LIGHT.zero[0] + (LIGHT.pos[0] - LIGHT.zero[0]) * 0.1 ** 0.7, 6);
 });
 

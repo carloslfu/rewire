@@ -1,15 +1,17 @@
 // Teach in 3D: the same Qwen specimen with its frozen layers, and the adapter that is actually
-// training shown as its two real matrices beside layer 28's MLP.
+// training shown as its two real matrices beside layer 28's MLP. Every weight of both matrices can be
+// read exactly, now and as change since the lesson began.
 import { useEffect, useMemo, useState } from "react";
 import { LESSON_RANK, type LessonWeights } from "@rewire/engine/src/lora.ts";
 import { QWEN_INFO } from "../model/info.ts";
-import { store } from "../state/store.ts";
-import type { Example } from "../teach/lessons.ts";
+import { store, useStore } from "../state/store.ts";
 import type { LessonResult } from "../teach/types.ts";
 import { lessonPlates, lessonStats } from "./adapters.ts";
 import { buildArch, type Part, partName } from "./arch.ts";
 import { Docked } from "./immersive.ts";
 import type { Pose } from "./intervene.ts";
+import { lessonMatrices } from "./matrices.ts";
+import { MatrixInspector, useCell } from "./MatrixInspector.tsx";
 import type { BaySpec, Stage } from "./scene/stage.ts";
 import { RealNote, Workbench } from "./Workbench.tsx";
 
@@ -27,16 +29,19 @@ export interface TeachControls {
 }
 
 const SIZES: BaySpec["sizes"] = { "lora.a": [3.6, 1.3], "lora.rank": [0.34, 1.3], "lora.b": [2.4, 1.3] };
+const loss = (v: number) => (v < 0.001 ? "<0.001" : v.toFixed(3));
 
-export default function TeachStage({ weights, reference, step, running, losses, run, examples, active, controls }: {
+export default function TeachStage({ weights, reference, step, running, losses, run, active, controls }: {
   weights: LessonWeights | null; reference: LessonWeights; step: number; running: boolean; losses: { step: number; loss: number }[];
-  run: LessonResult | null; examples: Example[]; active: boolean; controls: TeachControls;
+  run: LessonResult | null; active: boolean; controls: TeachControls;
 }) {
   const arch = useMemo(() => buildArch(QWEN_INFO), []);
   const last = arch.floors - 1;
   const [stage, setStage] = useState<Stage | null>(null);
   const [selected, setSelected] = useState<Part | null>({ kind: "mlp", floor: last });
   const [difference, setDifference] = useState(true);
+  // False when the 3D drawing could not start. The weights are all still here; the notes then stop pointing at plates.
+  const drawn = useStore((s) => s.stage3d);
   const poses = useMemo((): Pose[] => arch.parts.map((p) => ({ mult: 1, off: false, roll: 0, edited: p.kind === "mlp" && p.floor === last })), [arch, last]);
   const frozen = useMemo(() => Array.from({ length: arch.floors }, (_, L) => L !== last), [arch, last]);
   const plates = useMemo(() => (weights ? lessonPlates(weights, difference ? reference : null, QWEN_INFO.width, QWEN_INFO.units) : null), [weights, difference, reference]);
@@ -46,6 +51,11 @@ export default function TeachStage({ weights, reference, step, running, losses, 
 
   useEffect(() => { stage?.setValues(null, "signed"); stage?.setPoses(poses); stage?.setFrozen(frozen); }, [stage, poses, frozen]);
   useEffect(() => { stage?.setBay(bay); }, [stage, bay]);
+  // The adapter's matrices by name, each weight readable on its own. The tile of the one being read is
+  // outlined on its plate once the visitor has chosen it, here or by tapping a tile.
+  const matrices = useMemo(() => (weights ? lessonMatrices(weights, reference, QWEN_INFO.width, QWEN_INFO.units, { kind: "mlp", floor: last }) : []), [weights, reference, last]);
+  const [cell, setCell, picked] = useCell(matrices);
+  useEffect(() => { stage?.markTile(picked && cell ? { plate: cell.id, index: cell.index } : null); }, [stage, picked, cell]);
 
   const learned = (part: Part | null) => part?.kind === "mlp" && part.floor === last;
   const describe = (part: Part) => `${partName(QWEN_INFO, part)}\n${learned(part) ? "The adapter adds B × A to this MLP's down projection" : "Frozen while teaching. Its weights do not change."}`;
@@ -68,22 +78,16 @@ export default function TeachStage({ weights, reference, step, running, losses, 
   const transport = <section className="stage-transport" aria-label="Teaching">
     <Docked>{training}</Docked>
     <div className="seg" role="group" aria-label="Plates show"><button type="button" aria-pressed={difference} onClick={() => setDifference(true)}>Change from original adapter</button><button type="button" aria-pressed={!difference} onClick={() => setDifference(false)}>Weights now</button></div>
-    {losses.length > 0 && <div className="lesson-loss"><svg viewBox="0 0 400 70" role="img" aria-label="Cross entropy on training tokens over gradient steps, this round"><path d="M 1 1 V 64 H 399" stroke="var(--line)" fill="none" />
+    {losses.length > 0 && <div className="lesson-loss"><h4>Prediction error · this round</h4><svg viewBox="0 0 400 70" role="img" aria-label="Cross entropy on training tokens over gradient steps, this round"><path d="M 1 1 V 64 H 399" stroke="var(--line)" fill="none" />
       <polyline points={losses.map((p) => `${1 + (p.step / Math.max(1, losses.at(-1)!.step)) * 398},${64 - (p.loss / maxLoss) * 60}`).join(" ")} fill="none" stroke="var(--changed)" strokeWidth="2" /></svg>
-      <p className="note">Prediction error this round, on sampled training tokens.{run && run.initialLoss !== null && run.finalLoss !== null ? ` Full lesson: ${run.initialLoss.toFixed(3)} to ${run.finalLoss.toFixed(3)}.` : ""}</p></div>}
+      <p className="note">Lower means better predictions on the examples. Points use sampled training tokens.{run && run.initialLoss !== null && run.finalLoss !== null ? ` Full lesson: ${loss(run.initialLoss)} to ${loss(run.finalLoss)}.` : ""}</p></div>}
   </section>;
-
-  const rail = <div className="stage-question">
-    <p className="note">{examples.length ? `${examples.length} ${examples.length === 1 ? "example" : "examples"}. Edit them in the lesson editor.` : validation || "Write examples in the lesson editor."}</p>
-    <ol className="stage-examples">{examples.slice(0, 8).map((e, i) => <li key={i}><span>{e.prompt}</span><span className="note">{e.answer}</span></li>)}</ol>
-    {examples.length > 8 && <p className="note">And {examples.length - 8} more.</p>}
-    <Docked>{actions}<p className="note training-status">{controls.status}</p></Docked>
-  </div>;
 
   return <Workbench arch={arch} active={active} eyebrow="Same Qwen · live training" title={running ? "A lesson taking shape" : weights ? "What you taught it" : "Where learning happens"}
     status={<span>Qwen3-0.6B · {arch.floors} layers frozen · 32,768 trainable parameters beside layer {last + 1}’s MLP</span>}
     tools={["explore", "grab"]} selected={selected} onSelect={setSelected} onPunch={() => false} describe={describe} onStage={setStage}
-    rail={rail} railTitle="Your lesson" railName="Lesson" transport={transport}
+    onTile={(plate, index) => setCell({ id: plate, index })} annotate={(part) => (learned(part) ? "the adapter learns here" : part.kind === "layer" && part.floor === last ? "holds the adapter" : "")}
+    railTitle="Your lesson" railName="Lesson" transport={transport}
     immersiveBar={<section className="training-bar" aria-label="Teaching">{training}</section>}>
     <section className="stage-info">
       <div className="section-heading"><h3>{selected ? partName(QWEN_INFO, selected) : "The learned addition"}</h3>
@@ -91,8 +95,14 @@ export default function TeachStage({ weights, reference, step, running, losses, 
       {selected && !learned(selected) ? <p className="note">Frozen while teaching. Qwen’s original weights never change; only the adapter beside layer {last + 1}’s MLP learns.</p>
         : <p className="note">Two small matrices, A and B, add a rank-{LESSON_RANK} update to the down projection of this MLP. Each row of the plates is one rank: what it reads from the {QWEN_INFO.units.toLocaleString("en-US")} neurons, how large it is, and what it writes to the stream.</p>}
       <dl className="weight-metrics"><div><dt>Parameters changed</dt><dd>{stats?.changed.toLocaleString("en-US") ?? "Waiting"}</dd></div><div><dt>RMS change</dt><dd>{stats?.rms.toFixed(5) ?? "Waiting"}</dd></div><div><dt>Largest change</dt><dd>{stats?.max.toFixed(5) ?? "Waiting"}</dd></div></dl>
-      <p className="note">32,768 trainable parameters. Blue is negative and orange is positive. Wide plates show the largest of several neighboring weights in each tile; hover a tile to read it.</p>
+      <p className="note">All 32,768 trainable parameters, A and B together. Layers 1 to {last} are frozen, the learned addition B × A runs inside layer {last + 1}’s MLP, and the next token is chosen from the same vocabulary.</p>
+      <p className="note">Blue is negative and orange is positive. These are parameter values, not pushes toward a word. {drawn ? "Wide plates show the largest of several neighboring weights in each tile: click or tap a tile, or use the fields below, to read every weight exactly."
+        : "Use the fields below to read every weight exactly."}</p>
     </section>
+    <MatrixInspector matrices={matrices} cell={cell} onCell={setCell} heading="Read one adapter weight" difference={difference} onLook={stage ? () => stage.focusBay() : undefined}
+      empty="Start a lesson to read its real parameter updates here, one weight at a time.">
+      <p className="note">Real training parameters, installed for inference when the round ends. Snapshots arrive every 10 steps. Turning off layer {last + 1}’s MLP also turns off this learned addition.</p>
+    </MatrixInspector>
     <section className="stage-info">
       <h3>Take it apart</h3>
       <p className="note">Punch lives in Dismantle. Carry these exact weights there to cut a head or this MLP and see what survives.</p>

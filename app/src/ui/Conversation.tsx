@@ -1,8 +1,8 @@
 // Independent samples, each with an editable question and its original/changed pair.
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { Reply, Side, Turn } from "../model/types.ts";
-import { askReplay, contextCap, continueReply, editSample, piece, removeSample, selectWord, undoPick, undoRemoveSample } from "../state/actions.ts";
-import { useStore } from "../state/store.ts";
+import { askReplay, chooseWord, contextCap, continueReply, editSample, piece, removeSample, selectWord, undoPick, undoRemoveSample } from "../state/actions.ts";
+import { store, useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { pct } from "./color.ts";
 import { describe } from "./describe.ts";
@@ -18,16 +18,9 @@ export function Conversation() {
   const removed = useStore((s) => s.removed);
   const busy = useStore((s) => s.busy);
   const replay = useStore((s) => s.replay);
-  const end = useRef<HTMLDivElement>(null);
   const undoButton = useRef<HTMLButtonElement>(null);
-  const newestSeen = useRef(0);
   const removedId = removed.at(-1)?.sample.id;
-  useEffect(() => { if (removedId !== undefined) undoButton.current?.focus(); }, [removedId]);
-  useEffect(() => {
-    const newest = Math.max(0, ...turns.map((t) => t.id));
-    if (newest > newestSeen.current && turns.length > 1) end.current?.scrollIntoView({ block: "nearest" });
-    newestSeen.current = Math.max(newestSeen.current, newest);
-  }, [turns.length]);
+  useEffect(() => { if (removedId !== undefined) undoButton.current?.focus({ preventScroll: true }); }, [removedId]);
   if (!turns.length && !removed.length) return null;
   const undoAt = Math.min(removed.at(-1)?.index ?? -1, turns.length);
   const undo = removed.length > 0 && <div className="sample-undo" role="status" key="undo-remove">
@@ -37,9 +30,20 @@ export function Conversation() {
   return (
     <div className="conversation" aria-live="off">
       <ReplayStatus />
+      {turns.length > 1 && <label className="sample-jump">Jump to sample
+        <select value="" onChange={e => {
+          const id = Number(e.target.value);
+          const index = turns.findIndex(turn => turn.id === id);
+          if (index < 0) return;
+          const token = replySegments(turns[index].normal)[0];
+          if (token && store.get().word?.turn !== index) chooseWord({ turn: index, side: "normal", index: token.from });
+          const heading = document.getElementById(`sample-${id}`);
+          heading?.scrollIntoView({ block: "nearest" });
+          heading?.focus({ preventScroll: true });
+        }}><option value="">Choose a question ({turns.length})</option>{turns.map((turn, k) =>
+          <option key={turn.id} value={turn.id}>{k + 1}. {turn.user}</option>)}</select></label>}
       {turns.flatMap((t, k) => [k === undoAt ? undo : null, <TurnView key={t.id} turn={t} k={k} live={mode === "live"} />])}
       {undoAt === turns.length && undo}
-      <div ref={end} />
     </div>
   );
 }
@@ -57,7 +61,7 @@ function TurnView({ turn, k, live }: { turn: Turn; k: number; live: boolean }) {
     <article className="turn" aria-labelledby={`sample-${turn.id}`}>
       <div className="sample-heading">
         <div className="sample-question"><p className="eyebrow">{model.id === "tiny" ? "Text" : `Sample ${k + 1}`}</p>
-          <h3 id={`sample-${turn.id}`}>{turn.user}</h3></div>
+          <h3 tabIndex={-1} id={`sample-${turn.id}`}>{turn.user}</h3></div>
         {model.id === "qwen" && <div className="sample-actions">
           <button className="btn" disabled={locked} aria-label={`Edit sample ${k + 1}`} aria-expanded={editing}
             onClick={() => { setText(turn.user); setEditing(true); }}>Edit</button>
@@ -86,7 +90,6 @@ function TurnView({ turn, k, live }: { turn: Turn; k: number; live: boolean }) {
 
 function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; side: Side; turn: Turn; live: boolean }) {
   const word = useStore((s) => s.word);
-  const inspecting = useStore((s) => s.sheet);
   const busy = useStore((s) => s.busy);
   const replay = useStore((s) => s.replay);
   const model = useStore((s) => s.model);
@@ -143,10 +146,10 @@ function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; si
           if (!inspectable) return <Fragment key={i}>{txt}</Fragment>;
           return (
             <button key={i} type="button" className={`tok${sel ? " sel" : ""}${under ? " under" : ""}${members.some((t) => t.picked) ? " picked" : ""}`}
-              data-i={i} tabIndex={i === roving ? 0 : -1} aria-pressed={!!sel && inspecting}
+              data-i={i} tabIndex={i === roving ? 0 : -1} aria-pressed={!!sel}
               aria-label={spanNote ? `${spoken}. ${spanNote}` : under ? `${spoken}: the changed model gives it ${pct(pc!)}` : !txt.trim() ? spoken : undefined}
               title={spanNote ?? (under ? `Normal ${pct(Math.exp(toks[i].lp1))}, changed ${pct(pc!)}` : undefined)}
-              onClick={() => selectWord({ turn: k, side, index: i })}>
+              onClick={() => chooseWord({ turn: k, side, index: i })}>
               {txt}
             </button>
           );
@@ -157,6 +160,8 @@ function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; si
       {pending && !queued && replay.status !== "running" && <p className="note">Update interrupted here.</p>}
       {moved && <p className="moved">{moved}</p>}
       <div className="foot">
+        {inspectable && selHere >= 0 && word && <button type="button" className="btn quiet"
+          onClick={() => selectWord(word)}>Inspect selected token</button>}
         {reply.pickedAt !== undefined && reply.original && (
           <>
             {/* Until the picked piece arrives the reply is still being written; only a finished reply without it was stopped. */}

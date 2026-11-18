@@ -1,5 +1,5 @@
 // What a gesture on a 3D part means for the real model. Every edit here becomes the same change spec
-// the 2D controls write; the scene only draws what the spec says.
+// the strength controls and the inspector write; the scene only draws what the spec says.
 import { geometryActive } from "@rewire/engine/src/changes.ts";
 import type { ModelInfo } from "../model/info.ts";
 import type { ChangeSpec, Focus } from "../model/types.ts";
@@ -83,15 +83,28 @@ export function focusOf(p: Part): Focus | null {
   }
 }
 
+/**
+ * The part an inspector panel is about, or null for panels about no one part: a word, the weights'
+ * precision. Several parts can share a panel (the final normalization opens Words out, shared keys and
+ * values open their layer), so a part is kept selected while the panel is still its own: see `sameFocus`.
+ */
 export function partOf(focus: Focus): Part | null {
   switch (focus.kind) {
     case "head": return { kind: "head", floor: focus.floor, head: focus.head };
     case "memory": return { kind: "mlp", floor: focus.floor };
     case "floor": return { kind: "layer", floor: focus.floor };
-    case "dictionary": return { kind: "embed" };
+    case "dictionary": case "words-in": return { kind: "embed" };
     case "words-out": return { kind: "unembed" };
     default: return null;
   }
+}
+
+/** Whether a part's own inspector panel is the one being shown, whatever position or side that panel is on. */
+export function sameFocus(part: Part | null, focus: Focus): boolean {
+  const mine = part ? focusOf(part) : null;
+  if (!mine) return !part && partOf(focus) === null;
+  if (part!.kind === "embed") return focus.kind === "dictionary" || focus.kind === "words-in";
+  return JSON.stringify(mine) === JSON.stringify(focus);
 }
 
 /** Why the model cannot be edited right now, or null when an edit will run. Mirrors applyChips' own guard. */

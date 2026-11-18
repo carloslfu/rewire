@@ -96,7 +96,7 @@ it("measures nothing and sets no state while a reply is written, however fast th
   expect(seen.at(-1)).toBe("ready");
 });
 
-it("keeps the 2D inspector out of the same loop when it is open over a reply being written", async () => {
+it("keeps the inspector out of the same loop when it is open over a reply being written", async () => {
   let renders = 0;
   const shown: boolean[] = [];
   function Inspector() {

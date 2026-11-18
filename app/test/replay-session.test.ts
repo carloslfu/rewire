@@ -253,19 +253,29 @@ it("keeps playing when a measurement of the selected token arrives, since the re
   expect(R.session.get()).toMatchObject({ mode: "replay", playing: true, token: 2 });
 });
 
-it("opens the 3D view for a reply-level replay request, and ignores one while the model is writing", async () => {
+it("asks the 3D model for a reply-level replay, and ignores a request while the model is writing or the drawing could not start", async () => {
   await actions.send("Hello");
   const id = store.get().turns[0].id;
   actions.askReplay(id, "normal");
-  expect(store.get()).toMatchObject({ scopeView: "3d", replayRequest: { sample: id, side: "normal" } });
-  // Asking does not start anything by itself: the 3D view does, once it is drawing.
+  // The 3D model is the only view: asking switches nothing, it leaves a request for the bench.
+  expect(store.get()).toMatchObject({ replayRequest: { sample: id, side: "normal" } });
+  expect(store.get()).not.toHaveProperty("scopeView");
+  // Asking does not start anything by itself: the bench does, once it is drawing.
   expect(mode()).toBe("live");
-  store.set({ scopeView: "2d", replayRequest: null, busy: true });
+  store.set({ replayRequest: null, busy: true });
   actions.askReplay(id, "normal");
-  expect(store.get()).toMatchObject({ scopeView: "2d", replayRequest: null });
+  expect(store.get().replayRequest).toBeNull();
+  // Without the drawing there is nothing to replay on: no request, no replay, and the reason is said.
   store.set({ busy: false, stage3d: false });
   actions.askReplay(id, "normal");
   expect(store.get().replayRequest).toBeNull();
+  expect(R.replayWait(store.get())).toBe("Replay needs the 3D drawing, which could not start here. Try again on the model.");
+  expect(R.startReplay("answer")).toBe(false);
+  expect(mode()).toBe("live");
+  // Once a retry has the drawing back, the same reply replays.
+  store.set({ stage3d: true });
+  expect(R.replayWait(store.get())).toBe("");
+  expect(R.startReplay("answer")).toBe(true);
 });
 
 it("tells the engine when a 3D view is open, so writing and comparing leave the GPU room to draw it", async () => {

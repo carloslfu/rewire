@@ -4,6 +4,7 @@ import * as actions from "./state/actions.ts";
 import { store } from "./state/store.ts";
 import { App } from "./ui/App.tsx";
 import "./styles.css";
+import "./workspace.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

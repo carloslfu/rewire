@@ -7,9 +7,7 @@ import { useStore } from "../state/store.ts";
 import { S } from "../strings.ts";
 import { divergingRGB, fmt, pct, onThemeChange } from "../ui/color.ts";
 import { Strip } from "../ui/Strip.tsx";
-import { WeightScope } from "./WeightScope.tsx";
-import { Modal } from "../ui/Modal.tsx";
-import { useNarrow } from "../ui/useNarrow.ts";
+import { ModelWorkspace } from "../ui/ModelWorkspace.tsx";
 import type { TinyIn, TinyOut } from "./train.worker.ts";
 import type { Damage } from "../stage/GrowStage.tsx";
 import { afterAdopting, afterDamage, afterRestore, type Checkpoint, continueNote, copyLabel, endRun, failureNote, type Held, isDamaged, type Lineage, NOTHING_HELD, NO_RUN, type Run, runIsCurrent, runNote, runUpTo, UNTRAINED, whileTraining } from "./lineage.ts";
@@ -23,7 +21,6 @@ type TestResult = Extract<TinyOut, { t: "tested" }>["results"];
 
 export default function TinyView() {
   const active = useStore((s) => s.tiny);
-  const view3d = useStore((s) => s.scopeView === "3d" && s.stage3d);
   const [text, setText] = useState(language.text);
   const [prompt, setPrompt] = useState(language.tests[0].prompt);
   const [running, setRunning] = useState(false);
@@ -49,7 +46,6 @@ export default function TinyView() {
   const [cases, setCases] = useState(language.tests.map((t) => t.prompt + t.answer).join("\n"));
   const [testCorpus, setTestCorpus] = useState("");
   const [step, setStep] = useState(0);
-  const [scope, setScope] = useState(false);
   const [strength, setStrength] = useState(0.25);
   const w = useRef<Worker | null>(null);
   const runBase = useRef(0);
@@ -65,7 +61,6 @@ export default function TinyView() {
   const mutationSeed = useRef(3);
   const mounted = useRef(true);
   const unavailable = !("gpu" in navigator);
-  const narrow = useNarrow();
   const disabled = running || working;
 
   useEffect(() => {
@@ -190,23 +185,19 @@ export default function TinyView() {
   const ownRun = running || runIsCurrent(lineage);
   const lastLoss = losses.length ? losses[losses.length - 1] : null;
   const validText = encode(text).length >= 65;
-  // Training state stays in this component; the flat map and the 3D model are two views of it.
-  const visualizer = view3d ? <Suspense fallback={<p className="stage-state" role="status">Opening the 3D model…</p>}>
+  const visualizer = <Suspense fallback={<p className="stage-state" role="status">Opening the 3D model…</p>}>
     <GrowStage params={params} reference={reference} intact={intact} step={step} running={running} active={active}
       controls={{ disabled, unavailable, validText, status, loss: ownRun ? lastLoss : null, mutation, damage, strength, setStrength,
         keepLabel, continueNote: continueNote(lineage), retrained: lineage.retrained, intactStep, adopt,
-        teach, stop: () => { w.current?.postMessage({ t: "stop" } satisfies TinyIn); setStatus("Finishing the current step…"); }, mutate, restore,
-        prompt, setPrompt, test: () => test(), result, baseline }} /></Suspense>
-    : <WeightScope params={params} reference={reference} step={step} running={running} mutated={!!mutation} />;
+        teach, stop: () => { w.current?.postMessage({ t: "stop" } satisfies TinyIn); setStatus("Finishing the current step…"); }, mutate, restore }} /></Suspense>;
   const testCases = cases.split("\n").flatMap((line) => {
     const parts = line.split(" = ");
     return parts.length === 2 && parts[0] && parts[1] ? [{ prompt: `${parts[0]} = `, answer: parts[1] }] : [];
   }).slice(0, 12);
-  return <div className={`lab-layout training-lab${scope ? " mobile-scope-open" : ""}`}>
-    <main className="workspace training-workspace" id="training">
+  return <ModelWorkspace stage={visualizer} id="training-scope" label="Live training visualizer" workLabel="Training">
+    <main tabIndex={-1} className="workspace training-workspace" id="training">
       <div className="lab-heading"><p className="eyebrow">Grow a model · starts with random weights</p><h1>Give it a strange little world.</h1>
         <p>Invent a language. Feed it your writing. Watch the weights learn, then mess them up.</p></div>
-      <button className="btn mobile-scope-toggle" aria-expanded={scope} aria-controls="training-scope" onClick={() => setScope(!scope)}>{scope ? "Hide live weights" : "Show live weights"}</button>
       <section className="teaching-data">
         <div className="section-heading"><h2>What should it learn?</h2><button className="btn quiet" disabled={disabled} onClick={() => { setText(language.text); setPrompt(language.tests[0].prompt); setCases(language.tests.map((t) => t.prompt + t.answer).join("\n")); }}>Secret language</button></div>
         <p className="note">These invented words are editable. Six combinations are left out so you can test whether it learns the pieces.</p>
@@ -243,9 +234,7 @@ export default function TinyView() {
       {params && <section className="training-handoff"><button className="btn" disabled={disabled} onClick={() => { setWorking(true); void openTiny(params).catch((e) => setStatus(String(e))).finally(() => setWorking(false)); }}>Open this model in the full lab</button><p className="note">Inspect attention, disable heads, and follow each letter through all four layers.</p></section>}
       <details className="training-details"><summary>What is actually being trained?</summary><p className="note">A separate {layout(cfg).total.toLocaleString()}-parameter transformer, starting from random weights. Adam updates every trainable parameter using next-letter prediction. This does not fine-tune Qwen. Keep learning preserves the current weights and starts a new optimizer. After Scramble or Erase it trains the damaged copy and the intact weights stay available to restore. It trains on 64-letter windows and works best with short ASCII patterns.</p>{params && !disabled && <SlowMotion params={params} corpus={text} worker={worker} />}</details>
     </main>
-    {!narrow && <aside className={`lab-scope${view3d ? " stage-scope" : ""}`} id="training-scope" aria-label="Live training visualizer">{visualizer}</aside>}
-    {narrow && <Modal open={scope && active} onClose={() => setScope(false)} title="Live weights" className="mobile-model"><div id="training-scope" className={view3d ? "stage-scope" : undefined}>{visualizer}</div></Modal>}
-  </div>;
+  </ModelWorkspace>;
 }
 function LossChart({ losses }: { losses: number[] }) {
   const ref = useRef<HTMLCanvasElement>(null);

@@ -126,8 +126,15 @@ export interface Plate {
   scale: number;
   /** Source cells per tile, down and across. A pooled tile shows its largest-magnitude cell. */
   pool: [number, number];
-  /** The source cell a tile's value came from, and how many source cells the tile stands for. */
-  origin: (row: number, col: number) => { row: number; col: number; count: number };
+  /** The source cell a tile's value came from, its place in `source.data`, and how many source cells the tile stands for. */
+  origin: (row: number, col: number) => { row: number; col: number; index: number; count: number };
+  /**
+   * The whole tensor behind the tiles, before pooling: its shape as drawn, every number, and the name
+   * of each. A vector folded into a block for drawing still has one index, not two.
+   */
+  source: { rows: number; cols: number; data: ArrayLike<number>; name: (row: number, col: number) => string; vector?: boolean;
+    /** What a row and a column count, in the singular, and the number the first of each goes by. */
+    axes: [string, string]; first: [number, number] };
   /** The replay beat this plate belongs to, for plates of a measured layer. */
   phase?: "attention" | "mlp";
   /** Unsigned sizes use the single-color ramp; signed values use blue and orange. */
@@ -155,6 +162,12 @@ export function pooled(values: ArrayLike<number>, rows: number, cols: number, ma
   return { values: out, rows: R, cols: C, pool: [pr, pc] as [number, number], source };
 }
 
+/** The tile that draws one source cell of a plate, by the cell's place in `source.data`. Null when the plate has no such cell. */
+export function tileOf(p: Pick<Plate, "source" | "pool" | "rows" | "cols">, index: number): { row: number; col: number } | null {
+  if (!Number.isInteger(index) || index < 0 || index >= p.source.rows * p.source.cols) return null;
+  return { row: Math.floor(Math.floor(index / p.source.cols) / p.pool[0]), col: Math.floor((index % p.source.cols) / p.pool[1]) };
+}
+
 function largest(values: ArrayLike<number>): number {
   let m = 0;
   for (let i = 0; i < values.length; i++) { const a = Math.abs(values[i]); if (Number.isFinite(a) && a > m) m = a; }
@@ -171,7 +184,8 @@ export function vectorRows(n: number): number {
 }
 
 interface PlateInput { id: string; title: string; formula?: string; shape?: string; band: number; phase?: Plate["phase"]; rows: number; cols: number; data: ArrayLike<number>;
-  scale?: number; ramp?: Plate["ramp"]; name?: (row: number, col: number) => string; maxRows?: number; maxCols?: number }
+  scale?: number; ramp?: Plate["ramp"]; name?: (row: number, col: number) => string; maxRows?: number; maxCols?: number; vector?: boolean;
+  axes?: [string, string]; first?: [number, number] }
 
 export function plate(p: PlateInput): Plate {
   const s = pooled(p.data, p.rows, p.cols, p.maxRows ?? 128, p.maxCols ?? 128);
@@ -181,9 +195,10 @@ export function plate(p: PlateInput): Plate {
   const block = (r: number, c: number) => ({ r0: r * pr, r1: Math.min(p.rows, (r + 1) * pr) - 1, c0: c * pc, c1: Math.min(p.cols, (c + 1) * pc) - 1 });
   const origin = (r: number, c: number) => {
     const at = s.source[r * s.cols + c], b = block(r, c);
-    return { row: Math.floor(at / p.cols), col: at % p.cols, count: (b.r1 - b.r0 + 1) * (b.c1 - b.c0 + 1) };
+    return { row: Math.floor(at / p.cols), col: at % p.cols, index: at, count: (b.r1 - b.r0 + 1) * (b.c1 - b.c0 + 1) };
   };
   return { id: p.id, title: p.title, formula: p.formula, band: p.band, phase: p.phase, rows: s.rows, cols: s.cols, values: s.values, pool: s.pool, origin,
+    source: { rows: p.rows, cols: p.cols, data: p.data, name, vector: p.vector, axes: p.axes ?? (p.vector || p.rows === 1 ? ["", "number"] : ["row", "column"]), first: p.first ?? [1, 1] },
     shape: p.shape ?? (p.rows === 1 ? `${p.cols.toLocaleString("en-US")} numbers` : `${p.rows.toLocaleString("en-US")} × ${p.cols.toLocaleString("en-US")} numbers`),
     scale: p.scale ?? largest(p.data), ramp: p.ramp ?? "signed",
     // The value is named by the cell it was actually read from; a pooled tile also says which cells it stands for.
@@ -195,7 +210,7 @@ export function plate(p: PlateInput): Plate {
 
 function vector(id: string, title: string, formula: string, band: number, data: ArrayLike<number>, phase?: Plate["phase"]): Plate {
   const rows = vectorRows(data.length), cols = data.length / rows;
-  return plate({ id, title, formula, band, phase, rows, cols, data, shape: `${data.length.toLocaleString("en-US")} numbers`, name: (r, c) => `number ${r * cols + c + 1}` });
+  return plate({ id, title, formula, band, phase, rows, cols, data, vector: true, shape: `${data.length.toLocaleString("en-US")} numbers`, name: (r, c) => `number ${r * cols + c + 1}` });
 }
 
 /**
@@ -216,6 +231,8 @@ export function layerPlates(model: ModelInfo, detail: FloorDetail, floor: number
     const cols = data.length / rows, positions = k === "probs" || k === "scores";
     out.push(plate({ id: k, title, formula, band, phase: "attention", rows, cols, data, scale, ramp: scale ? "size" : "signed",
       shape: positions ? `${rows} heads × ${cols} positions` : `${rows} ${unit}s × ${cols} numbers`,
+      // Positions in the context are counted from 0, as the model counts them.
+      axes: [unit, positions ? "position" : "number"], first: [1, positions ? 0 : 1],
       name: (r, c) => `${unit} ${r + 1}, ${positions ? `position ${c}` : c + 1}` }));
   };
   v("x", "Stream in", "x", 0);
@@ -267,7 +284,8 @@ export function tray(n: number, slots: number, row?: ArrayLike<number> | null): 
   return out;
 }
 
-const TINY_MATRICES: [string, string, string, number][] = [
+/** The weight matrices of one tiny-model layer: tensor name, title, symbol, and the row of the bay they stand in. */
+export const TINY_MATRICES: [string, string, string, number][] = [
   ["q", "Queries", "W_q", 0], ["k", "Keys", "W_k", 0], ["v", "Values", "W_v", 0], ["o", "Head output", "W_o", 0],
   ["gate", "MLP gate", "W_gate", 1], ["up", "MLP up", "W_up", 1], ["down", "MLP down", "W_down", 1],
 ];
@@ -336,11 +354,11 @@ export function lessonPlates(weights: LessonWeights, reference: LessonWeights | 
   const strength = rankStrength(weights, width, units);
   return [
     plate({ id: "lora.a", title: "A reads the neurons", formula: "z = A a", band: 0, rows: LESSON_RANK, cols: units, data: a, maxCols: 192,
-      shape: `${LESSON_RANK} × ${units.toLocaleString("en-US")} weights`, name: (r, c) => `A[${r + 1}, ${c + 1}]` }),
+      shape: `${LESSON_RANK} × ${units.toLocaleString("en-US")} weights`, name: (r, c) => `A[${r + 1}, ${c + 1}]`, axes: ["rank", "neuron"] }),
     plate({ id: "lora.rank", title: "Rank size", formula: "‖B_r‖ · ‖A_r‖", band: 0, rows: LESSON_RANK, cols: 1, data: strength, ramp: "size",
-      shape: `${LESSON_RANK} ranks`, name: (r) => `rank ${r + 1}` }),
+      shape: `${LESSON_RANK} ranks`, name: (r) => `rank ${r + 1}`, axes: ["rank", ""] }),
     plate({ id: "lora.b", title: "B writes to the stream", formula: "m += B z", band: 0, rows: LESSON_RANK, cols: width, data: bt, maxCols: 128,
-      shape: `${width.toLocaleString("en-US")} × ${LESSON_RANK} weights, drawn on its side`, name: (r, c) => `B[${c + 1}, ${r + 1}]` }),
+      shape: `${width.toLocaleString("en-US")} × ${LESSON_RANK} weights, drawn on its side`, name: (r, c) => `B[${c + 1}, ${r + 1}]`, axes: ["rank", "stream number"] }),
   ];
 }
 

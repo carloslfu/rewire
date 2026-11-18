@@ -1,20 +1,28 @@
 // Grow in 3D: the tiny transformer built from its real configuration. Each part is colored by its
-// own slice of the parameter array, and Punch rewrites a layer's actual weights.
+// own slice of the parameter array, Punch rewrites a layer's actual weights, and every weight of
+// every matrix can be read exactly, now and as change since training began.
 import { useEffect, useId, useMemo, useState } from "react";
 import { layout, TINY } from "@rewire/tiny/src/config.ts";
 import { VOCAB } from "@rewire/tiny/src/data.ts";
+import { weightStats } from "@rewire/tiny/src/lab.ts";
 import { TINY_INFO } from "../model/info.ts";
-import { store } from "../state/store.ts";
-import { tinyDictPlate, tinyLayerPlates, tinyValues } from "./adapters.ts";
+import { store, useStore } from "../state/store.ts";
+import { TINY_MATRICES, tinyDictPlate, tinyLayerPlates, tinyValues } from "./adapters.ts";
 import { buildArch, type Part, partIndex, partName } from "./arch.ts";
 import { Docked } from "./immersive.ts";
 import type { Pose } from "./intervene.ts";
+import { type CellRef, type Matrix, matrixStats, tinyMatrices } from "./matrices.ts";
+import { MatrixInspector, useCell } from "./MatrixInspector.tsx";
 import type { BaySpec, Stage, Tool } from "./scene/stage.ts";
 import { RealNote, Workbench } from "./Workbench.tsx";
 
 const cfg = { ...TINY, vocab: VOCAB };
 
 export interface Damage { kind: "noise" | "erase"; floor?: number }
+
+/** Whether the plates beside the selected part include a matrix: a layer's own seven, or the embedding table at either end. */
+const beside = (selected: Part | null, m: Matrix | undefined) => !!selected && !!m?.part && (m.part.kind === "embed" ? selected.kind === "embed" || selected.kind === "unembed"
+  : "floor" in selected && "floor" in m.part && selected.floor === m.part.floor);
 
 export interface GrowControls {
   /** A reply or training step is in flight. */
@@ -41,11 +49,7 @@ export interface GrowControls {
   intactStep: number;
   /** Make the retrained copy the intact one. */
   adopt: () => void;
-  prompt: string;
-  setPrompt: (v: string) => void;
-  test: () => void;
-  result: { prompt: string; text: string; model: string } | null;
-  baseline: { prompt: string; text: string } | null;
+
 }
 
 export default function GrowStage({ params, reference, intact, step, running, active, controls }: {
@@ -56,6 +60,8 @@ export default function GrowStage({ params, reference, intact, step, running, ac
   const [selected, setSelected] = useState<Part | null>(null);
   const [difference, setDifference] = useState(true);
   const strengthId = useId();
+  // False when the 3D drawing could not start. The numbers are all still here; the notes then stop pointing at plates and windows.
+  const drawn = useStore((s) => s.stage3d);
   const { damage, disabled, strength } = controls;
   const values = useMemo(() => (difference && !reference ? null : tinyValues(arch, cfg, params, difference ? reference : null)), [arch, params, reference, difference]);
   const hit = (floor: number) => !!damage && (damage.floor === undefined || damage.floor === floor);
@@ -76,6 +82,24 @@ export default function GrowStage({ params, reference, intact, step, running, ac
   useEffect(() => { stage?.setPoses(poses); }, [stage, poses]);
   useEffect(() => { stage?.setBay(bay); }, [stage, bay]);
 
+  // Every weight matrix by name, each weight readable on its own. The matrix being read and the part
+  // selected on the stage stay together: choosing a matrix of another layer selects that layer, and
+  // selecting another part moves the reading to that part's own matrices.
+  const matrices = useMemo(() => (params ? tinyMatrices(cfg, params, reference) : []), [params, reference]);
+  const preferred = dictionary ? "dict" : `f${Math.max(0, floor)}.${selected?.kind === "head" ? "q" : selected?.kind === "kv" ? "k" : "down"}`;
+  const [cell, setCell, picked] = useCell(matrices, preferred);
+  const pickCell = (next: CellRef) => {
+    const m = matrices.find((x) => x.id === next.id);
+    setCell(next);
+    if (m?.part && !beside(selected, m)) setSelected(m.part);
+  };
+  const selectPart = (part: Part | null) => {
+    setSelected(part);
+    if (picked && !beside(part, matrices.find((x) => x.id === picked.id))) setCell(null);
+  };
+  useEffect(() => { stage?.markTile(picked && cell ? { plate: cell.id, index: cell.index } : null); }, [stage, picked, cell]);
+  const total = useMemo(() => (params && reference && reference.length === params.length ? weightStats(params, reference) : null), [params, reference]);
+
   const say = (announce: string) => store.set({ announce });
   const measure = difference ? "RMS change since the start" : "RMS weight size";
   const punch = (part: Part): boolean => {
@@ -91,6 +115,12 @@ export default function GrowStage({ params, reference, intact, step, running, ac
     return [partName(TINY_INFO, part), v !== undefined && !Number.isNaN(v) ? `${measure}: ${v.toFixed(5)}` : "Waiting for weights",
       tool === "punch" ? ("floor" in part ? (hit(part.floor) && damage?.floor === part.floor ? "Click to restore this layer" : "Click to scramble this layer's weights") : "Punch works on layers here") : "",
       tool === "grab" && (part.kind === "head" || part.kind === "mlp" || part.kind === "layer") ? "Drag to move it. The model does not change." : ""].filter(Boolean).join("\n");
+  };
+
+  /** Each part's own number, for the menus that name every part. */
+  const annotate = (part: Part): string => {
+    const v = values?.raw[partIndex(TINY_INFO, part)];
+    return [v !== undefined && !Number.isNaN(v) ? v.toFixed(5) : "", "floor" in part && part.kind !== "kv" && hit(part.floor) ? "damaged" : ""].filter(Boolean).join(" · ");
   };
 
   const actions = <div className="row training-actions">
@@ -112,39 +142,43 @@ export default function GrowStage({ params, reference, intact, step, running, ac
     <div className="seg" role="group" aria-label="Colors show"><button type="button" aria-pressed={difference} onClick={() => setDifference(true)}>Change since start</button><button type="button" aria-pressed={!difference} onClick={() => setDifference(false)}>Weights now</button></div>
   </section>;
 
-  const rail = <div className="stage-question">
-    <p className="note">Only this starting text goes into the model.</p>
-    <div className="probe-input"><input aria-label="Test starting text" value={controls.prompt} disabled={disabled} onChange={(e) => controls.setPrompt(e.target.value)} />
-      <button type="button" className="btn" disabled={!params || disabled || !controls.prompt.trim()} onClick={controls.test}>Generate</button></div>
-    {controls.result && <div className="probe-result"><p className="eyebrow">{controls.result.model || "Intact weights"}</p><pre className="sample">{controls.result.text}</pre></div>}
-    {controls.baseline && controls.result?.model && controls.baseline.prompt === controls.result.prompt && <div className="intact-comparison"><p className="eyebrow">Intact weights · same input and seed</p><pre className="sample">{controls.baseline.text}</pre></div>}
-  </div>;
-
   const value = selected ? values?.raw[partIndex(TINY_INFO, selected)] : undefined;
   return <Workbench arch={arch} active={active} eyebrow="Live weights" title={controls.mutation ? "Under the knife" : running ? "A brain taking shape" : params ? "Your specimen" : "Waiting for its first lesson"}
     status={<span>{arch.floors} transformer layers · {layout(cfg).total.toLocaleString("en-US")} trainable numbers{controls.mutation ? " · damaged copy" : ""}</span>}
-    tools={["explore", "grab", "punch"]} selected={selected} onSelect={setSelected} onPunch={punch} describe={describe} onStage={setStage}
+    tools={["explore", "grab", "punch"]} selected={selected} onSelect={selectPart} onPunch={punch} describe={describe} onStage={setStage}
+    onTile={(plate, index) => pickCell({ id: plate, index })} annotate={annotate}
     punchHelp="Click any part of a layer to scramble that layer's real weights at the strength below, starting from the intact copy. Click the same layer again to restore it."
-    rail={rail} railTitle="Ask it something" railName="Ask" transport={transport}
+    railTitle="Training and tests" railName="Training" transport={transport}
     immersiveBar={<section className="training-bar" aria-label="Training">{training}</section>}
     restore={{ label: "Restore intact model", disabled: !controls.mutation || disabled, run: controls.restore }}>
     <section className="stage-info">
       {selected ? <>
-        <div className="section-heading"><h3>{partName(TINY_INFO, selected)}</h3><button type="button" className="btn quiet" onClick={() => setSelected(null)}>Close</button></div>
+        <div className="section-heading"><h3>{partName(TINY_INFO, selected)}</h3><button type="button" className="btn quiet" onClick={() => selectPart(null)}>Close</button></div>
         <p className="scope-measurement">{value !== undefined && !Number.isNaN(value) ? <><span className="num">{value.toFixed(5)}</span> {measure.toLowerCase()}</> : "Waiting for weights."}</p>
         <p className="note">{selected.kind === "head" ? "A head owns its rows of the query matrix and its columns of the output matrix. The number above covers exactly those weights."
           : selected.kind === "kv" ? "These rows of the key and value matrices are read by both heads sitting on this base."
           : selected.kind === "mlp" ? "The gate, up and down matrices of this layer's MLP."
           : selected.kind === "layer" ? "Every matrix and normalization weight in this layer."
           : selected.kind === "norm" ? "The final normalization weights." : "The letter embeddings. The same table turns numbers back into letters."}</p>
-        {(floor >= 0 || dictionary) && <p className="note">The plates beside it are {floor >= 0 ? "this layer's real weight matrices" : "the real embedding table"}{difference ? ", shown as change since the start" : ""}. Hover a tile to read a weight.</p>}
+        {drawn && (floor >= 0 || dictionary) && <p className="note">The plates beside it are {floor >= 0 ? "this layer's real weight matrices" : "the real embedding table"}{difference ? ", shown as change since the start" : ""}. A tile can stand for several weights: click or tap one, or use the fields below, to read every weight exactly.</p>}
         <div className="stage-part-actions">
           {floor >= 0 && <button type="button" className="btn" disabled={!intact || disabled} onClick={() => stage?.react(selected, punch(selected))}>{damage?.floor === floor ? "Restore this layer" : "Scramble this layer"}</button>}
           {floor >= 0 && <button type="button" className="btn quiet" disabled={!intact || disabled} onClick={() => controls.mutate("erase", floor)}>Erase in this layer</button>}
           <button type="button" className="btn quiet" disabled={!stage} onClick={() => stage?.focus(selected)}>Look closer</button>
         </div>
-      </> : <><h3>Select a part</h3><p className="note">Each part's window is lit by how much its own weights {difference ? "have moved since the start" : "weigh now"}. Click one to see its matrices.</p></>}
+      </> : <><h3>Select a part</h3><p className="note">{drawn ? `Each part's window is lit by how much its own weights ${difference ? "have moved since the start" : "weigh now"}. Click one to see its matrices.`
+        : `Each part is listed in the menu above with how much its own weights ${difference ? "have moved since the start" : "weigh now"}. Choose one to read its matrices below.`}</p></>}
     </section>
+    <MatrixInspector matrices={matrices} cell={cell} onCell={pickCell} heading="Read one weight" difference={difference} onLook={stage && bay ? () => stage.focusBay() : undefined}
+      empty="The weights can be read here, one at a time, once learning has started.">
+      <dl className="weight-metrics" aria-label="The whole model since the start">
+        <div><dt>Weights changed</dt><dd>{total ? total.changed.toLocaleString("en-US") : "Waiting"}</dd></div>
+        <div><dt>RMS change</dt><dd>{total?.rms.toFixed(5) ?? "Waiting"}</dd></div>
+        <div><dt>Largest change</dt><dd>{total?.max.toFixed(5) ?? "Waiting"}</dd></div>
+      </dl>
+      <Movement matrices={matrices} current={cell?.id} onPick={(id) => pickCell({ id, index: -1 })} />
+      <p className="note">Measured from the parameter arrays used for inference, over all {layout(cfg).total.toLocaleString("en-US")} trainable numbers. Training updates all layers by backpropagation. Snapshots arrive every 100 steps.</p>
+    </MatrixInspector>
     <section className="stage-info damage-bench">
       <h3>Break what it learned</h3>
       <div className="damage-strength"><label htmlFor={strengthId}>Strength</label><output htmlFor={strengthId}>{Math.round(strength * 100)}%</output>
@@ -157,4 +191,24 @@ export default function GrowStage({ params, reference, intact, step, running, ac
     <RealNote punch real={`Four layers, four attention heads and one MLP in each, with heads paired on shared keys and values, exactly as configured. The color of every lit window is computed from that part's slice of the ${layout(cfg).total.toLocaleString("en-US")} parameters. Plates are the real matrices. Punch, Scramble and Erase rewrite those weights.`}
       drawing="The shapes and positions. Training measures no activations here, so there is no token replay on this bench. Open the model in the full lab to follow a letter through it." />
   </Workbench>;
+}
+
+/** How far every weight matrix has moved since the start, layer by layer: a number for each, and a button that opens it. */
+function Movement({ matrices, current, onPick }: { matrices: Matrix[]; current: string | undefined; onPick: (id: string) => void }) {
+  const moved = useMemo(() => new Map(matrices.map((m) => [m.id, matrixStats(m).change?.rms])), [matrices]);
+  const cellOf = (id: string, label: string) => {
+    const v = moved.get(id);
+    return <button type="button" className="matrix-cell num" aria-pressed={id === current} disabled={v === undefined} aria-label={`${label}: RMS change ${v === undefined ? "not measured yet" : v.toFixed(5)}`}
+      onClick={() => onPick(id)}>{v === undefined ? "…" : v.toFixed(4)}</button>;
+  };
+  if (!matrices.length) return null;
+  return <table className="matrix-movement">
+    <caption>RMS change of each matrix since the start. Select one to read its weights.</caption>
+    <thead><tr><td />{TINY_MATRICES.map(([name, title]) => <th key={name} scope="col" title={title}>{name}</th>)}</tr></thead>
+    <tbody>
+      {Array.from({ length: cfg.floors }, (_, L) => <tr key={L}><th scope="row">Layer {L + 1}</th>
+        {TINY_MATRICES.map(([name, title]) => <td key={name}>{cellOf(`f${L}.${name}`, `Layer ${L + 1} · ${title}`)}</td>)}</tr>)}
+      <tr><th scope="row">Letters</th><td colSpan={TINY_MATRICES.length}>{cellOf("dict", "Letter embeddings")}</td></tr>
+    </tbody>
+  </table>;
 }

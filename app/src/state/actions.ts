@@ -336,14 +336,23 @@ export function setFollowing(follow: boolean) {
 }
 
 /**
- * Ask the 3D view to replay one finished reply from its first token. Opens the 3D view if needed.
- * This is the visual replay of values already measured; nothing is generated again.
+ * Ask the 3D model to replay one finished reply from its first token. This is the visual replay of
+ * values already measured; nothing is generated again. Without a drawing there is nothing to replay on.
  */
 let replayRequests = 0;
 export function askReplay(sample: number, side: Side) {
   const s = store.get();
   if (!s.stage3d || s.busy || s.replay) return;
-  store.set({ scopeView: "3d", replayRequest: { sample, side, n: ++replayRequests } });
+  store.set({ replayRequest: { sample, side, n: ++replayRequests } });
+}
+
+/**
+ * From the inspector back to the 3D model: the inspector closes, and the bench goes to the part it
+ * was showing. The selection is shared, so this is the same model and the same part, not another view of it.
+ */
+let stageVisits = 0;
+export function exploreModel(focus: Focus = store.get().focus) {
+  store.set({ focus, sheet: false, stageFocus: { n: ++stageVisits } });
 }
 
 /** A 3D view opened or closed. While one is open the engine leaves the GPU room to draw it. */
@@ -774,7 +783,7 @@ export function chooseWord(w: WordRef) {
 }
 
 export function setFocus(focus: Focus) {
-  store.set((s) => ({ focus, sheet: true, inspectView: s.inspectView === "model" && !matchMedia("(max-width: 1000px)").matches ? "model" : "word" }));
+  store.set({ focus, sheet: true, inspectView: "word" });
 }
 
 // ---------------------------------------------------------------- device check and the live model

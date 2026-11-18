@@ -45,7 +45,7 @@ it("seats query heads on the key/value group the engine gives them", () => {
   expect(() => buildArch({ ...QWEN_INFO, kvHeads: 5 })).toThrow();
 });
 
-it("reads each part's push from the same slot the 2D tower uses", () => {
+it("reads each part's push from the slot the engine writes it to", () => {
   for (const model of [QWEN_INFO, TINY_INFO]) {
     setDims(model);
     const arch = buildArch(model), seen = new Set<number>();

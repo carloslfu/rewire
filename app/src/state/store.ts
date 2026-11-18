@@ -62,12 +62,19 @@ export interface State {
   /** Id of the sample whose output was written most recently. Following tracks it; null means the last sample. */
   outputSample: number | null;
   focus: Focus;
-  /** Tower lighting: each part's push, or changed minus normal on the same words. */
+  /** What the model's lit windows show: each part's push, or changed minus normal on the same words. */
   view: "push" | "difference";
-  /** Which instrument the benches show: the flat diagrams or the 3D model. Kept for the visit only. */
-  scopeView: "2d" | "3d";
-  /** False once this browser has failed to draw the 3D model; the benches then stay in 2D. */
+  /**
+   * False once the 3D model has failed to start in this browser: no WebGL, or its drawing code did not
+   * load. The benches then say so and keep their named parts, controls and readings; nothing else
+   * draws the model. It is true again when a visitor's Try again succeeds.
+   */
   stage3d: boolean;
+  /**
+   * The visitor asked, from the inspector, to go to the 3D model at the part the inspector was showing.
+   * The bench comes into view, turns the camera to that part and takes the keyboard focus, then clears this.
+   */
+  stageFocus: { n: number } | null;
   temperature: number;
   seed: number;
   /** Editable text prepared by an example or typed by the visitor. */
@@ -88,7 +95,7 @@ export interface State {
   /** Phone: the detail sheet is open. */
   sheet: boolean;
   /** Inspection is revealed only after an explicit request. */
-  inspectView: "explanation" | "word" | "model";
+  inspectView: "explanation" | "word";
   error: string | null;
   /** Qwen's mode while the tiny model is on screen. */
   qwenMode?: Mode;
@@ -119,8 +126,8 @@ export const initial: State = {
   outputSample: null,
   focus: { kind: "word" },
   view: "push",
-  scopeView: "2d",
   stage3d: true,
+  stageFocus: null,
   temperature: 0.7,
   seed: 11,
   draft: "",

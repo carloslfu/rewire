@@ -1,4 +1,4 @@
-// Follow output: one control, with the same words, in the 2D and 3D views.
+// Follow output: one control beside the 3D model.
 import { useId } from "react";
 import { setFollowing } from "../state/actions.ts";
 import { useStore } from "../state/store.ts";

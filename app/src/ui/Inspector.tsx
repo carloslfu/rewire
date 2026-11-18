@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
-import { piece, selectWord, stepData } from "../state/actions.ts";
+import { exploreModel, piece, selectWord, stepData } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
 import { stepCopy } from "../path/steps.ts";
 import { Detail } from "./Detail.tsx";
 import { Modal } from "./Modal.tsx";
-import { Tower } from "./Tower.tsx";
+import { partName } from "../stage/arch.ts";
+import { partOf } from "../stage/intervene.ts";
 
 export function Inspector() {
   const open = useStore((s) => s.sheet);
@@ -12,7 +13,8 @@ export function Inspector() {
   const word = useStore((s) => s.word);
   const turns = useStore((s) => s.turns);
   const step = useStore((s) => s.step);
-  const focusKey = useStore((s) => JSON.stringify(s.focus));
+  const focus = useStore((s) => s.focus), focusKey = JSON.stringify(focus);
+  const model = useStore((s) => s.model);
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const body = content.current?.closest(".modal-body");
@@ -22,9 +24,11 @@ export function Inspector() {
   const turn = word && turns[word.turn];
   const reply = turn && (word.side === "normal" ? turn.normal : turn.changed);
   const changeView = view === "explanation" && copy;
+  // The part of the 3D model this panel is about. The selection is shared, so the stage already has it selected.
+  const part = partOf(focus);
   return (
     <Modal open={open} onClose={() => store.set({ sheet: false })} title={changeView ? "Inside this experiment" : "Inside the model"}
-      className={`inspector${view === "model" ? " full-model" : ""}`}>
+      className="inspector">
       <div ref={content}>
       {changeView ? <div className="experiment-explanation">
         <h3>{copy.title}</h3>
@@ -60,15 +64,11 @@ export function Inspector() {
           <span className="note">{word.side === "changed" ? "Changed reply" : "Original reply"} · On this device</span>
         </div>}
         <div className="inspector-navigation">
-          <button type="button" className="btn quiet" onClick={() => store.set({ inspectView: view === "model" ? "word" : "model" })}>
-            {view === "model" ? "Hide the full model" : "Explore the full model"}
-          </button>
+          <button type="button" className="btn quiet" title={part ? `Close this panel and go to ${partName(model, part)} in the 3D model` : "Close this panel and go to the whole 3D model"}
+            onClick={() => exploreModel()}>Explore the full model</button>
           {copy && <button type="button" className="btn quiet" onClick={() => store.set({ inspectView: "explanation" })}>About this experiment</button>}
         </div>
-        <div className={view === "model" ? "inspection-grid" : ""}>
-          {view === "model" && <section aria-label="The tower"><Tower /></section>}
-          <section className="detail" aria-label="Details"><Detail /></section>
-        </div>
+        <section className="detail" aria-label="Details"><Detail /></section>
       </>}
       </div>
     </Modal>

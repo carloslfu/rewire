@@ -39,7 +39,7 @@ export const unlit = (t: Theme): RGB => (t.dark ? mix(t.zero, t.fg, 0.28) : t.ze
 
 /**
  * v in [-1, 1] to a color. Signed values run blue through neutral to orange, with the same curve as the
- * 2D tower. Sizes run from neutral to the change color.
+ * page's own diverging colors. Sizes run from neutral to the change color.
  */
 export function ramp(t: Theme, v: number, kind: "signed" | "size"): RGB {
   const zero = unlit(t);
