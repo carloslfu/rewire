@@ -34,17 +34,11 @@ export function App() {
   const turns = useStore((s) => s.turns);
   const step = useStore((s) => s.step);
   const error = useStore((s) => s.error);
-  const replayRequest = useStore((s) => s.replayRequest);
   const [, setTick] = useState(0);
   const [about, setAbout] = useState(false);
   const [trainingVisited, setTrainingVisited] = useState(false);
   const [teachVisited, setTeachVisited] = useState(false);
   useEffect(() => onPieces(() => setTick((t) => t + 1)), []);
-  useEffect(() => {
-    if (!replayRequest) return;
-    const scene = document.getElementById("chat-scope");
-    if (scene && scene.getBoundingClientRect().bottom < 150) scene.scrollIntoView({ block: "start" });
-  }, [replayRequest]);
   useEffect(() => { if (tiny) setTrainingVisited(true); }, [tiny]);
   useEffect(() => { if (teach) setTeachVisited(true); }, [teach]);
   useEffect(() => {

@@ -98,9 +98,9 @@
 .model-workspace > .model-scene { padding: 0; }
 .model-workspace:has(.stage-bench.immersive) > .work-sidebar { visibility: hidden; }
 .live-mobile { position: relative; padding: 6px 12px; }
-.live-mobile summary { display: list-item; width: calc(100% - 134px); min-height: 44px; padding: 4px 0; align-content: center; font-weight: 600; cursor: pointer; }
+.live-mobile summary { display: list-item; width: calc(100% - 167px); min-height: 44px; padding: 4px 0; align-content: center; font-weight: 600; cursor: pointer; }
 .live-mobile small { display: block; margin-inline-start: 15px; color: var(--muted); font-weight: 400; line-height: 1.2; }
-.live-mobile .replay-enter { position: absolute; inset: 6px 12px auto auto; min-height: 44px; }
+.live-mobile .replay-enter { position: absolute; inset: 6px 12px auto auto; min-height: 44px; font-size: 12px; }
 .mobile-live-options { display: grid; gap: 8px; padding: 6px 0; }
 @container (max-width: 510px) {
   .workspace-content .training-samples, .workspace-content .lesson-answer-pair { grid-template-columns: minmax(0,1fr); }
@@ -108,7 +108,21 @@
 @media (max-width: 900px), (max-width: 1100px) and (max-height: 500px) {
   .model-scene .stage-bench:not(.immersive) .stage-reset:disabled { display: none; }
   .model-scene .stage-bench:not(.immersive) .stage-top[data-tool="explore"] .stage-hint { display: none; }
-  .model-scene .stage-bench:not(.immersive) .replay-readout { min-height: 0; }
+  .model-scene .stage-bench:not(.immersive) .replay-bar.replaying { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-inline: 12px; }
+  .model-scene .stage-bench:not(.immersive) .replaying > :is(.replay-run, .replay-head, .replay-progress, .replay-transport) { flex: 1 1 100%; }
+  .model-scene .stage-bench:not(.immersive) .replaying :is(.replay-head, .replay-transport, .replay-scrub) { flex-wrap: nowrap; }
+  .model-scene .stage-bench:not(.immersive) .replaying .replay-head { gap: 6px; }
+  .model-scene .stage-bench:not(.immersive) .replaying .token-navigation { order: 0; flex: 1; justify-content: center; flex-wrap: nowrap; gap: 2px; }
+  .model-scene .stage-bench:not(.immersive) .replaying .token-navigation :is(strong, .note) { display: none; }
+  .model-scene .stage-bench:not(.immersive) .replay-token-position { display: inline; white-space: nowrap; }
+  .model-scene .stage-bench:not(.immersive) .replaying .token-navigation .btn { width: 38px; }
+  .model-scene .stage-bench:not(.immersive) .replay-exit { white-space: nowrap; padding-inline: 8px; }
+  .model-scene .stage-bench:not(.immersive) .replay-main, .model-scene .stage-bench:not(.immersive) .replay-step { flex: none; min-width: 44px; padding-inline: 0; }
+  .model-scene .stage-bench:not(.immersive) .replay-steps { flex: none; }
+  .model-scene .stage-bench:not(.immersive) :is(.replay-word, .replay-scrub-name) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .model-scene .stage-bench:not(.immersive) .replay-scrub { margin-left: 0; }
+  .model-scene .stage-bench:not(.immersive) .replay-scrub input { min-width: 0; width: 100%; }
+  .model-scene .stage-bench:not(.immersive) .replay-readout { flex: 1 1 148px; min-height: 2.9em; align-content: center; }
 }
 .work-examples { margin-block: 10px 20px; padding-block: 3px; border-block: 1px solid var(--line); }
 .work-examples summary { min-height: 42px; align-content: center; cursor: pointer; font-size: 14px; font-weight: 550; }

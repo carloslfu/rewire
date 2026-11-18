@@ -667,14 +667,12 @@ export class Stage {
   get hasBay() { return !!this.bay; }
 
   /**
-   * The replay is on a token whose candidates have not been handed over yet. The output stays empty
-   * until they arrive with setCandidates, so another token's result is never shown as this one's.
-   * Live output is never held.
+   * Hold the meters and output while the replay waits for the selected token's own readings.
    */
-  holdOutput(held = true) {
+  holdReadings(held = true) {
     held &&= this.replaying;
     if (held === this.specimen.held) return;
-    this.specimen.holdOutput(held);
+    this.specimen.holdReadings(held);
     this.hideOutput();
     this.invalidate();
   }
@@ -693,7 +691,7 @@ export class Stage {
   setPlayhead(t: number | null, fadeMs = 0) {
     const goal = t === null ? this.beats : seek(t, this.beats), ahead = goal - this.shown;
     this.goal = goal; this.fadeMs = fadeMs; this.replaying = t !== null;
-    if (t === null) this.specimen.holdOutput(false);
+    if (t === null) this.specimen.holdReadings(false);
     if (!(fadeMs > 0 && !this.reduced && ahead > 0 && ahead <= 1)) this.shown = goal;
     this.drawPlayhead();
     this.hideOutput();

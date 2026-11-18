@@ -176,7 +176,7 @@ function ReplyView({ reply, k, side, turn, live }: { reply: Reply; k: number; si
           </>
         ))}
         {reply.done && !reply.stale && !busy && !replay && stage3d && segments.length > 0 && (
-          <button type="button" className="linkish reply-replay" title={S.replayIn3dTitle} onClick={() => askReplay(turn.id, side)}>{S.replayIn3d}</button>
+          <button type="button" className="linkish reply-replay" title={S.replayIn3dTitle} onClick={() => askReplay(turn.id, side)}>{turn.changed ? (changed ? "Replay changed" : "Replay original") : S.replayIn3d}</button>
         )}
       </div>
     </div>

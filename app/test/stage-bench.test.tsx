@@ -9,7 +9,6 @@ import type { Tok } from "../src/model/types.ts";
 import { pushIndex, pushLength } from "../src/stage/arch.ts";
 import { QWEN_INFO } from "../src/model/info.ts";
 import { afterDamage, afterTraining, continueNote, copyLabel, isDamaged, type Lineage, whileTraining } from "../src/tiny/lineage.ts";
-import { S } from "../src/strings.ts";
 
 let store: typeof import("../src/state/store.ts").store;
 let initial: typeof import("../src/state/store.ts").initial;
@@ -229,7 +228,7 @@ it("shows Replay as its own mode: what is playing, where it is, what each contro
   for (const [speed, on] of [["Slow", false], ["Steady", true], ["Fast", false]] as const) expect(html).toMatch(new RegExp(`aria-pressed="${on}"[^>]*>${speed}</button>`));
   // The readout names the step, and a screen reader hears the state, not every step.
   expect(t).toContain("Read the token.");
-  expect(html).toContain('<p class="sr-only" aria-live="polite">Replay playing: the whole answer.</p>');
+  expect(html).toContain('<p class="sr-only" aria-live="polite">Replay playing: the whole answer. Original run.</p>');
   expect(t).not.toContain("Direct pushes add up to");
 
   // Paused part way: Resume, and the place is announced.
@@ -240,12 +239,12 @@ it("shows Replay as its own mode: what is playing, where it is, what each contro
   expect(html).toContain('<span class="replay-mode on paused">Replay paused</span>');
   expect(html).toMatch(/<progress class="replay-progress paused" max="115" value="41"/);
   expect(t).toContain("Layer 21 · attention. Direct pushes so far: +1.50 of +1.25.");
-  expect(html).toContain('aria-live="polite">Replay paused. Token 1 of 2, step 42 of 58, Layer 21 · attention.</p>');
+  expect(html).toContain('aria-live="polite">Replay paused. Token 1 of 2, step 42 of 58, Layer 21 · attention. Original run.</p>');
   // A token chosen by hand is shown whole, and the button says what Play will do with it.
   R.session.toToken(1);
   html = renderToString(<Dismantle />); t = text(html);
   expect(buttons(html).get("Play from this token")).toEqual([false]);
-  expect(t).toContain("Token written: “…”, which the model gave 90.48%. Direct pushes add up to +1.25.");
+  expect(t).toContain("“…” · 90.48% model probability. Direct push total +1.25.");
   // This token: the same bar is about the token alone. Its first step is empty and its last is full, wherever the token sits in the answer.
   R.session.setScope("token");
   html = renderToString(<Dismantle />);
@@ -263,9 +262,9 @@ it("shows Replay as its own mode: what is playing, where it is, what each contro
   expect(html).toContain('<span class="replay-mode on ended">Replay finished</span>');
   expect(html).toMatch(/<progress class="replay-progress ended" max="115" value="115"/);
   expect(b.has("Start over")).toBe(false);
-  expect(t).toContain("End of the answer. Token written:");
+  expect(t).toContain("90.48% model probability.");
   expect(buttons(html).get("Next step")).toEqual([true]);
-  expect(html).toContain('aria-live="polite">Replay finished at token 2 of 2.</p>');
+  expect(html).toContain('aria-live="polite">Replay finished at token 2 of 2. Original run.</p>');
   expect(t).not.toContain("—");
 
   // While a whole answer plays, a selected layer is not measured for each token going by, and says so.
@@ -282,21 +281,59 @@ it("shows Replay as its own mode: what is playing, where it is, what each contro
   expect(html).toMatch(/class="follow-toggle"[^>]*aria-pressed="true"/);
 });
 
+it("labels the replayed sample and uses that run's probability and MLP reading", () => {
+  const original = sample(), mlp = pushIndex(QWEN_INFO, { kind: "mlp", floor: 27 });
+  const normalToken = { ...original.normal.toks[0], lp1: Math.log(0.9887), activity: new Float32Array(pushLength(QWEN_INFO)) };
+  normalToken.activity[mlp] = 0.04;
+  const guesses = Array.from({ length: 28 }, () => [{ id: 100, p: 0.9832 }]);
+  const changedToken = { ...normalToken, lp1: Math.log(0.9832), pushes: normalToken.pushes.slice(), activity: normalToken.activity.slice(), guesses };
+  changedToken.pushes[mlp] = changedToken.activity[mlp] = 0;
+  const changes = { memory: [{ floor: 27, mult: 0 }] };
+  store.set({ mode: "live", turns: [{ ...original, normal: { ...original.normal, toks: [normalToken] },
+    changed: { ...original.normal, toks: [changedToken], changes } }], chips: changes,
+    word: { turn: 0, side: "normal", index: 0 }, focus: { kind: "memory", floor: 27 } });
+
+  expect(buttons(renderToString(<Dismantle />)).get("Replay changed answer")).toEqual([false]);
+  expect(R.startReplay("answer")).toBe(true);
+  let html = renderToString(<Dismantle />);
+  expect(text(html)).toContain("Replay run Sample 1 Original Changed MLP on layer 28 off");
+  expect(html).toMatch(/aria-pressed="true"[^>]*>Changed<\/button>/);
+  expect(text(html)).not.toContain("98.32%");
+  R.session.seek(55);
+  expect(text(renderToString(<Dismantle />))).toContain("Top candidate at this layer");
+  R.session.seek(57);
+  expect(text(renderToString(<Dismantle />))).not.toContain("Top candidate at this layer");
+  R.session.seek(58);
+  html = renderToString(<Dismantle />);
+  expect(text(html)).toContain("98.32% model probability. Direct push total +1.50.");
+  expect(text(html)).toContain("Output size 0 RMS");
+  expect(buttons(html).has("Change from original")).toBe(false);
+
+  R.switchReplayRun("normal");
+  html = renderToString(<Dismantle />);
+  expect(html).toMatch(/aria-pressed="true"[^>]*>Original<\/button>/);
+  expect(text(html)).toContain("98.87% model probability. Direct push total +1.25.");
+  expect(text(html)).toContain("Output size 0.0400 RMS");
+  expect(text(html)).not.toContain("98.32%");
+});
+
 it("offers a replay on each finished reply in the conversation, and not while the model is writing or the 3D drawing could not start", () => {
   const changed = { ...sample().normal, toks: [tok(200), tok(151645)], changes: { heads: [{ floor: 20, head: 13, mult: 0 }] } };
   store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [{ ...sample(), changed }], fork: 0 });
   let b = buttons(renderToString(<Talk.Conversation />));
-  expect(b.get(S.replayIn3d)).toEqual([false, false]);
+  expect(b.get("Replay original")).toEqual([false]);
+  expect(b.get("Replay changed")).toEqual([false]);
   store.set({ busy: true });
-  expect(buttons(renderToString(<Talk.Conversation />)).has(S.replayIn3d)).toBe(false);
+  expect([...buttons(renderToString(<Talk.Conversation />)).keys()].filter((label) => label.startsWith("Replay "))).toEqual([]);
   store.set({ busy: false, replay: { turn: 0, status: "stopped" } });
-  expect(buttons(renderToString(<Talk.Conversation />)).has(S.replayIn3d)).toBe(false);
+  expect([...buttons(renderToString(<Talk.Conversation />)).keys()].filter((label) => label.startsWith("Replay "))).toEqual([]);
   store.set({ replay: null, stage3d: false });
-  expect(buttons(renderToString(<Talk.Conversation />)).has(S.replayIn3d)).toBe(false);
+  expect([...buttons(renderToString(<Talk.Conversation />)).keys()].filter((label) => label.startsWith("Replay "))).toEqual([]);
   // A stale reply is not offered; its current sibling still is.
   store.set({ stage3d: true, turns: [{ ...sample(), changed: { ...changed, stale: true } }] });
   b = buttons(renderToString(<Talk.Conversation />));
-  expect(b.get(S.replayIn3d)).toEqual([false]);
+  expect(b.get("Replay original")).toEqual([false]);
+  expect(b.has("Replay changed")).toBe(false);
 });
 
 it("names every camera action, says where you are, and opens no empty bay before there is something to show", () => {

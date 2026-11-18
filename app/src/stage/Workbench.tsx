@@ -73,6 +73,8 @@ export interface WorkbenchProps {
   /** Always in sight directly under the stage, in every layout. It does not scroll with the controls below it. */
   bar?: ReactNode;
   replaying?: boolean;
+  /** A reply card launched replay. Bring its transport into view even from the Questions overlay. */
+  replyReplay?: number;
   /** Along the bottom in full screen on a bench with no `bar`: the training controls, whose docked copy is then in a closed panel. */
   immersiveBar?: ReactNode;
   transport?: ReactNode;
@@ -255,6 +257,17 @@ export function Workbench(p: WorkbenchProps) {
   // Docked, the controls share one scroll area under the stage: bring a newly selected part's controls into it.
   const selectedKey = selected ? partKey(selected) : "";
   useEffect(() => { if (selectedKey && lower.current) lower.current.scrollTop = 0; }, [selectedKey]);
+  useEffect(() => {
+    const bar = foot.current, play = bar?.querySelector<HTMLButtonElement>(".replay-main");
+    if (!p.replyReplay || !bar || !play) return;
+    setOverlays(NONE);
+    setPanel(null);
+    play.focus({ preventScroll: true });
+    const rect = bar.getBoundingClientRect();
+    if (!root.current?.classList.contains("immersive") && (rect.top < 0 || rect.bottom > window.innerHeight)) {
+      bar.scrollIntoView({ block: "end" });
+    }
+  }, [p.replyReplay]);
   // In full screen the floating controls sit clear of the title above and the bar below, whatever height those take.
   useEffect(() => {
     const bench = root.current;

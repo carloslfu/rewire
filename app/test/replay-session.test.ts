@@ -203,6 +203,39 @@ it("ends for Continue, a model change, a punch put back, an edit, a removal, an 
   expect(store.get().word).toBeNull();
 });
 
+it("defaults to the changed run of the selected sample and switches runs at the same step", async () => {
+  await actions.send("Capital of France?");
+  await actions.send("Capital of Italy?");
+  await actions.applyChips(head(0));
+  actions.chooseWord(at(0, "normal", 2));
+  actions.setTowerView("difference");
+  expect(store.get()).toMatchObject({ word: at(0, "normal", 2), view: "difference" });
+
+  // The changed answer is shorter. Preview its last visible token at this position.
+  expect(R.startReplay("token")).toBe(true);
+  expect(store.get()).toMatchObject({ word: at(0, "changed", 1), view: "push" });
+  expect(R.session.get()).toMatchObject({ token: 1, tokens: 2, step: 1, playing: true });
+  frames(() => R.session.get().step === 7);
+  R.switchReplayRun("normal");
+  expect(store.get()).toMatchObject({ word: at(0, "normal", 1), view: "push" });
+  expect(R.session.get()).toMatchObject({ scope: "token", token: 1, tokens: 3, step: 7, playing: false });
+  R.session.seek(beats);
+  R.switchReplayRun("changed");
+  expect(store.get().word).toEqual(at(0, "changed", 1));
+  expect(R.session.get()).toMatchObject({ token: 1, tokens: 2, step: beats, playing: false, picked: true });
+  R.session.exit("live");
+
+  actions.chooseWord(at(0, "normal", 2));
+  expect(R.startReplay("answer")).toBe(true);
+  expect(store.get().word).toEqual(at(0, "changed", 0));
+  expect(R.session.get()).toMatchObject({ scope: "answer", token: 0, step: 1 });
+  R.session.exit("live");
+  // The explicit Original card also exits the same-context comparison lens.
+  actions.setTowerView("difference");
+  expect(R.startReplay("answer", { sample: store.get().turns[0].id, side: "normal" })).toBe(true);
+  expect(store.get()).toMatchObject({ word: at(0, "normal", 0), view: "push" });
+});
+
 it("pauses on a token the visitor chooses, in either reply or another sample, and resumes from there", async () => {
   await actions.send("One"); await actions.send("Two");
   await actions.applyChips(head(0)); await flush();
@@ -299,15 +332,18 @@ function fakeStage() {
     log, held: false, replaying: false, driver: null as unknown,
     setDriver(d: unknown) { st.driver = d; log.push(d ? "driver" : "no driver"); },
     setPlayhead(t: number | null) { st.replaying = t !== null; if (t === null) st.held = false; log.push(`playhead ${t}`); },
-    holdOutput(held = true) { held &&= st.replaying; if (held !== st.held) { st.held = held; log.push(held ? "hold" : "release"); } },
-    setCandidates(list: { label: string }[]) { st.held = false; log.push(`candidates ${list.map((c) => c.label).join(",")}`); },
+    holdReadings(held = true) { held &&= st.replaying; if (held !== st.held) { st.held = held; log.push(held ? "hold" : "release"); } },
+    setPoses() { log.push("poses"); },
+    setValues(values: Float32Array) { log.push(`values ${values[0]}`); },
+    setCandidates(list: { label: string }[]) { log.push(`candidates ${list.map((c) => c.label).join(",")}`); },
   };
   return st;
 }
 /** What React does after a render: hand over the selected token's candidates with its identity. */
 const handOver = (link: ReturnType<typeof R.linkStage>) => {
   const s = store.get(), w = s.word!, turn = s.turns[w.turn], reply = w.side === "normal" ? turn.normal : turn.changed!;
-  link.deliver([{ label: `tok${reply.toks[w.index].id}`, p: 0.5, chosen: true }], R.outputIdentity(s));
+  const id = reply.toks[w.index].id;
+  link.deliver({ poses: [], values: [Float32Array.of(id), "signed"], candidates: [{ label: `tok${id}`, p: 0.5, chosen: true }] }, R.readingIdentity(s, mode() === "replay"));
 };
 
 it("holds the output from the moment a replay reaches a token until that token's own result is handed over", async () => {
@@ -316,17 +352,20 @@ it("holds the output from the moment a replay reaches a token until that token's
   const stage = fakeStage(), link = R.linkStage(stage as never);
   // Live: results are handed over and shown at once; nothing is ever held.
   handOver(link);
-  expect(stage.log).toEqual(["driver", "playhead null", "candidates tok201"]);
+  expect(stage.log).toEqual(["driver", "playhead null", "poses", "values 201", "candidates tok201"]);
   actions.chooseWord(at(1, "normal", 1)); handOver(link);
   expect(stage.held).toBe(false);
   expect(stage.log).not.toContain("hold");
 
   // A replay of the whole answer goes to the first token: held before anything else can be drawn, until its result arrives.
   stage.log.length = 0;
-  expect(R.startReplay("answer")).toBe(true);
+  expect(R.startReplay("answer", { sample: store.get().turns[1].id, side: "normal" })).toBe(true);
+  expect(stage.log).toEqual(["playhead 1", "hold"]);
+  link.deliver({ poses: [], values: [null, "signed"], candidates: [] }, R.readingIdentity(store.get(), false));
+  expect(stage.held).toBe(true);
   expect(stage.log).toEqual(["playhead 1", "hold"]);
   handOver(link);
-  expect(stage.log.slice(2)).toEqual(["candidates tok100"]);
+  expect(stage.log.slice(2)).toEqual(["poses", "values 100", "candidates tok100", "release"]);
   expect(stage.held).toBe(false);
   // Playing on into the next token: its first step and the hold arrive together, before React has rendered anything.
   stage.log.length = 0;
@@ -343,7 +382,7 @@ it("holds the output from the moment a replay reaches a token until that token's
   expect(R.session.get().token).toBe(1);
   expect(stage.log).toEqual([`playhead ${beats}`, "hold"]);
   handOver(link);
-  expect(stage.log.at(-1)).toBe("candidates tok201");
+  expect(stage.log.slice(-4)).toEqual(["poses", "values 201", "candidates tok201", "release"]);
   expect(stage.held).toBe(false);
   // And the same index of the same side in another sample.
   stage.log.length = 0;

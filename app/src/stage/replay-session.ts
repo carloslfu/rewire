@@ -1,15 +1,36 @@
 // The one visual replay of the page, bound to the store. It watches every state change itself, so a
 // replay can never run on into output that was removed, rewritten or measured under other settings.
 import { useSyncExternalStore } from "react";
-import type { Side } from "../model/types.ts";
+import type { Reply, Side, WordRef } from "../model/types.ts";
 import { setFollowing } from "../state/actions.ts";
 import { type State, store } from "../state/store.ts";
-import { chosen, comparisonTarget, replyMark, visibleTokens } from "../ui/word.ts";
+import { chosen, replyMark, visibleTokens } from "../ui/word.ts";
 import { beatCount } from "./playback.ts";
 import { fadeMs, ReplayController, type Scope, type Snapshot, type Subject } from "./replay.ts";
 import type { Stage } from "./scene/stage.ts";
 
-type Live = Pick<State, "model" | "version" | "turns" | "word" | "fork" | "busy" | "replay">;
+type Live = Pick<State, "model" | "version" | "turns" | "word" | "fork" | "busy" | "replay" | "stage3d">;
+type Selection = Pick<Live, "turns" | "word">;
+type ReadingState = Pick<State, "model" | "version" | "turns" | "word" | "fork" | "view">;
+type Run = { sample: number; side: Side };
+export const runName = (side: Side) => side === "changed" ? "Changed" : "Original";
+
+const replayableTokens = (reply: Reply | undefined) => reply?.done ? visibleTokens(reply) : [];
+
+/** Move by visible token position. The two runs can generate different words and lengths. */
+export function replayWord(s: Selection, side?: Side): WordRef | null {
+  if (!s.word) return null;
+  const { turn, index, side: current } = s.word, sample = s.turns[turn];
+  if (!sample) return null;
+  const changed = replayableTokens(sample.changed);
+  side ??= changed.length ? "changed" : "normal";
+  const tokens = side === "changed" ? changed : replayableTokens(sample.normal);
+  if (!tokens.length) return null;
+  const from = visibleTokens(current === "changed" ? sample.changed : sample.normal).indexOf(index);
+  if (from < 0) return null;
+  if (side === current) return s.word;
+  return { turn, side, index: tokens[Math.min(from, tokens.length - 1)] };
+}
 
 /** The selected reply as the replay sees it. Null when no token of a reply is selected. */
 export function replaySubject(s: Live): Subject | null {
@@ -19,10 +40,10 @@ export function replaySubject(s: Live): Subject | null {
   if (at < 0) return null;
   return {
     epoch: `${s.model.id}.${s.version}`,
-    reply: `${c.turn.id}.${c.ref.side}.${c.reply.toks.map((t) => t.id).join(",")}`,
+    reply: `${c.turn.id}.${c.ref.side}.${replyMark(c.reply)}.${c.reply.toks.map((t) => t.id).join(",")}`,
     tokens: visible.length, at,
     // `busy` covers writing and comparing; `replay` is the store's name for an update of the samples after a model change.
-    ready: !s.busy && !s.replay && c.reply.done && !c.reply.stale,
+    ready: s.stage3d && !s.busy && !s.replay && c.reply.done && !c.reply.stale,
   };
 }
 
@@ -35,10 +56,13 @@ export function outputIdentity(s: Pick<State, "model" | "version" | "turns" | "w
   return c ? `${s.model.id}.${s.version}.${c.turn.id}.${c.ref.side}.${c.ref.index}.${c.tok.id}.${replyMark(c.reply)}` : "";
 }
 
+/** In replay the chassis uses recorded edits. In live one token can also show a difference reading. */
+export const readingIdentity = (s: ReadingState, replaying: boolean) => `${outputIdentity(s)}.${s.view}.${replaying}`;
+
 /** Why Replay answer is not available yet, in the visitor's words. Empty when it is. */
 export function replayWait(s: Live): string {
   // A replay is drawn on the 3D model. Without the drawing there is nothing to walk a reply through.
-  if (!store.get().stage3d) return "Replay needs the 3D drawing, which could not start here. Try again on the model.";
+  if (!s.stage3d) return "Replay needs the 3D drawing, which could not start here. Try again on the model.";
   if (!s.turns.length) return s.busy ? "Replay is ready when this reply is finished." : "Ask a question first. Once the reply is finished you can replay it here.";
   if (s.replay) return s.replay.status === "running" ? "Replay is ready when the sample update is finished." : "Retry the sample update or restore the originals, then replay.";
   if (s.busy) return "Replay is ready when this reply is finished.";
@@ -46,11 +70,8 @@ export function replayWait(s: Live): string {
   if (!c) return "Select a token in a reply to replay it.";
   if (c.reply.stale) return "This reply used earlier settings. Select a token in a current reply.";
   if (!c.reply.done) return "Replay is ready when this reply is finished.";
-  return replaySubject(s) ? "" : "Select a token in a reply to replay it.";
+  return replayWord(s) ? "" : "Select a token in a reply to replay it.";
 }
-
-/** The view a token can be shown in: a comparison only where one was measured. */
-const viewFor = (s: State, word: NonNullable<State["word"]>): State["view"] => (word.side === "normal" && comparisonTarget({ ...s, word }) ? s.view : "push");
 
 /** The visitor's own pauses counted when the replay began. */
 let pausesAtStart = 0;
@@ -62,7 +83,7 @@ export const session = new ReplayController({
     const s = store.get(), c = chosen(s), index = c ? visibleTokens(c.reply)[token] : undefined;
     if (!c || index === undefined) return;
     const word = { ...c.ref, index };
-    store.set({ word, view: viewFor(s, word) });
+    store.set({ word, view: "push" });
   },
   left: (reason, follow) => {
     // A token chosen or a candidate picked during the replay is the visitor's own pause, as it is in
@@ -79,23 +100,33 @@ store.subscribe(() => { if (session.sync() && store.get().sheet) session.pause()
  * unless that reply can be replayed now. The selection is held by the replay, so following pauses
  * for as long as it lasts and comes back as it was when it ends.
  */
-export function startReplay(scope: Scope, of?: { sample: number; side: Side }): boolean {
+export function startReplay(scope: Scope, of?: Run): boolean {
   const s = store.get();
-  if (!s.stage3d) return false;
-  let word = s.word;
+  if (!s.stage3d || (!of && replayWait(s))) return false;
+  let word = replayWord(s);
   if (of) {
     const turn = s.turns.findIndex((t) => t.id === of.sample), t = s.turns[turn];
-    const index = visibleTokens(of.side === "normal" ? t?.normal : t?.changed)[0];
+    const index = replayableTokens(of.side === "normal" ? t?.normal : t?.changed)[0];
     if (index === undefined) return false;
     word = { turn, side: of.side, index };
   }
   if (!word || !replaySubject({ ...s, word })?.ready) return false;
   const following = s.follow;
   if (session.get().mode === "live") pausesAtStart = s.pauseRevision;
-  store.set({ word, view: viewFor(s, word), follow: false });
+  store.set({ word, view: "push", follow: false });
   if (session.enter(scope, following)) return true;
   if (following) setFollowing(true);
   return false;
+}
+
+/** Switch runs for this sample, pausing at the same step and visible token position. */
+export function switchReplayRun(side: Side) {
+  const s = store.get(), r = session.get();
+  if (r.mode !== "replay" || side === s.word?.side) return;
+  const word = replayWord(s, side);
+  if (!word || !replaySubject({ ...s, word })?.ready) return;
+  store.set({ word, view: "push" });
+  if (r.step < r.beats) session.seek(r.step);
 }
 
 export function useReplay<T>(select: (s: Snapshot) => T): T {
@@ -103,30 +134,35 @@ export function useReplay<T>(select: (s: Snapshot) => T): T {
   return useSyncExternalStore(session.subscribe, read, read);
 }
 
-type Linked = Pick<Stage, "setDriver" | "setPlayhead" | "holdOutput" | "setCandidates">;
+type Linked = Pick<Stage, "setDriver" | "setPlayhead" | "holdReadings" | "setCandidates" | "setValues" | "setPoses">;
+type Readings = {
+  values: Parameters<Stage["setValues"]>;
+  poses: Parameters<Stage["setPoses"]>[0];
+  candidates: Parameters<Stage["setCandidates"]>[0];
+};
 
-/**
- * Join the replay to a stage: the stage lends its frames and draws the playhead, and the output shows
- * a result only for the token it was handed for. The replay reaches a token (by playing on, by a
- * step, or because the visitor selected one, in this reply, the other reply or another sample) before
- * React hands over that token's candidates with `deliver`. Until then the output is held empty.
- * `deliver` must be called with outputIdentity of the state the candidates were made from.
- */
+/** The frame driver can reach a new token before React commits its data. Hold its readings until
+ * the matching values, run settings and output have all arrived. */
 export function linkStage(stage: Linked) {
-  let delivered = "";
+  let delivered = "", last: Readings | undefined;
+  const hold = () => stage.holdReadings(session.get().mode === "replay" && readingIdentity(store.get(), true) !== delivered);
   const show = () => {
     const r = session.get();
-    stage.setPlayhead(r.mode === "replay" ? r.step : null, fadeMs(r.speed));
-    stage.holdOutput(r.mode === "replay" && outputIdentity(store.get()) !== delivered);
+    stage.setPlayhead(r.mode === "replay" ? r.step : null, r.playing && r.step < r.beats ? fadeMs(r.speed) : 0);
+    hold();
   };
   stage.setDriver(session);
   show();
   const off = session.subscribe(show);
   return {
-    deliver(list: Parameters<Stage["setCandidates"]>[0], identity: string) {
+    deliver(readings: Readings, identity: string) {
+      if (identity !== readingIdentity(store.get(), session.get().mode === "replay")) return;
+      if (last?.poses !== readings.poses) stage.setPoses(readings.poses);
+      if (last?.values[0] !== readings.values[0] || last?.values[1] !== readings.values[1]) stage.setValues(...readings.values);
+      if (last?.candidates !== readings.candidates) stage.setCandidates(readings.candidates);
+      last = readings;
       delivered = identity;
-      stage.setCandidates(list);
-      stage.holdOutput(session.get().mode === "replay" && outputIdentity(store.get()) !== delivered);
+      hold();
     },
     close() { off(); stage.setDriver(null); session.pause(); },
   };

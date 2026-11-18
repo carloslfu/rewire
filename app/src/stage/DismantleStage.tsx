@@ -2,7 +2,7 @@
 // are the selected token's measured pushes, Replay walks a finished answer's values through the
 // architecture token by token, and Punch writes the same change spec as the strength controls. Every
 // reading here is also given in words and numbers, so the bench works without the drawing.
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FloorDetail, Focus } from "../model/types.ts";
 import { guideAddress, guideTarget } from "../path/steps.ts";
 import { applyChips, chipsWith, floorDetail, piece, retryComparison, setFocus, setTowerView, stepData } from "../state/actions.ts";
@@ -16,7 +16,7 @@ import { ReplayStatus } from "../ui/ReplayStatus.tsx";
 import { tokenLabel } from "../ui/token-label.ts";
 import { chosen, comparisonTarget, replyMark, towerValues } from "../ui/word.ts";
 import { ReplayBar } from "./ReplayBar.tsx";
-import { linkStage, outputIdentity, replayWait, session, startReplay, useReplay } from "./replay-session.ts";
+import { linkStage, readingIdentity, replayWait, runName, session, startReplay, useReplay } from "./replay-session.ts";
 import { activityValues, attentionRow, layerPlates, outputBars, pushValues, rmsLabel, tray } from "./adapters.ts";
 import { buildArch, groupHeads, type Part, partIndex, partName, samePart } from "./arch.ts";
 import { blocked, focusOf, isTarget, partChanged, partOf, poseOf, punched, restored, restoreLabel, sameFocus, strengthOf } from "./intervene.ts";
@@ -53,6 +53,7 @@ export default function DismantleStage() {
   const st = stepData(useStore((s) => s.step));
   const arch = useMemo(() => buildArch(model), [model]);
   const [stage, setStage] = useState<Stage | null>(null);
+  const [replyReplay, setReplyReplay] = useState(0);
   const [showActivity, setShowActivity] = useState(false);
   const [selected, setSelected] = useState<Part | null>(() => partOf(store.get().focus));
   const replaying = useReplay((r) => r.mode === "replay");
@@ -68,7 +69,8 @@ export default function DismantleStage() {
   const displayed = activityMode ? activity : values;
   const running = useMemo(() => (vals ? runningPush(model, vals) : null), [model, vals]);
   const coverage = useMemo(() => pushCoverage(model, vals), [model, vals]);
-  const poses = useMemo(() => arch.parts.map((p) => poseOf(chips, p, model)), [arch, chips, model]);
+  const drawingChips = replaying && c ? c.reply.changes : chips;
+  const poses = useMemo(() => arch.parts.map((p) => poseOf(drawingChips, p, model)), [arch, drawingChips, model]);
   const changes = describeChips(chips);
   const reason = blocked({ mode, busy, replay, teachingBusy });
   const wq = c ? text(c.tok.id) : "";
@@ -123,34 +125,32 @@ export default function DismantleStage() {
   const candidates = useMemo(() => {
     return c ? outputBars(c.tok, 5).map((x) => ({ label: text(x.id), p: x.p, chosen: x.chosen })) : [];
   }, [c]);
-  const candidateKey = JSON.stringify(candidates);
-
-  useEffect(() => { stage?.setValues(displayed?.scaled ?? null, activityMode ? "activity" : "signed"); }, [stage, displayed, activityMode]);
-  useEffect(() => { stage?.setPoses(poses); }, [stage, poses]);
   useEffect(() => { stage?.setMarked(marked); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [stage, marked && partIndex(model, marked)]);
-  useEffect(() => { stage?.setBay(bay); }, [stage, bay]);
+  useLayoutEffect(() => { stage?.setBay(bay); }, [stage, bay]);
   // The measured tensors of the selected layer, each number readable on its own. The tile of the one
   // being read is outlined on its plate once the visitor has chosen it, here or by tapping a tile.
   const matrices = useMemo(() => (plates ? plateMatrices(plates) : []), [plates]);
   const [cell, setCell, picked] = useCell(matrices);
   useEffect(() => { stage?.markTile(picked && cell ? { plate: cell.id, index: cell.index } : null); }, [stage, picked, cell]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     stage?.setTray(slots.map((s, i) => ({ label: trayLabels[i], weight: s.weight })), slots.length - 1, c?.input ?? null, selected?.kind === "head" && row ? selected : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, trayKey]);
   // The stage lends the replay its frames and draws its playhead. Each step reaches the stage directly,
   // without a render of this component. With no stage (another bench, a drawing that could not start, a rebuilt context) nothing moves.
-  // This effect comes before the one that hands over candidates, so the link exists when they arrive.
+  // The link is installed before the measurements are handed over.
   const link = useRef<ReturnType<typeof linkStage> | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!stage) return;
     const made = link.current = linkStage(stage);
     return () => { made.close(); link.current = null; };
   }, [stage]);
   // Keyed on the token's identity too: a replay that reached this token is waiting for exactly this
   // handover, even when the numbers are the same as the last token's.
-  const outputKey = outputIdentity({ model, version, turns, word, fork });
-  useEffect(() => { link.current?.deliver(candidates, outputKey); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [stage, candidateKey, outputKey]);
+  const readingKey = readingIdentity({ model, version, turns, word, fork, view }, replaying);
+  useLayoutEffect(() => {
+    link.current?.deliver({ candidates, poses, values: [displayed?.scaled ?? null, activityMode ? "activity" : "signed"] }, readingKey);
+  }, [stage, candidates, poses, displayed, activityMode, readingKey]);
 
   // ------------------------------------------------------------ replay (the stage link is with the data above)
   // Leaving this bench ends the replay. It never starts again by itself.
@@ -160,7 +160,8 @@ export default function DismantleStage() {
   useEffect(() => {
     if (!request || !stage) return;
     store.set({ replayRequest: null });
-    if (!startReplay("answer", request)) store.set({ announce: replayWait(store.get()) || "That reply cannot be replayed now." });
+    if (startReplay("answer", request)) setReplyReplay(request.n);
+    else store.set({ announce: replayWait(store.get()) || "That reply cannot be replayed now." });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.n, stage]);
 
@@ -201,7 +202,7 @@ export default function DismantleStage() {
       lines.push(activityMode ? `${part.kind === "layer" ? "Largest part output" : "Output size"} · ${rmsLabel(v)}`
         : `${scoreLabel(v)} ${view === "difference" ? "change in direct push" : part.kind === "layer" ? "direct push from all its parts" : "direct push"} for “${wq}”`);
     } else if (!awaitingOutput && (part.kind === "head" || part.kind === "mlp")) lines.push(c ? "Reading unavailable" : "Select a reply token to see its reading");
-    if (isTarget(part) && strengthOf(chips, part) !== 1) lines.push(`Signal ${S.mult(strengthOf(chips, part))}`);
+    if (isTarget(part) && strengthOf(drawingChips, part) !== 1) lines.push(`Signal ${S.mult(strengthOf(drawingChips, part))}`);
     if (part.kind !== "layer" && "floor" in part && poses[partIndex(model, { kind: "layer", floor: part.floor })].off) lines.push("Its layer is off");
     if (tool === "punch") lines.push(isTarget(part) ? (strengthOf(chips, part) === 0 ? "Click to put it back" : "Click to knock it out") : "Punch works on heads, MLPs and layers");
     if (tool === "grab" && isTarget(part)) lines.push("Drag to move it. The model does not change.");
@@ -215,21 +216,23 @@ export default function DismantleStage() {
       notes.push(activityMode ? rmsLabel(v) : v !== undefined && Number.isFinite(v) ? scoreLabel(v) : "unavailable");
     }
     if (isTarget(part)) {
-      const mult = strengthOf(chips, part);
-      if (mult !== 1) notes.push(S.mult(mult)); else if (partChanged(chips, part)) notes.push("changed");
+      const mult = strengthOf(drawingChips, part);
+      if (mult !== 1) notes.push(S.mult(mult)); else if (partChanged(drawingChips, part)) notes.push("changed");
     }
     if (marked && samePart(marked, part)) notes.push("example target");
     return notes.join(" · ");
   };
 
-  const status = <span>{model.id === "tiny" ? "Your tiny model" : "Qwen3-0.6B"} · {model.floors} layers · {changes.length ? `${changes.length} active ${changes.length === 1 ? "change" : "changes"}` : "original model"}{reason ? ` · ${reason}` : ""}</span>;
+  const status = <span>{model.id === "tiny" ? "Your tiny model" : "Qwen3-0.6B"} · {model.floors} layers · {replaying && c
+    ? `${runName(c.ref.side)} run`
+    : changes.length ? `${changes.length} active ${changes.length === 1 ? "change" : "changes"}` : "original model"}{reason ? ` · ${reason}` : ""}</span>;
 
   const meterBar = <div className="window-meter-bar">
     <div className="seg" role="group" aria-label="Model readings">
       <button type="button" aria-pressed={view === "push" && !showActivity} onClick={() => { setShowActivity(false); setTowerView("push"); }}>{S.viewPush}</button>
       <button type="button" aria-pressed={activityMode} onClick={() => { setShowActivity(true); setTowerView("push"); }}>Activity</button>
-      <button type="button" aria-pressed={view === "difference"} disabled={!hasDiff} title={hasDiff ? S.diffNote : diffHint} aria-describedby={hasDiff ? undefined : diffId}
-        onClick={() => setTowerView("difference")}>{S.viewDiff}</button>
+      {!replaying && <button type="button" aria-pressed={view === "difference"} disabled={!hasDiff} title={hasDiff ? S.diffNote : diffHint} aria-describedby={hasDiff ? undefined : diffId}
+        onClick={() => setTowerView("difference")}>{S.viewDiff}</button>}
     </div>
     {drawn && <div className="window-meter-key" aria-label="Meter color key">
       {activityMode ? <span><i className="meter-activity" />Larger output</span> : <>
@@ -240,7 +243,7 @@ export default function DismantleStage() {
   </div>;
   const transport = <section className="stage-transport" aria-label={`${drawn ? "Colors" : "Numbers"} and totals for the selected token`}>
     {c && !replaying && <div className="stage-token"><button type="button" className="linkish" title="Its probability, the candidates it was drawn from, and its dictionary entry" onClick={() => setFocus({ kind: "word" })}>Details and candidates for “{wq}” →</button></div>}
-    {!hasDiff && <p id={diffId} className={turn ? "note comparison-status" : "sr-only"}>{diffHint}
+    {!replaying && !hasDiff && <p id={diffId} className={turn ? "note comparison-status" : "sr-only"}>{diffHint}
       {canRetry && <> <button type="button" className="linkish" disabled={mode !== "live" || busy} onClick={() => void retryComparison()}>Retry comparison</button></>}</p>}
     {marked && st && <button type="button" className="example-marker-key" onClick={() => { select(marked); stage?.focus(marked); }}><span aria-hidden="true" />Marked: {guideAddress(st)}</button>}
     {!replaying && <p className="stage-readout" role="status">
@@ -260,7 +263,7 @@ export default function DismantleStage() {
     </dl>}
     {activityMode ? <p className="note">Activity measures how much each head or MLP adds to the model’s shared state, as a root mean square. Longer meters show larger outputs within this token. An empty track means zero. Dark glass means the reading is unavailable or its replay step is ahead.</p>
       : drawn && <PushLegend view={view} scale={values && coverage.measured > 0 ? values.scale : null} token={!!c} word={wq} values={!awaitingOutput && coverage.complete ? vals : null} model={model} />}
-    <p className="note">Replay shows values the model already measured while writing, slowed down and in the order the model computes them. Nothing is generated again. It is not a timing of the real computation.</p>
+    <p className="note">{replaying ? "Back to live to compare both runs in the same context. " : ""}Replay shows values the model already measured while writing, slowed down and in the order the model computes them. Nothing is generated again. It is not a timing of the real computation.</p>
   </section>;
 
   const how = c ? written(c.tok) : null;
@@ -276,12 +279,12 @@ export default function DismantleStage() {
     tools={["explore", "grab", "punch"]} selected={selected} onSelect={select} onPunch={punch} describe={describe}
     punchHelp="Click a head, an MLP or a layer to knock it out. Its real output is set to zero and your samples update. Click it again to put it back."
     annotate={annotate} onTile={(plate, index) => setCell({ id: plate, index })} attention={attention}
-    onHidden={() => session.pause()} onStage={setStage} railTitle="Questions and comparisons" railName="Questions" bar={<>{meterBar}<ReplayBar activity={activityMode} /></>} replaying={replaying} transport={transport}
+    onHidden={() => session.pause()} onStage={setStage} railTitle="Questions and comparisons" railName="Questions" bar={<>{meterBar}<ReplayBar activity={activityMode} /></>} replaying={replaying} replyReplay={replyReplay} transport={transport}
     restore={{ label: "Restore model", disabled: !!reason || !changes.length, run: () => void applyChips({}) }}>
     <ReplayStatus compact />
     {part ? <>
       <PartControls key={`${model.id}.${part.kind}.${part.floor}.${part.kind === "head" ? part.head : ""}`} part={focusOf(part) as Extract<Focus, { kind: "head" | "memory" | "floor" }>}
-        disabled={!!reason} onClose={() => select(null)} showReading={!awaitingOutput} outputSize={c ? rmsLabel(partActivity ?? undefined) : undefined} />
+        disabled={!!reason} onClose={() => select(null)} showReading={!awaitingOutput} replaying={replaying} outputSize={c ? rmsLabel(partActivity ?? undefined) : undefined} />
       <div className="stage-part-actions">
         <button type="button" className="btn" disabled={!!reason} onClick={() => stage?.react(part, punch(part))}>{strengthOf(chips, part) === 0 ? "Put back" : "Knock out"}</button>
         <button type="button" className="btn quiet" disabled={!!reason || !partChanged(chips, part)} onClick={() => void chipsWith((spec) => restored(spec, part))}>{restoreLabel(part)}</button>

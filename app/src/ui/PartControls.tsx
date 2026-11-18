@@ -43,8 +43,8 @@ export function MoreExperiments({ disabled }: { disabled: boolean }) {
   </section>;
 }
 
-export function PartControls({ part, disabled, onClose, showReading, outputSize }: {
-  part: Part; disabled: boolean; onClose: () => void; showReading: boolean; outputSize?: string;
+export function PartControls({ part, disabled, onClose, showReading, outputSize, replaying }: {
+  part: Part; disabled: boolean; onClose: () => void; showReading: boolean; outputSize?: string; replaying?: boolean;
 }) {
   const chips = useStore((s) => s.chips);
   const c = chosen(useStore((s) => s));
@@ -62,9 +62,10 @@ export function PartControls({ part, disabled, onClose, showReading, outputSize 
   const concept = part.kind === "floor" && chips.concept && chips.concept.strength !== 0 && chips.concept.floor === part.floor ? chips.concept : null;
   return <section className="scope-part" aria-label="Selected component controls">
     <div className="section-heading"><h3>{name}</h3><button className="btn quiet" onClick={onClose} aria-label="Close component controls">Close</button></div>
-    {part.kind === "memory" && part.floor === 27 && chips.lesson && <p className="note changed-text">Includes your learned weights. Off disables the MLP and its learned addition together.</p>}
     {showReading && value !== undefined && c && <p className="scope-measurement"><span className="num">{scoreLabel(value)}</span> {view === "difference" ? "change in direct push" : "direct push"} for “{tokenLabel(piece(c.tok.id))}”</p>}
     {showReading && outputSize && <p className="scope-measurement">{part.kind === "floor" ? "Largest part output" : "Output size"}{view === "difference" ? " in the original run" : ""} <span className="num">{outputSize}</span></p>}
+    {replaying && <p className="note">The settings below apply to the live model. Editing ends replay.</p>}
+    {part.kind === "memory" && part.floor === 27 && chips.lesson && <p className="note changed-text">Includes your learned weights. Off disables the MLP and its learned addition together.</p>}
     {geometry && <p className="scope-measurement changed-text">{geometryLabel(geometry)} · Strength below applies on top.</p>}
     {zeroed > 0 && <p className="scope-measurement changed-text">{zeroed === 1 ? "One weight" : `${zeroed} weights`} in this layer set to zero.</p>}
     {concept && <p className="scope-measurement changed-text">“{concept.id}” pushed here, strength {concept.strength}.</p>}

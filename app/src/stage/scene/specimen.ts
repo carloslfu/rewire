@@ -382,9 +382,10 @@ export class Specimen {
 
   private placeMarker() {
     const tall = this.tall + this.lift, frac = this.playhead === null ? 1 : this.height(this.playhead);
-    this.flow.scale.y = Math.max(1e-4, this.values ? frac * tall : 1e-4);
-    this.flow.visible = !!this.values;
-    this.pulse.visible = this.playhead !== null && !this.reducedMotion && !!this.values;
+    const measured = !!this.values && !this.readingsHeld;
+    this.flow.scale.y = Math.max(1e-4, measured ? frac * tall : 1e-4);
+    this.flow.visible = measured;
+    this.pulse.visible = this.playhead !== null && !this.reducedMotion && measured;
     this.pulse.position.set(this.arch.spineX, this.spineY[0] + frac * tall, this.arch.spineZ);
   }
 
@@ -579,7 +580,6 @@ export class Specimen {
   /** Real candidate probabilities as bars on the output block. */
   setCandidates(list: { p: number; chosen: boolean }[]) {
     this.candidates = list.slice(0, MAX_BARS);
-    this.outputHeld = false;
     this.layoutBars();
     this.recolor();
   }
@@ -604,19 +604,18 @@ export class Specimen {
   }
 
   /** Whether the output of the selected token is on show: always in live, and in a replay only after its last step. */
-  get outputShown(): boolean { return this.playhead === null && !this.outputHeld; }
+  get outputShown(): boolean { return this.playhead === null && !this.readingsHeld; }
 
-  /**
-   * Keep the output off show while the bars still belong to another token. A replay moves to a token
-   * before the page hands over that token's candidates; in between, nothing is better than the wrong result.
-   */
-  holdOutput(held: boolean) {
-    if (held === this.outputHeld) return;
-    this.outputHeld = held;
+  /** Withhold token-dependent readings until the selection and the render agree. */
+  holdReadings(held: boolean) {
+    if (held === this.readingsHeld) return;
+    this.readingsHeld = held;
+    this.placeMarker();
+    this.recolor();
     this.layoutBars();
   }
-  private outputHeld = false;
-  get held(): boolean { return this.outputHeld; }
+  private readingsHeld = false;
+  get held(): boolean { return this.readingsHeld; }
 
   /** Attention of one head drawn as arcs from the context tray to the head. */
   setArcs(target: number, weights: number[]) {
@@ -771,13 +770,13 @@ export class Specimen {
 
   private recolor() {
     const a = this.arch, th = this.theme, H = a.heads, KV = a.kvHeads;
-    const t = this.playhead, model = a.model;
+    const t = this.playhead, model = a.model, values = this.readingsHeld ? null : this.values;
     const attention = new Float32Array(a.floors).fill(NaN);
     for (let i = 0; i < this.n; i++) {
-      const p = a.parts[i], v = this.values ? this.values[i] : NaN, pose = this.poses[i];
+      const p = a.parts[i], v = values?.[i] ?? NaN, pose = this.poses[i];
       const k = Number.isNaN(v) ? 0 : lit(beatOf(model, p), t);
       const frozen = "floor" in p && !!this.frozen?.[p.floor];
-      // The chassis shows current controls. The inserts show the chosen run or comparison.
+      // The chassis and its meters use the settings and readings supplied by the bench.
       const body = pose.off ? DULL : frozen ? DIM : WHITE;
       if (p.kind === "head") {
         const at = p.floor * H + p.head;
@@ -805,7 +804,7 @@ export class Specimen {
       this.paint(this.rings, L * 2, this.tint(Math.max(-1, Math.min(1, v))));
     }
     // The dictionary row the model looked up lights only when its push was measured.
-    const embed = this.values ? this.values[0] : NaN, tiles = this.lookupTile;
+    const embed = values?.[0] ?? NaN, tiles = this.lookupTile;
     tiles.visible = this.lookup !== null && !Number.isNaN(embed);
     if (tiles.visible) {
       const c = this.tint(embed, lit(0, t));

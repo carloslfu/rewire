@@ -3,6 +3,7 @@
 import { useContext, useEffect, useId, useMemo, useRef } from "react";
 import { chooseWord, piece } from "../state/actions.ts";
 import { store, useStore } from "../state/store.ts";
+import { chips as describeChips } from "../ui/describe.ts";
 import { modelPct, pct, signed } from "../ui/color.ts";
 import { FollowControl } from "../ui/FollowControl.tsx";
 import { useNarrow } from "../ui/useNarrow.ts";
@@ -13,7 +14,7 @@ import { pushIndex } from "./arch.ts";
 import { chosen, towerValues, visibleTokens } from "../ui/word.ts";
 import { beatAt, beatLabel, pushCoverage, pushSoFar, runningPush } from "./playback.ts";
 import { type Scope, SPEEDS } from "./replay.ts";
-import { replayWait, session, startReplay, useReplay } from "./replay-session.ts";
+import { replayWait, replayWord, runName, session, startReplay, switchReplayRun, useReplay } from "./replay-session.ts";
 
 const text = (id: number) => tokenLabel(piece(id));
 
@@ -39,6 +40,7 @@ export function ReplayBar({ activity = false }: { activity?: boolean } = {}) {
   const busy = useStore((s) => s.busy);
   const update = useStore((s) => s.replay);
   const mode = useStore((s) => s.mode);
+  const stage3d = useStore((s) => s.stage3d);
   const id = useId();
   const narrow = useNarrow();
   const immersive = useContext(Immersive);
@@ -51,10 +53,17 @@ export function ReplayBar({ activity = false }: { activity?: boolean } = {}) {
   const vals = useMemo(() => towerValues(c, view), [c, view]);
   const running = useMemo(() => (vals ? runningPush(model, vals) : null), [model, vals]);
   const complete = useMemo(() => pushCoverage(model, vals).complete, [model, vals]);
-  const wait = replayWait({ model, version, turns, word, fork, busy, replay: update });
+  const wait = replayWait({ model, version, turns, word, fork, busy, stage3d, replay: update });
   const replaying = rp.mode === "replay";
-  const visible = visibleTokens(c?.reply), at = c ? visible.indexOf(c.ref.index) : -1;
+  const visible = useMemo(() => visibleTokens(c?.reply), [c?.reply]);
+  const at = c ? visible.indexOf(c.ref.index) : -1;
   const wq = c ? text(c.tok.id) : "";
+  const launch = !wait && !replaying ? replayWord({ turns, word }) : null;
+  const launchesChanged = launch?.side === "changed";
+  const mappedToken = launchesChanged && c ? visibleTokens(c.turn.changed).indexOf(launch.index) + 1 : 0;
+  const paired = useMemo(() => !!replayWord({ turns, word }, "normal") && !!replayWord({ turns, word }, "changed"), [turns, word]);
+  const replayedEdits = replaying && c?.ref.side === "changed" ? c.reply : undefined;
+  const edits = useMemo(() => replayedEdits ? describeChips(replayedEdits.changes, replayedEdits.read) : [], [replayedEdits]);
 
   useEffect(() => {
     if (moved.current) main.current?.focus();
@@ -73,15 +82,16 @@ export function ReplayBar({ activity = false }: { activity?: boolean } = {}) {
   const token = c ? <div className="token-navigation" role="group" aria-label={replaying ? "Token in the replay" : "Selected token"}>
     <button type="button" className="btn quiet" aria-label="Previous token" title={replaying ? "Previous token. Pauses the replay." : "Previous token"} disabled={at <= 0} onClick={() => move(-1)}>‹</button>
     <strong title={waitingForOutput ? "Awaiting output" : wq}>{waitingForOutput ? "…" : `“${wq}”`}</strong>
+    {replaying && <span className="replay-token-position num" aria-hidden="true">{at + 1}/{visible.length}</span>}
     <button type="button" className="btn quiet" aria-label="Next token" title={replaying ? "Next token. Pauses the replay." : "Next token"} disabled={at < 0 || at >= visible.length - 1} onClick={() => move(1)}>›</button>
     <span className="note">Token {at + 1} of {visible.length} · {c.ref.side === "normal" ? (model.id === "tiny" ? "Reply" : "Original reply") : "Changed reply"}</span>
   </div> : <p className="note replay-empty">{update ? "Updating samples…" : busy ? "Writing the reply…" : mode === "live" ? "Ask a question to light up the model." : "The model lights up once it is ready and you ask a question."}</p>;
 
   const playAnswer = <button ref={main} type="button" className="btn primary replay-enter" disabled={!!wait} aria-describedby={`${id}-how`}
-    title={wait || "Play this reply from its first token"} onClick={() => enter("answer")}><Icon name="play" />Replay answer</button>;
+    title={wait || "Play from the first token through the whole model"} onClick={() => enter("answer")}><Icon name="play" />{launchesChanged ? "Replay changed answer" : "Replay answer"}</button>;
   const liveControls = <>
     <div className="replay-follow"><FollowControl /></div>
-    <p className="note replay-how" id={`${id}-how`}>{wait || <><span className="replay-what">Walks this reply through the whole model, token by token.</span> <button type="button" className="linkish" onClick={() => enter("token")}>Replay only this token</button></>}</p>
+    <p className="note replay-how" id={`${id}-how`}>{wait || <><span className="replay-what">Walks {launchesChanged ? "the changed reply" : "this reply"} through the whole model, token by token.</span> <button type="button" className="linkish" onClick={() => enter("token")}>{launchesChanged && c?.ref.side !== "changed" ? `Replay changed token ${mappedToken}` : "Replay only this token"}</button></>}</p>
   </>;
   if (!replaying) {
     if (narrow && !immersive) return <section className="live-mobile" aria-label="Live output and replay">
@@ -95,10 +105,13 @@ export function ReplayBar({ activity = false }: { activity?: boolean } = {}) {
     </section>;
   }
 
+  const activeRun = c ? runName(c.ref.side) : "Original";
+  const editDescription = edits.length === 1 ? edits[0].label : edits.length ? `${edits.length} model edits` : "";
   const whole = rp.step >= rp.beats, beat = beatAt(model, rp.step - 1);
+  const probability = whole && c ? Math.exp(c.tok.lp1) : NaN;
   // A total is given only when every push is a number. Otherwise the readout says the measurement is incomplete.
   const total = running && complete ? signed(running[running.length - 1]) : "";
-  const partial = running && !complete ? ` Some ${view === "difference" ? "changes in direct push" : "direct pushes"} are unavailable for this token, so no total is given.` : "";
+  const partial = running && !complete ? " Some direct pushes are unavailable for this token, so no total is given." : "";
   let activityText = "";
   if (activity && !whole && beat.kind !== "output") {
     const readings = c?.tok.activity;
@@ -111,7 +124,8 @@ export function ReplayBar({ activity = false }: { activity?: boolean } = {}) {
       activityText = ` ${beat.kind === "mlp" ? "MLP output" : "Embedding size"} · ${rmsLabel(size)}.`;
     }
   }
-  const guess = !whole && beat.kind === "mlp" ? c?.tok.guesses?.[beat.floor]?.[0] : undefined;
+  // The last projection reads the same final state as Words out. Show it only at the output step.
+  const guess = beat.kind === "mlp" && beat.floor < model.floors - 1 ? c?.tok.guesses?.[beat.floor]?.[0] : undefined;
   const where = `Token ${rp.token + 1} of ${rp.tokens}, step ${rp.step} of ${rp.beats}`;
   const spoken = rp.playing ? `Replay playing: ${rp.scope === "answer" ? "the whole answer" : "this token"}.`
     : rp.ended ? `Replay finished at token ${rp.token + 1} of ${rp.tokens}.` : `Replay paused. ${where}, ${whole ? "token complete" : beatLabel(beat)}.`;
@@ -136,7 +150,19 @@ export function ReplayBar({ activity = false }: { activity?: boolean } = {}) {
     </div>;
 
   return <section className="replay-bar replaying" aria-label="Replay of this answer">
-    <p className="sr-only" aria-live="polite">{spoken}</p>
+    <p className="sr-only" aria-live="polite">{`${spoken} ${activeRun} run.`}</p>
+    <div className="replay-run">
+      <div className="replay-run-sample">
+        <span id={`${id}-run`}>Replay run</span>
+        {c && <span className="replay-sample-number" title={c.turn.user}>{model.id === "tiny" ? "Text" : `Sample ${c.ref.turn + 1}`}</span>}
+      </div>
+      {paired ? <div className="seg" role="group" aria-labelledby={`${id}-run`}>
+        {(["normal", "changed"] as const).map((side) => <button key={side} type="button" aria-pressed={c?.ref.side === side}
+          title={`Show the ${runName(side).toLowerCase()} reply at this token position and pause`}
+          onClick={() => switchReplayRun(side)}>{runName(side)}</button>)}
+      </div> : <strong>{activeRun}</strong>}
+      {editDescription && <span className="replay-run-edits" title={edits.map(e => e.label).join(", ")}>{editDescription}</span>}
+    </div>
     <div className="replay-head">
       <span className={`replay-mode on ${state}`}>{rp.playing ? "Replaying" : rp.ended ? (compact ? "Finished" : "Replay finished") : (compact ? "Paused" : "Replay paused")}</span>
       {token}
@@ -161,9 +187,9 @@ export function ReplayBar({ activity = false }: { activity?: boolean } = {}) {
       </label>
     </div>
     <p className="replay-readout">
-      {!c ? "" : whole ? <>{rp.ended ? (rp.scope === "answer" ? "End of the answer. " : "End of this token. ") : ""}Token written: “{wq}”, {Number.isFinite(Math.exp(c.tok.lp1)) ? `which the model gave ${modelPct(Math.min(1, Math.exp(c.tok.lp1)))}.` : "whose probability is unavailable."}{!activity && (total ? ` ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${total}.` : partial)}</>
-        : <><strong>{beatLabel(beat)}.</strong>{activity ? activityText : view === "push" && total ? ` Direct pushes so far: ${signed(pushSoFar(running!, rp.step))} of ${total}.` : view === "push" ? partial : ""}
-          {guess ? ` If it stopped after this layer it would say “${text(guess.id)}” (${pct(guess.p)}).` : ""}</>}
+      {!c ? "" : whole ? <><strong>“{wq}”</strong>{Number.isFinite(probability) ? <> · <strong className="num">{modelPct(Math.min(1, probability))}</strong> model probability.</> : " · Probability unavailable."}{!activity && (total ? ` Direct push total ${total}.` : partial)}</>
+        : <><strong>{beatLabel(beat)}.</strong>{activity ? activityText : total ? ` Direct pushes so far: ${signed(pushSoFar(running!, rp.step))} of ${total}.` : partial}
+          {guess ? ` Top candidate at this layer “${text(guess.id)}” (${pct(guess.p)}).` : ""}</>}
     </p>
     {compact ? <details className="replay-settings" onKeyDown={(event) => {
       if (event.key !== "Escape" || !event.currentTarget.open) return;
@@ -171,7 +197,7 @@ export function ReplayBar({ activity = false }: { activity?: boolean } = {}) {
       event.currentTarget.open = false;
       event.currentTarget.querySelector("summary")?.focus();
     }}>
-      <summary>Replay options</summary>
+      <summary aria-label="Replay options">Options</summary>
       {options}
     </details> : options}
   </section>;

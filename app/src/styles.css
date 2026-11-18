@@ -694,6 +694,7 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .stage-readout { margin-top: 6px; }
 .window-meter-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 5px 12px; padding: 6px 20px; border-bottom: 1px solid var(--line); }
 .window-meter-key { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; color: var(--muted); font-size: 11px; }
+.stage-bar:has(.replay-bar.replaying) .window-meter-key { gap: 2px 8px; }
 .window-meter-key span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .window-meter-key i { width: 10px; height: 6px; border-radius: 2px; }
 .meter-up { background: var(--pos); }
@@ -707,6 +708,9 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
   .window-meter-bar { padding: 4px 10px; }
   .window-meter-bar .seg button { min-height: 44px; }
 }
+@media (max-width: 405px) {
+  .stage-bar:has(.replay-bar.replaying) .window-meter-key { flex-direction: column; align-items: flex-start; }
+}
 @media (max-width: 350px) {
   .window-meter-bar .seg button { padding-inline: 6px; white-space: nowrap; }
 }
@@ -715,6 +719,12 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .stage-bar { flex: none; border-bottom: 1px solid var(--line); background: var(--panel); }
 .replay-bar { display: grid; gap: 7px; padding: 9px 20px 10px; font-size: 12px; }
 .replay-bar.replaying { background: color-mix(in oklab, var(--soft) 60%, var(--panel)); box-shadow: inset 3px 0 var(--pos); }
+.replay-run { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.replay-run-sample { display: flex; flex-direction: column; font-weight: 650; line-height: 1.25; }
+.replay-sample-number, .replay-run-edits { color: var(--muted); font-weight: 400; font-size: 11px; }
+.replay-run .seg button { padding-inline: 12px; font-size: 12px; }
+.replay-run .seg button:focus-visible { outline-offset: -3px; }
+.replay-run-edits { min-width: 0; overflow-wrap: anywhere; }
 .replay-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .replay-mode { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 24px; padding: 2px 10px; border: 1px solid transparent; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; white-space: nowrap; }
 .replay-mode::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
@@ -728,6 +738,7 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .replay-head .token-navigation { flex: 1 1 190px; min-width: 0; }
 .replay-head .token-navigation strong { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .replay-head .token-navigation .note { min-width: 0; margin-left: 4px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.replay-token-position { display: none; }
 .replay-empty { flex: 1 1 190px; margin: 0; font-size: 12px; }
 .replay-bar .btn { min-height: 34px; padding: 5px 12px; font-size: 13px; }
 .replay-bar .token-navigation .btn { min-height: 28px; padding: 0 6px; font-size: 22px; }
@@ -865,7 +876,7 @@ html:has(.stage-bench.immersive) { overflow: hidden; }
 .stage-bench.immersive .replay-bar:not(.replaying), .stage-bench.immersive .replay-bar.replaying { display: flex; flex-wrap: wrap; align-items: center; }
 .stage-bench.immersive .replay-bar:not(.replaying) .replay-head { flex: 1 1 420px; min-width: 0; }
 .stage-bench.immersive .replay-follow .follow-hint { display: none; }
-.stage-bench.immersive .replay-how, .stage-bench.immersive .replay-bar.replaying > .replay-head, .stage-bench.immersive .replay-progress { flex: 1 1 100%; }
+.stage-bench.immersive .replay-run, .stage-bench.immersive .replay-how, .stage-bench.immersive .replay-bar.replaying > .replay-head, .stage-bench.immersive .replay-progress { flex: 1 1 100%; }
 .stage-bench.immersive .replay-transport { flex: 1 1 520px; flex-wrap: nowrap; min-width: 0; }
 .stage-bench.immersive .replay-scrub { flex-wrap: nowrap; }
 .stage-bench.immersive .replay-scrub-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -908,7 +919,6 @@ html:has(.stage-bench.immersive) { overflow: hidden; }
 .stage-bench.immersive.narrow .replay-what { display: none; }
 .stage-bench.immersive.narrow .replay-head { flex-wrap: nowrap; gap: 6px; }
 .stage-bench.immersive.narrow .replay-head .token-navigation, .stage-bench.immersive.narrow .replay-empty { order: 0; flex: 1 1 auto; flex-wrap: nowrap; }
-.stage-bench.immersive.narrow .replay-head .token-navigation strong { max-width: 72px; }
 .stage-bench.immersive.narrow .replay-mode { width: 24px; padding: 0; gap: 0; justify-content: center; font-size: 0; }
 .stage-bench.immersive.narrow .replay-mode.live, .stage-bench.immersive.narrow .replay-head .token-navigation .note, .stage-bench.immersive.narrow .replay-word,
 .stage-bench.immersive.narrow .replay-option > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -947,7 +957,7 @@ html:has(.stage-bench.immersive) { overflow: hidden; }
 .stage-bench.immersive.narrow .stage-camera-panel .stage-dock > .dock-btn { width: auto; height: 50px; }
 .stage-bench.immersive.narrow .replay-transport .replay-scrub input { min-width: 0; width: 100%; }
 .stage-bench.immersive.narrow .replay-bar.replaying { column-gap: 8px; }
-.stage-bench.immersive.narrow .replay-readout { flex: 1 1 125px; min-height: 2.9em; align-content: center; }
+.stage-bench.immersive.narrow .replay-readout { flex: 1 1 148px; min-height: 2.9em; align-content: center; }
 .replay-settings { order: 2; }
 .replay-settings summary { display: flex; align-items: center; gap: 6px; cursor: pointer; min-height: 40px; font-weight: 600; list-style: none; }
 .replay-settings summary::-webkit-details-marker { display: none; }
@@ -964,21 +974,37 @@ html:has(.stage-bench.immersive) { overflow: hidden; }
 }
 .stage-bench.immersive.narrow .stage-resets:not(:has(button:enabled)) { display: none; }
 .stage-bench.immersive.narrow .replay-head { width: 100%; min-width: 0; }
-.stage-bench.immersive.narrow .replay-head .token-navigation { gap: 2px; min-width: 0; }
-.stage-bench.immersive.narrow .replay-head .token-navigation .btn { min-width: 36px; width: 36px; }
+.stage-bench.immersive.narrow .replay-head .token-navigation { justify-content: center; gap: 2px; min-width: 0; }
+.stage-bench.immersive.narrow .replay-head .token-navigation strong { max-width: 72px; }
+.stage-bench.immersive.narrow .replaying .token-navigation strong { display: none; }
+.stage-bench.immersive.narrow .replay-token-position { display: inline; white-space: nowrap; }
+.stage-bench.immersive.narrow .replay-head .token-navigation .btn { min-width: 38px; width: 38px; }
 .stage-bench.immersive.narrow .replay-head .replay-exit { padding-inline: 8px; }
 @media (min-width: 640px) and (max-height: 500px) {
+  .stage-bench.immersive.narrow .stage-bar:has(.replay-bar.replaying) { max-height: 57dvh; }
   .stage-bench.immersive.narrow .replay-bar.replaying {
     display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr) auto;
-    grid-template-areas: "head transport transport" "progress progress progress" "readout readout options";
+    grid-template-areas: "run head head" "transport transport options" "progress progress progress" "readout readout readout";
     gap: 2px 14px;
   }
+  .stage-bench.immersive.narrow .replay-run { grid-area: run; }
   .stage-bench.immersive.narrow .replay-head { grid-area: head; }
   .stage-bench.immersive.narrow .replay-transport { grid-area: transport; }
   .stage-bench.immersive.narrow .replay-progress { grid-area: progress; }
   .stage-bench.immersive.narrow .replay-readout { grid-area: readout; min-height: 0; }
   .stage-bench.immersive.narrow .replay-settings { grid-area: options; }
-  .stage-bench.immersive.narrow .replay-settings[open] { grid-column: 1 / -1; grid-row: 4; }
+  .stage-bench.immersive.narrow .replay-settings[open] { grid-column: 1 / -1; grid-row: 5; }
+}
+
+@media (min-width: 720px) and (max-height: 500px) {
+  .stage-bench.immersive.narrow .stage-bar:has(.replay-bar.replaying) { display: grid; grid-template-columns: max-content minmax(0, 1fr); }
+  .stage-bench.immersive.narrow .stage-bar:has(.replay-bar.replaying) .window-meter-bar {
+    flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 8px; padding: 8px;
+    border-bottom: 0; border-inline-end: 1px solid var(--line);
+  }
+  .stage-bench.immersive.narrow .stage-bar:has(.replay-bar.replaying) .window-meter-key { flex-direction: column; align-items: flex-start; }
+  .stage-bench.immersive.narrow .replay-bar.replaying { grid-template-columns: minmax(226px, .9fr) minmax(0, 1.1fr) auto; }
+  .stage-bench.immersive.narrow .replay-head .replay-mode.on { width: 18px; font-size: 0; }
 }
 
 /* ---- Reading the model in numbers beside the stage: the color key, a layer's sums, and one exact

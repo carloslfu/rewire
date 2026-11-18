@@ -617,35 +617,46 @@ it("shows the output of a replayed token only after its last step: no bar, no wo
     expect(bars()).toBe(3);
     // The replay goes on to the next token: back to its first step, and that token's data arrives afterwards. Nothing of either shows.
     h.stage.setPlayhead(1);
-    h.stage.holdOutput();
+    h.stage.holdReadings();
     h.stage.setCandidates(second);
+    h.stage.holdReadings(false);
     expect(bars()).toBe(0);
     expect(output()).toEqual(["Not chosen yet"]);
     h.stage.setPlayhead(beats);
     expect(output()).toContain("is >99.99%");
     // A token chosen by hand is shown whole. Until its own data arrives the previous token's result is not passed off as its result.
     expect(labels()).toContain("is >99.99%");
-    h.stage.holdOutput();
+    const meter = (sp as unknown as { mlpGlow: THREE.InstancedMesh }).mlpGlow.geometry.getAttribute("meterLevel");
+    const readings = new Float32Array(arch.parts.length).fill(0.5);
+    h.stage.setValues(readings, "signed");
+    expect(meter.getX(0)).toBeGreaterThan(0);
+    h.stage.holdReadings();
+    expect(meter.getX(0)).toBe(-1);
     // Again at once, with no frame in between.
     expect(labels().filter((t) => t !== "Not chosen yet")).toEqual([]);
     expect(bars()).toBe(0);
     expect(output()).toEqual(["Not chosen yet"]);
+    h.stage.setValues(new Float32Array(arch.parts.length), "signed");
     h.stage.setCandidates(first);
+    expect(bars()).toBe(0);
+    expect(meter.getX(0)).toBe(-1);
+    h.stage.holdReadings(false);
     expect(bars()).toBe(3);
+    expect(meter.getX(0)).toBe(0);
     // The new labels do not flash before their first frame either, and the old ones are gone.
     expect(labels()).toEqual([]);
     expect(output()).toContain("Paris 62.00%");
     // Released without new data (the replay came back to the token whose data is already there): shown again.
-    h.stage.holdOutput();
-    h.stage.holdOutput(false);
+    h.stage.holdReadings();
+    h.stage.holdReadings(false);
     expect(bars()).toBe(3);
     expect(output()).toContain("Paris 62.00%");
     // Back to live while waiting: live output is never held.
-    h.stage.holdOutput();
+    h.stage.holdReadings();
     h.stage.setPlayhead(null);
     expect(bars()).toBe(3);
     expect(output()).toContain("Paris 62.00%");
-    h.stage.holdOutput();
+    h.stage.holdReadings();
     expect(bars()).toBe(3);
     // No output at all: no bars, and no note about one.
     h.stage.setCandidates([]);
