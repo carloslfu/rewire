@@ -3,7 +3,7 @@
 // same measured pushes the stage lights its windows with.
 import type { ModelInfo } from "../model/info.ts";
 import { S } from "../strings.ts";
-import { scoreLabel, signed } from "../ui/color.ts";
+import { scoreLabel } from "../ui/color.ts";
 import { hardestFloors } from "../ui/word.ts";
 import { pushIndex } from "./arch.ts";
 
@@ -19,8 +19,10 @@ export function PushLegend({ view, scale, token, word, values, model }: {
       <span className="legend-negative">Blue: {view === "push" ? "against the token" : "decreased"}</span>
       <span className="legend-positive">Orange: {view === "push" ? "toward the token" : "increased"}</span>
     </div>
-    <div className="legend-ramp" aria-hidden="true" />
-    {scale !== null && <div className="legend-values num" aria-label="Score scale"><span>{signed(-scale)}</span><span>0</span><span>{signed(scale)}</span></div>}
+    {scale !== null && <>
+      <div className="legend-tracks" aria-hidden="true"><span /><span /><span /></div>
+      <div className="legend-values num" aria-label="Readings of a full blue, empty, and full orange meter"><span>{scoreLabel(-scale)}</span><span>0</span><span>{scoreLabel(scale)}</span></div>
+    </>}
     <p className="legend-note">{scale !== null ? "More lit segments mean a larger reading. An empty track means zero. Dark glass means the reading is unavailable or its replay step is ahead."
       : !token ? "Select a token to light the model with its scores."
       : view === "difference" ? "No comparison has been measured for this token yet, so nothing is lit." : "No scores were measured for this token, so nothing is lit."}</p>

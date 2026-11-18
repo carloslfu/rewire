@@ -291,7 +291,10 @@ html:has(dialog[open]) { overflow: hidden; }
 .legend-directions { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
 .legend-negative { color: var(--neg); }
 .legend-positive { color: color-mix(in oklab, var(--pos) 80%, var(--fg)); text-align: right; }
-.legend-ramp { height: 8px; border-radius: 4px; margin: 6px 0; background: linear-gradient(90deg, var(--neg), var(--zero), var(--pos)); }
+.legend-tracks { display: grid; grid-template-columns: 1fr auto 1fr; margin: 6px 0; }
+.legend-tracks span { width: 58px; height: 7px; border-radius: 2px; background: repeating-linear-gradient(90deg, transparent 0 6px, var(--panel) 6px 7px), var(--neg); }
+.legend-tracks span:nth-child(2) { background-color: var(--zero); }
+.legend-tracks span:last-child { justify-self: end; background-color: var(--pos); }
 .legend-values { display: grid; grid-template-columns: 1fr 1fr 1fr; }
 .legend-values > :nth-child(2) { text-align: center; }
 .legend-values > :last-child { text-align: right; }
