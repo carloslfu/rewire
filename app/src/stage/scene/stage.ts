@@ -10,7 +10,7 @@ import { DARK, type Theme } from "../theme.ts";
 import { modelPct } from "../../ui/color.ts";
 import { Bay, type BaySpec, type PlateHit } from "./bay.ts";
 import { along, ease, frame, type Pose, type ViewName, VIEWS } from "./camera.ts";
-import { MAX_BARS, Specimen } from "./specimen.ts";
+import { type WindowReading, MAX_BARS, Specimen } from "./specimen.ts";
 import { Studio, studioEnvironment } from "./studio.ts";
 
 export type Tool = "explore" | "grab" | "punch";
@@ -516,7 +516,7 @@ export class Stage {
     this.invalidate();
   }
 
-  setValues(scaled: Float32Array | null, kind: "signed" | "size") {
+  setValues(scaled: Float32Array | null, kind: WindowReading) {
     this.specimen.setValues(scaled, kind);
     this.specimen.setPlayhead(this.shown);
     this.refreshTip();

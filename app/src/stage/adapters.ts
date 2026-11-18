@@ -57,6 +57,25 @@ export function pushValues(arch: Arch, pushes: ArrayLike<number> | null | undefi
   return finish(raw, scale);
 }
 
+/** RMS of each residual update. A layer summarizes its largest measured update. */
+export function activityValues(arch: Arch, activity: Float32Array | undefined): PartValues | null {
+  if (activity?.length !== pushLength(arch.model)) return null;
+  const raw = new Float32Array(arch.parts.length).fill(NaN);
+  const layer = new Float32Array(arch.floors).fill(-1);
+  let scale = -1;
+  arch.parts.forEach((p, i) => {
+    const v = activity[pushIndex(arch.model, p)];
+    if (!Number.isFinite(v) || v < 0) return;
+    raw[i] = v;
+    scale = Math.max(scale, v);
+    if (p.kind === "head" || p.kind === "mlp") layer[p.floor] = Math.max(layer[p.floor], v);
+  });
+  arch.parts.forEach((p, i) => { if (p.kind === "layer" && layer[p.floor] >= 0) raw[i] = layer[p.floor]; });
+  return scale < 0 ? null : finish(raw, scale);
+}
+
+export const rmsLabel = (v: number | undefined) => v === undefined || !Number.isFinite(v) ? "Unavailable" : `${v === 0 ? "0" : v.toPrecision(3)} RMS`;
+
 // ------------------------------------------------------------------ the tiny model's parameters
 
 interface Range { tensor: Tensor; r0: number; r1: number; c0: number; c1: number }

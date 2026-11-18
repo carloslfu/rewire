@@ -91,7 +91,7 @@ export const S = {
 
   // what the model's lit windows show for the selected token
   towerNone: "Select a word or word piece in a reply to see which parts contribute toward or against it.",
-  viewPush: "Push",
+  viewPush: "Token score",
   viewDiff: "Change from original",
   diffNote: "Each lit window shows how its part's contribution changed for this original token: changed model minus original, on this sample's own prompt and original preceding tokens.",
   diffNone: "Change a layer, attention head or MLP to compare with the original.",

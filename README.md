@@ -185,9 +185,13 @@ What is measured and what is drawn:
   lighting are a drawing. A model has no physical form, and no shape stands for real hardware or for an
   individual parameter. The dictionary tiles and MLP fins stand in for 151,669 rows and 3,072 neurons
   and are not drawn one by one.
-- In Dismantle, the lit windows on each module, the strips on the sockets and the rings on the stream
-  are colored by the selected token's direct pushes, measured during inference. The chassis
-  keeps its own material, and a window with no measurement stays dark. Once a token is measured,
+- In Dismantle, **Token score** fills the windows with each part’s measured direct contribution to
+  the selected token’s score. Orange raises the score and blue lowers it. **Activity** shows the RMS
+  size of each part’s update to the residual stream. Both readings come from the same inference run.
+  Meter fill is relative to the token and compressed to keep small readings visible. An empty track
+  represents a measured zero, while dark glass represents a missing reading or an upcoming replay step.
+  Use the values in the inspector to compare tokens, or knock out a part and compare probabilities to
+  test its total effect. Once a token is measured,
   selecting a layer opens the tower above it and stands that layer's measured values there as plates,
   in computation order, from the same inspection pass the detail panel uses: the stream in, its
   normalization, the query, key and value projections, the normalized and position-rotated queries and

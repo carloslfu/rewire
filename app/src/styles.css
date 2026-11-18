@@ -688,8 +688,25 @@ button.crumb:hover:not(:disabled) { color: var(--fg); background: var(--soft); }
 .stage-transport .training-status { min-height: 0; margin-top: 6px; }
 .stage-transport .lesson-loss svg { height: 64px; margin-top: 8px; }
 .stage-token { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
-.stage-token .note { font-size: 12px; }
 .stage-readout { margin-top: 6px; }
+.window-meter-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 5px 12px; padding: 6px 20px; border-bottom: 1px solid var(--line); }
+.window-meter-key { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; color: var(--muted); font-size: 11px; }
+.window-meter-key span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.window-meter-key i { width: 10px; height: 6px; border-radius: 2px; }
+.meter-up { background: var(--pos); }
+.meter-down { background: var(--neg); }
+.meter-activity { background: #168b77; }
+.token-probability-comparison { margin: 8px 0; padding: 7px 10px; background: var(--soft); border: 1px solid var(--line); border-radius: 6px; }
+.token-probability-comparison dt { font-weight: 600; }
+.token-probability-comparison dd { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 3px 0 0; }
+.stage-bench.immersive .window-meter-bar { padding-inline: 12px; }
+@media (pointer: coarse), (max-width: 680px) {
+  .window-meter-bar { padding: 4px 10px; }
+  .window-meter-bar .seg button { min-height: 44px; }
+}
+@media (max-width: 350px) {
+  .window-meter-bar .seg button { padding-inline: 6px; white-space: nowrap; }
+}
 /* Live output and Replay: one strip directly under the stage, in sight in every layout. Its height is
    steady while a replay runs, so a step never resizes the stage above it. */
 .stage-bar { flex: none; border-bottom: 1px solid var(--line); background: var(--panel); }

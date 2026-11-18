@@ -112,6 +112,7 @@ export function synthModel(cfg: ModelConfig, seed = 1): CpuModel {
 interface Run {
   scores: Float64Array;
   pushes: Float64Array;
+  activity: Float64Array;
   final: Float64Array;
 }
 
@@ -252,5 +253,9 @@ export function cpuForward(m: CpuModel, tokens: number[], spec: ChangeSpec = {},
     }
     pushes = Float64Array.from(res);
   }
-  return { scores, pushes, final } as Run;
+  const input = sw(tokens[T - 1]);
+  const size = (part: Float64Array) => Math.sqrt(part.reduce((sum, v) => sum + v * v, 0) / W);
+  const activity = Float64Array.from([size(dict.slice(input * W, input * W + W)),
+    ...lastParts.flatMap(({ heads, mem, a }) => [...heads, mem].map((part) => Math.abs(a) * size(part)))]);
+  return { scores, pushes, activity, final } as Run;
 }

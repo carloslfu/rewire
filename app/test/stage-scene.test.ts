@@ -935,6 +935,8 @@ it("lights an insert only for a measurement and leaves the chassis its own mater
   const tile = s.group.children.find((o) => (o as THREE.Mesh).isMesh && !(o as THREE.InstancedMesh).isInstancedMesh && ((o as THREE.Mesh).material as THREE.MeshBasicMaterial).isMeshBasicMaterial && (o as THREE.Mesh).geometry.type === "BoxGeometry")!;
   // Nothing measured: every window is the same dark glass, and nothing on the dictionary is lit.
   const off = colorAt(glow, 0);
+  const level = glow.geometry.getAttribute("meterLevel");
+  expect(level.getX(0)).toBe(-1);
   for (let i = 0; i < 16; i++) { expect(colorAt(glow, i)).toEqual(off); expect(colorAt(body, i)).toEqual([1, 1, 1]); }
   expect(Math.max(...off)).toBeLessThan(0.06);
   s.setTray([0.5, 0.5], 1, 3);
@@ -942,23 +944,41 @@ it("lights an insert only for a measurement and leaves the chassis its own mater
   // One head pushed for the token, one against, one measured at zero; the rest were not measured.
   const values = new Float32Array(arch.parts.length).fill(NaN), at = (floor: number, head: number) => partIndex(arch, { kind: "head", floor, head });
   values[at(1, 0)] = 1; values[at(1, 1)] = -1; values[at(1, 2)] = 0; values[0] = 0.5;
+  values[at(2, 0)] = 0.000001;
   s.setValues(values, "signed");
   const toward = colorAt(glow, 4), against = colorAt(glow, 5);
   expect(toward[0]).toBeGreaterThan(toward[2] * 2);
   expect(against[2]).toBeGreaterThan(against[0] * 2);
   expect(colorAt(glow, 6)).toEqual(off);
   expect(colorAt(glow, 7)).toEqual(off);
+  expect(level.getX(4)).toBe(1);
+  expect(level.getX(5)).toBe(1);
+  expect(level.getX(6)).toBe(0);
+  expect(level.getX(7)).toBe(-1);
+  expect(level.getX(8)).toBeCloseTo(1 / 6);
   expect(tile.visible).toBe(true);
   // The module bodies never take the data's color.
   for (let i = 0; i < 16; i++) expect(colorAt(body, i)).toEqual([1, 1, 1]);
   // Before the replay reaches a head its window is still dark.
   s.setPlayhead(0);
   expect(colorAt(glow, 4)).toEqual(off);
+  expect(level.getX(4)).toBe(-1);
+  s.setValues(values, "activity");
+  s.setPlayhead(4);
+  const [r, g, b] = colorAt(glow, 4);
+  expect(g).toBeGreaterThan(r * 2);
+  expect(b).toBeGreaterThan(r);
+  expect(level.getX(4)).toBe(1);
+  s.setValues(values, "signed");
   s.setPlayhead(null);
-  // A part that is switched off dims its body and its window; the measurement does not keep it lit.
+  // Knockout changes the chassis. A recorded original or comparison remains readable on that part.
   s.setPoses(arch.parts.map((p) => poseOf({ heads: [{ floor: 1, head: 0, mult: 0 }] }, p, TINY_INFO)));
   expect(colorAt(body, 4)[0]).toBeLessThan(0.5);
-  expect(colorAt(glow, 4)[0]).toBeLessThan(toward[0] * 0.5);
+  expect(colorAt(glow, 4)).toEqual(toward);
+  // With the changed reply selected, the knocked-out head actually measures zero.
+  values[at(1, 0)] = 0;
+  s.setValues(values, "activity");
+  expect(level.getX(4)).toBe(0);
   s.dispose();
 });
 

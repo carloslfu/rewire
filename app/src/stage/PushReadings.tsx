@@ -3,7 +3,7 @@
 // same measured pushes the stage lights its windows with.
 import type { ModelInfo } from "../model/info.ts";
 import { S } from "../strings.ts";
-import { signed } from "../ui/color.ts";
+import { scoreLabel, signed } from "../ui/color.ts";
 import { hardestFloors } from "../ui/word.ts";
 import { pushIndex } from "./arch.ts";
 
@@ -21,24 +21,23 @@ export function PushLegend({ view, scale, token, word, values, model }: {
     </div>
     <div className="legend-ramp" aria-hidden="true" />
     {scale !== null && <div className="legend-values num" aria-label="Score scale"><span>{signed(-scale)}</span><span>0</span><span>{signed(scale)}</span></div>}
-    <p className="legend-note">{scale !== null ? "Score units, not percentages. The scale adjusts for each token. A dark window has no measurement."
+    <p className="legend-note">{scale !== null ? "More lit segments mean a larger reading. An empty track means zero. Dark glass means the reading is unavailable or its replay step is ahead."
       : !token ? "Select a token to light the model with its scores."
       : view === "difference" ? "No comparison has been measured for this token yet, so nothing is lit." : "No scores were measured for this token, so nothing is lit."}</p>
     <details className="legend-help">
       <summary>How to read these colors</summary>
       <p>{model.heads} attention heads and one MLP (feed-forward network) in each of {model.floors} layers. The model computes upward, from Words in to Words out.</p>
       {hardest && <p>{view === "push" ? S.summary(hardest[0] + 1, hardest[1] + 1, word) : `The biggest differences are on layers ${hardest[0] + 1} to ${hardest[1] + 1}.`}</p>}
-      <p>{view === "push" ? "A pale window means little direct contribution. A pale part can still matter through later layers." : "A pale window means little change in direct contribution."}</p>
       {view === "push" ? <>
-        <p>Each window shows one part's contribution to the selected token's score relative to the average score across all tokens. Orange adds to that relative score; blue subtracts from it. Stronger color means a larger contribution.</p>
+        <p>Each window shows one part’s direct contribution to the selected token’s score relative to the average across the vocabulary. Orange raises that score and blue lowers it.</p>
         <p>Blue does not mean an opposite word. A token is a word, part of a word, a character or punctuation.</p>
       </> : <>
         <p>Each window compares the same part in both models, forcing the original token after this sample’s prompt and original preceding tokens. Blue means its contribution decreased; orange means it increased.</p>
         <p>Each sample is compared on its own prompt. Other samples are never part of it, so a difference comes from the model changes alone.</p>
         <p>An increase can still leave a contribution negative. These colors show the change, not whether the part now supports the token.</p>
       </>}
-      <p>The numbers are in logits, the model's score units. The color range rescales to the largest absolute value shown, so use the numbers when comparing different tokens.</p>
-      <p>This measures direct contributions with the final normalization scale held fixed. It does not include effects through later layers. Turn a part off and compare outputs to test its effect.</p>
+      <p>The numbers are in logits, the model’s score units. Meter fill uses a compressed scale so small signals stay visible. Use the numbers to compare different tokens.</p>
+      <p>Direct contributions use the final normalization scale from this run. To test a part’s total effect, including what it changes in later layers, knock it out and compare the token’s probability.</p>
     </details>
   </div>;
 }
@@ -60,7 +59,7 @@ export function LayerReadings({ model, values, floor, view, word }: { model: Mod
   const sums = layerSums(model, values, floor);
   if (!sums) return null;
   // A sum of only some of its parts would mislead, so a part without a number leaves its sum unstated.
-  const say = (v: number | null) => (v === null ? "unavailable" : signed(v));
+  const say = (v: number | null) => (v === null ? "unavailable" : scoreLabel(v));
   return <section className="layer-readings" aria-label={`Layer ${floor + 1}: ${view === "difference" ? "changes in direct push" : "direct pushes"} for “${word}”`}>
     <h4>Layer {floor + 1} · {view === "difference" ? "change in direct push" : "direct push"} for “{word}”</h4>
     <dl className="kv">

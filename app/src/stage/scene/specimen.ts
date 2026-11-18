@@ -26,11 +26,19 @@ const UNSEAT = 0.8;
 
 /** An insert with nothing measured: dark glass. Measured values run from here to the page's colors. */
 const OFF: RGB = [42, 45, 54];
-const GONE: RGB = [15, 16, 19];
+const ACTIVITY: RGB = [97, 236, 204];
 /** The replay's position bracket. It says where the replay is and nothing about what was measured there. */
 const CURSOR: RGB = [255, 198, 92];
 /** Tints on the chassis: untouched, switched off, and frozen while teaching. */
 const WHITE: RGB = [255, 255, 255], DULL: RGB = [104, 106, 112], DIM: RGB = [172, 174, 180];
+
+export type WindowReading = "signed" | "size" | "activity";
+
+/** Compress the range for legibility and give any nonzero reading at least one segment. */
+function meterCoverage(value: number, columns: number): number {
+  if (value === 0) return 0;
+  return Math.max(1 / columns, Math.log1p(63 * Math.min(1, Math.abs(value))) / Math.log(64));
+}
 
 export class Specimen {
   readonly group = new THREE.Group();
@@ -66,7 +74,7 @@ export class Specimen {
   private readonly active = new Set<number>();
   private poses: Pose[] = [];
   private values: Float32Array | null = null;
-  private rampKind: "signed" | "size" = "signed";
+  private rampKind: WindowReading = "signed";
   private frozen: boolean[] | null = null;
   private drawer = -1;
   /** Everything above this layer is lifted by `height` to make room for the detail bay. -2 means closed. */
@@ -113,6 +121,16 @@ export class Specimen {
       (o.parent ?? this.group).add(mesh);
       return mesh;
     };
+    const meter = (geo: THREE.BufferGeometry, count: number, columns: number, topColumns = columns) => {
+      const uv = geo.getAttribute("uv"), normal = geo.getAttribute("normal");
+      const position = new Float32Array(uv.count);
+      for (let i = 0; i < uv.count; i++) position[i] = uv.getX(i) / (normal.getY(i) > 0.5 ? topColumns : columns);
+      geo.setAttribute("meterPosition", new THREE.BufferAttribute(position, 1));
+      const level = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, count)).fill(-1), 1);
+      level.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute("meterLevel", level);
+      return inst(geo, kit.meter, count, { tint: true });
+    };
     const solid = { cast: true, receive: true, tint: true };
     const head = a.size[partIndex(a, { kind: "head", floor: 0, head: 0 })], kv = a.size[partIndex(a, { kind: "kv", floor: 0, group: 0 })];
     const mlp = a.size[partIndex(a, { kind: "mlp", floor: 0 })], headZ = a.pos[partIndex(a, { kind: "head", floor: 0, head: 0 })][2];
@@ -127,15 +145,15 @@ export class Specimen {
     // ---- sockets and the modules seated in them
     const socket = socketShapes(kv, u, high);
     this.saddles = inst(socket.body, kit.graphite, F * KV, solid);
-    this.saddleGlow = inst(socket.glow, kit.glow, F * KV, { tint: true });
+    this.saddleGlow = meter(socket.glow, F * KV, 8);
     this.socketParts = [this.saddles, this.saddleGlow];
     const headShape = headShapes(head, u, high);
     this.heads = inst(headShape.body, kit.ceramic, F * H, solid);
-    this.headGlow = inst(headShape.glow, kit.glow, F * H, { tint: true });
+    this.headGlow = meter(headShape.glow, F * H, 6, 4);
     this.headParts = [this.heads, inst(headShape.trim, kit.gold, F * H), this.headGlow];
     const mlpShape = mlpShapes(mlp, u, high, head[1] * 0.26, kit.nameplates.MLP);
     this.mlps = inst(mlpShape.body, kit.ceramic, F, solid);
-    this.mlpGlow = inst(mlpShape.glow, kit.glow, F, { tint: true });
+    this.mlpGlow = meter(mlpShape.glow, F, 24);
     this.sinks = inst(mlpShape.sink, kit.aluminum, F, { cast: true, tint: true });
     this.mlpParts = [this.mlps, inst(mlpShape.trim, kit.gold, F), this.mlpGlow, this.sinks, inst(mlpShape.steel, kit.steel, F), inst(mlpShape.badge, kit.plate, F)];
     // Cover glass over the lit inserts: reflections only, and only where the GPU budget allows.
@@ -396,7 +414,7 @@ export class Specimen {
   }
 
   /** Scaled values per part (NaN where unmeasured) and the ramp that colors them. */
-  setValues(scaled: Float32Array | null, kind: "signed" | "size") {
+  setValues(scaled: Float32Array | null, kind: WindowReading) {
     this.values = scaled && scaled.length === this.n ? scaled : null;
     this.rampKind = kind;
     this.recolor();
@@ -734,8 +752,21 @@ export class Specimen {
   /** A measurement as the color of an insert: dark when unmeasured, toward the page's color as it grows. */
   private tint(v: number, k = 1): RGB {
     if (Number.isNaN(v)) return OFF;
-    const th = this.theme, c = this.rampKind === "size" ? th.changed : v < 0 ? th.neg : th.pos;
-    return mix(OFF, c, Math.min(1, Math.abs(v)) ** 0.7 * k);
+    return mix(OFF, this.readingColor(v), Math.min(1, Math.abs(v)) ** 0.7 * k);
+  }
+
+  private readingColor(value: number): RGB {
+    if (this.rampKind === "activity") return ACTIVITY;
+    if (this.rampKind === "size") return this.theme.changed;
+    return value < 0 ? this.theme.neg : this.theme.pos;
+  }
+
+  private paintMeter(mesh: THREE.InstancedMesh, index: number, value: number, amount: number, columns: number) {
+    const hasReading = Number.isFinite(value) && amount > 0;
+    const level = !hasReading ? -1 : meterCoverage(value, columns) * amount;
+    mesh.geometry.getAttribute("meterLevel").setX(index, level);
+    const color = value === 0 || !hasReading ? OFF : mix(this.readingColor(value), WHITE, 0.3);
+    this.paint(mesh, index, color);
   }
 
   private recolor() {
@@ -746,33 +777,32 @@ export class Specimen {
       const p = a.parts[i], v = this.values ? this.values[i] : NaN, pose = this.poses[i];
       const k = Number.isNaN(v) ? 0 : lit(beatOf(model, p), t);
       const frozen = "floor" in p && !!this.frozen?.[p.floor];
-      // The chassis only dims for a part that is off or frozen. Measured values color the inserts.
+      // The chassis shows current controls. The inserts show the chosen run or comparison.
       const body = pose.off ? DULL : frozen ? DIM : WHITE;
-      const insert = (c: RGB) => { let out = c; if (pose.off) out = mix(out, GONE, 0.82); if (frozen) out = mix(out, GONE, 0.5); return out; };
       if (p.kind === "head") {
         const at = p.floor * H + p.head;
         this.paint(this.heads, at, body);
-        this.paint(this.headGlow, at, insert(this.tint(v, k)));
-        if (!Number.isNaN(v)) attention[p.floor] = (Number.isNaN(attention[p.floor]) ? 0 : attention[p.floor]) + v * k;
+        this.paintMeter(this.headGlow, at, v, k, 6);
+        if (Number.isFinite(v)) {
+          const previous = Number.isNaN(attention[p.floor]) ? 0 : attention[p.floor];
+          attention[p.floor] = this.rampKind === "activity" ? Math.max(previous, v * k) : previous + v * k;
+        }
       } else if (p.kind === "mlp") {
         this.paint(this.mlps, p.floor, body);
         this.paint(this.sinks, p.floor, body);
-        this.paint(this.mlpGlow, p.floor, insert(this.tint(v, k)));
-        this.paint(this.rings, p.floor * 2 + 1, insert(this.tint(v, k)));
+        this.paintMeter(this.mlpGlow, p.floor, v, k, 24);
+        this.paint(this.rings, p.floor * 2 + 1, this.tint(v, k));
       } else if (p.kind === "kv") {
         const at = p.floor * KV + p.group;
         this.paint(this.saddles, at, body);
-        this.paint(this.saddleGlow, at, insert(this.tint(v, k)));
+        this.paintMeter(this.saddleGlow, at, v, k, 8);
       } else if (p.kind === "layer") {
         for (const mesh of [this.decks, this.fascias, this.boards]) this.paint(mesh, p.floor, body);
       }
     }
     for (let L = 0; L < a.floors; L++) {
-      const off = this.poses[partIndex(a, { kind: "layer", floor: L })].off, frozen = !!this.frozen?.[L], v = attention[L];
-      let c = this.tint(Number.isNaN(v) ? NaN : Math.max(-1, Math.min(1, v)));
-      if (off) c = mix(c, GONE, 0.82);
-      if (frozen) c = mix(c, GONE, 0.5);
-      this.paint(this.rings, L * 2, c);
+      const v = attention[L];
+      this.paint(this.rings, L * 2, this.tint(Math.max(-1, Math.min(1, v))));
     }
     // The dictionary row the model looked up lights only when its push was measured.
     const embed = this.values ? this.values[0] : NaN, tiles = this.lookupTile;
@@ -787,6 +817,7 @@ export class Specimen {
       this.paint(this.tokens, i, i === this.currentSlot ? mix(OFF, th.fg, 0.75) : Number.isNaN(w) ? mix(OFF, th.fg, 0.12) : mix(OFF, th.pos, Math.min(1, w) ** 0.7));
     }
     for (let i = 0; i < this.candidates.length; i++) this.paint(this.bars, i, this.candidates[i].chosen ? th.fg : mix(OFF, th.fg, 0.35));
+    for (const mesh of [this.headGlow, this.mlpGlow, this.saddleGlow]) mesh.geometry.getAttribute("meterLevel").needsUpdate = true;
     for (const mesh of [this.decks, this.fascias, this.boards, this.saddles, this.saddleGlow, this.heads, this.headGlow, this.mlps, this.mlpGlow, this.sinks, this.rings, this.tokens, this.bars]) {
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }

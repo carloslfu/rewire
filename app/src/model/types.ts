@@ -30,6 +30,8 @@ export interface Tok {
   cands: Cand[];
   /** Direct pushes toward this piece: the dictionary row, then per floor its 16 heads and its memory block. */
   pushes: Float32Array;
+  /** RMS of each part’s residual vector in the same order. Older measurements can lack it. */
+  activity?: Float32Array;
   /** Top five floor guesses per floor (after the word is inspected). */
   guesses?: Cand[][];
   /** The visitor picked this piece from the candidates. */

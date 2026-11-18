@@ -424,13 +424,13 @@ async function write(job: WriteJob, id: number, epoch = writeEpoch): Promise<{ e
   const take = async (i: number) => {
     const r = await c.result(i);
     const t: Tok = {
-      id: r.token, lp1: r.lp1, concept: r.concept, cut: r.cut, pushes: r.pushes,
+      id: r.token, lp1: r.lp1, concept: r.concept, cut: r.cut, pushes: r.pushes, activity: r.activity,
       cands: candidates(r.ids, r.probs, r.candLp),
     };
     if (i === 0 && job.force !== undefined) t.picked = true;
     toks.push(t.id);
     const pieces = which === "qwen" && tok ? [t.id, ...t.cands.map((x) => x.id)].map((k): [number, TokenPiece] => [k, tok!.pieceData(k)]) : undefined;
-    post({ t: "tok", id, tok: t, pieces }, [t.pushes.buffer as ArrayBuffer]);
+    post({ t: "tok", id, tok: t, pieces }, [r.pushes.buffer, r.activity.buffer] as ArrayBuffer[]);
     if (which === "qwen" && STOP.has(t.id)) ended = true;
     return ended;
   };

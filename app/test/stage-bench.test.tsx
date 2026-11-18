@@ -84,7 +84,7 @@ it("shows a selected part's real controls and measured value, and locks them whi
   expect(b.get("Restore this head")).toEqual([true]);
   expect(b.get("Replay answer")).toEqual([false]);
   expect(b.get("Off")).toEqual([false]);
-  expect(t).toContain("Every part is lit. Direct pushes add up to +1.25");
+  expect(t).toContain("Direct pushes add up to +1.25");
   // The bay is honest about a measurement that has not arrived.
   expect(t).toContain("Measuring every step for this token…");
   // The same part with a real change on it.
@@ -230,7 +230,7 @@ it("shows Replay as its own mode: what is playing, where it is, what each contro
   // The readout names the step, and a screen reader hears the state, not every step.
   expect(t).toContain("Read the token.");
   expect(html).toContain('<p class="sr-only" aria-live="polite">Replay playing: the whole answer.</p>');
-  expect(t).not.toContain("Every part is lit.");
+  expect(t).not.toContain("Direct pushes add up to");
 
   // Paused part way: Resume, and the place is announced.
   R.session.seek(42);
@@ -337,7 +337,7 @@ it("is the one drawing of the model: no 2D view to fall back to, and a failed st
   expect(html).not.toMatch(/aria-label="Model view"|class="tower|stage-recovery/);
   for (const other of ["2D", "3D", "Use the 2D view"]) expect(buttons(html).has(other)).toBe(false);
   expect(text(html)).toContain("Opening the 3D model…");
-  expect(readout(html)).toMatch(/^Every part is lit\. Direct pushes add up to \+1\.25/);
+  expect(readout(html)).toMatch(/^Direct pushes add up to \+1\.25/);
   expect(html).toContain('class="stage-legend"');
 
   // The drawing could not start: no WebGL, or its code did not load. The bench stays and says so.
@@ -366,10 +366,10 @@ it("is the one drawing of the model: no 2D view to fall back to, and a failed st
   expect(t).toContain("16 attention heads, summed +1.50 MLP +0.00 Layer total +1.50");
   for (const control of ["Knock out", "Off", "Cut layer 1"]) expect(b.get(control)).toEqual([false]);
   // Nothing claims to be lit or colored, and the same total is given as a number.
-  expect(readout(html)).toMatch(/^Every part has a number\. Direct pushes add up to \+1\.25 for “.+”\.$/);
+  expect(readout(html)).toMatch(/^Direct pushes add up to \+1\.25 for “.+”\.$/);
   expect(html).not.toContain('class="stage-legend"');
-  expect(t).toContain("Numbers show");
-  expect(t).not.toContain("Colors show");
+  expect(html).toMatch(/aria-label="Model readings"><button type="button" aria-pressed="true">Token score<\/button>/);
+  expect(t).not.toContain("Raises score");
   // A replay is drawn on the model, so it waits and says why.
   expect(b.get("Replay answer")).toEqual([true]);
   expect(t).toContain("Replay needs the 3D drawing, which could not start here. Try again on the model.");
@@ -549,10 +549,11 @@ it("states no total in the difference view while the comparison is being measure
   // One measured on other tokens (the original was rewritten since) is not a comparison of these.
   store.set({ turns: [{ ...comparing, changed: { ...comparing.changed, comparing: false, compare: [forced(100), forced(999), forced(151645)] } }] });
   expect(readout(renderToString(<Dismantle />))).toMatch(/^No comparison has been measured/);
-  // Measured on these tokens: now, and only now, every part is lit and the changes are totalled.
+  // Same token and context in both models: the score change and both model probabilities are available.
   store.set({ turns: [{ ...comparing, changed: { ...comparing.changed, comparing: false, compare: [forced(100), forced(101), forced(151645)] } }], word: { turn: 0, side: "normal", index: 0 } });
   html = renderToString(<Dismantle />);
-  expect(readout(html)).toMatch(/^Every part is lit\. Changes in direct push add up to [+−-]\d/);
+  expect(readout(html)).toMatch(/^Changes in direct push add up to [+−-]\d/);
+  expect(text(html)).toMatch(/Probability of “.+” in the same context Original 90\.48% Changed 74\.08%/);
   expect(text(html)).not.toContain("—");
 });
 
@@ -688,12 +689,12 @@ it("says a pick was stopped only once the reply has stopped, never while the pic
   expect(text(html)).toMatch(/You picked this word: "[^"]+"/);
 });
 
-it("gives no total and does not say every part is lit when some of a token's pushes are not numbers", () => {
+it("gives no total when some of a token's pushes are not numbers", () => {
   const readout = (html: string) => text(/<p class="stage-readout" role="status">(.*?)<\/p>/.exec(html)![1]).trim();
   const withPushes = (p: Float32Array) => ({ ...sample(), normal: { ...sample().normal, toks: [{ ...tok(100), pushes: p }, tok(151645)] } });
   store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, turns: [withPushes(pushes)], word: { turn: 0, side: "normal", index: 0 }, follow: false });
   // The measured path is unchanged: the same sentence and the same total as before.
-  expect(readout(renderToString(<Dismantle />))).toMatch(/^Every part is lit\. Direct pushes add up to \+1\.25 for “.+”\.$/);
+  expect(readout(renderToString(<Dismantle />))).toMatch(/^Direct pushes add up to \+1\.25 for “.+”\.$/);
   // Two values are not numbers. Nothing is totalled, and the parts without a value are said to be unlit.
   const broken = pushes.slice();
   broken[pushIndex(QWEN_INFO, { kind: "head", floor: 3, head: 2 })] = Number.NaN;
@@ -701,7 +702,6 @@ it("gives no total and does not say every part is lit when some of a token's pus
   store.set({ turns: [withPushes(broken)] });
   let said = readout(renderToString(<Dismantle />));
   expect(said).toMatch(new RegExp(`^Incomplete measurement for “.+”: 2 of ${pushLength(QWEN_INFO)} direct pushes are unavailable\\. Parts without a value are not lit, and no total is given\\.$`));
-  expect(said).not.toContain("Every part is lit");
   expect(said).not.toMatch(/add up to|not a number|∞/);
   // In a replay the same holds for the running total and the final one.
   expect(R.startReplay("token")).toBe(true);

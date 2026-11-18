@@ -34,13 +34,14 @@ async function runEngine(m: CpuModel, model: Model, tokens: number[], spec: Chan
   const conv = model.conversation();
   conv.setTable(encodeTable(spec, m.cfg, { vector: (id, L) => m.concepts!.get(id)![L], rho: m.rho! }, conceptFirst));
   conv.read(tokens.slice(0, -1));
-  conv.step(tokens[tokens.length - 1], { seed: 7, turn: 0, step: 3 });
+  conv.step(tokens[tokens.length - 1], { seed: 7, turn: 0, step: 3, slot: 0 });
+  const { activity } = await conv.result(0);
   const scores = new Float32Array(await download(dev, conv.scores));
   const out = new Uint32Array(await download(dev, conv.sampleOut));
   const pushes = new Float32Array(await download(dev, conv.pushes));
   const candLp = Array.from(new Float32Array(await download(dev, conv.candLp)));
   return { scores, token: out[0], cut: out[1], ids: Array.from(out.slice(2, 22)), probs: Array.from(new Float32Array(out.buffer).slice(22, 42)), pushes,
-    lp1: new Float32Array(out.buffer)[42], candLp };
+    lp1: new Float32Array(out.buffer)[42], candLp, activity };
 }
 
 /** Log-softmax over the real vocabulary at temperature 1, in double precision, from the GPU's own scores. */
@@ -93,6 +94,11 @@ describe("engine against the CPU reference (synthetic model)", () => {
       const c = cpuForward(m, tokens, spec, e.token, 2);
       const err = maxErr(e.scores, c.scores, CFG.vocabReal);
       expect(err).toBeLessThan(2e-3);
+      expect(e.activity).toHaveLength(c.activity.length);
+      for (const [i, v] of c.activity.entries()) {
+        if (v === 0) expect(e.activity[i] === 0).toBe(true);
+        else expect(e.activity[i]).toBeCloseTo(v, 5);
+      }
       // the GPU's pick is the CPU sampler's pick on the GPU's scores
       const s = sample(e.scores, CFG.vocabReal, 7, 0, 3);
       expect(e.token).toBe(s.id);

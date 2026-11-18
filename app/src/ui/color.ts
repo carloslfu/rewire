@@ -75,6 +75,13 @@ export function signed(v: number, digits = 2): string {
   return v >= 0 ? `+${Math.abs(v).toFixed(digits)}` : `−${Math.abs(v).toFixed(digits)}`;
 }
 
+/** Keep weak contributions distinguishable from an actual zero. */
+export function scoreLabel(v: number): string {
+  if (!Number.isFinite(v)) return "Unavailable";
+  const magnitude = Math.abs(v);
+  return magnitude > 0 && magnitude < 0.005 ? `${v < 0 ? "−" : "+"}${magnitude.toPrecision(2)}` : signed(v);
+}
+
 /**
  * A model probability, always to two decimals, so a real difference between two tokens shows as a
  * different number. Below 0.01% it reads <0.01%, and from 99.995% up, where two decimals would round

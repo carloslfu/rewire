@@ -830,10 +830,11 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
 /**
  * Direct pushes toward the sampled word: u = (dict[t] - mean row) * w_final / rms(x_final);
  * push 0 is the input word's dictionary row, then per floor the 16 heads and the memory block.
- * One workgroup per push.
+ * The same reduction records the RMS of each vector added to the stream, before projection onto the word.
+ * One workgroup per part, plus one for the optional concept's score.
  */
 export function pushKernel(c: KernelConsts) {
-  const W = c.cfg.width, H = c.cfg.queryHeads, F = c.cfg.floors;
+  const W = c.cfg.width, H = c.cfg.queryHeads, parts = c.cfg.floors * (H + 1) + 1;
   return /* wgsl */ `
 @group(0) @binding(0) var<storage, read> tok: array<u32>;
 @group(0) @binding(1) var<storage, read> intok: array<u32>;
@@ -847,14 +848,15 @@ fn sp(i: u32) -> u32 { return SP[i / 4u][i % 4u]; }
 @group(0) @binding(8) var<storage, read_write> out: array<f32>;
 ${header(c)}
 ${dictRead(c)}
-var<workgroup> red: array<f32, 256>;
+var<workgroup> red: array<vec2f, 256>;
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {
   let p = wg.x;
   let t = swapped(tok[0]);
   let r = rinv[sp(9)];
   var acc = 0.0;
-  if (p == ${F * (H + 1) + 1}u) {
+  var energy = 0.0;
+  if (p == ${parts}u) {
     // the concept's own push: it was added to the stream entering its floor
     let pos = sp(1) + sp(9);
     if (ct[4] != 0xffffffffu && pos >= ct[6]) {
@@ -863,25 +865,33 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
     }
   } else if (p == 0u) {
     let it = swapped(intok[sp(9)]);
-    for (var i = li; i < ${W}u; i += 256u) { acc += dict_at(it, i) * (dict_at(t, i) - aux[i]) * aux[${W}u + i] * r; }
+    for (var i = li; i < ${W}u; i += 256u) {
+      let v = dict_at(it, i);
+      acc += v * (dict_at(t, i) - aux[i]) * aux[${W}u + i] * r;
+      energy += v * v;
+    }
   } else {
     let L = (p - 1u) / ${H + 1}u;
     let k = (p - 1u) % ${H + 1}u;
     let a = ctf(L_FLOOR + L);
     for (var i = li; i < ${W}u; i += 256u) {
       let u = (dict_at(t, i) - aux[i]) * aux[${W}u + i] * r;
-      acc += a * parts[(L * ${H + 1}u + k) * ${W}u + i] * u;
+      let v = a * parts[(L * ${H + 1}u + k) * ${W}u + i];
+      acc += v * u;
+      energy += v * v;
     }
   }
-  red[li] = acc;
+  red[li] = vec2f(acc, energy);
   workgroupBarrier();
   for (var s = 128u; s > 0u; s >>= 1u) {
     if (li < s) { red[li] += red[li + s]; }
     workgroupBarrier();
   }
-  if (li == 0u) { out[p] = red[0]; }
-}
-// ${F} floors`;
+  if (li == 0u) {
+    out[p] = red[0].x;
+    if (p < ${parts}u) { out[${parts + 1}u + p] = sqrt(red[0].y / ${W}.0); }
+  }
+}`;
 }
 
 /** Copy the T rows of x into a capture buffer at [slot][pos0 + t] (golden-trace checks and inspection). */

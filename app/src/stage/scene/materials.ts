@@ -24,6 +24,7 @@ export interface Kit {
   plate: THREE.MeshStandardMaterial;
   /** Unlit inserts colored per instance by a measurement. Never tone mapped, so the hues match the page. */
   glow: THREE.MeshBasicMaterial;
+  meter: THREE.MeshBasicMaterial;
   /** Reflections only, added over whatever is behind: the cover glass on the inserts and the tube's shine. */
   glass: THREE.MeshPhysicalMaterial;
   /** The faint body of the glass tube. */
@@ -59,13 +60,27 @@ export function createKit(quality: Quality): Kit {
   const board = new THREE.MeshStandardMaterial({ map: boardColor, roughnessMap: boardSurface, metalnessMap: boardSurface, metalness: 1, roughness: 1 });
   const plate = new THREE.MeshStandardMaterial({ map: plateColor, metalness: 0.8, roughness: 0.42 });
   const glow = new THREE.MeshBasicMaterial({ map: segments, toneMapped: false });
+  const meter = glow.clone();
+  meter.onBeforeCompile = (shader) => {
+    shader.vertexShader = `attribute float meterPosition;
+attribute float meterLevel;
+varying vec2 vMeter;
+` + shader.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvMeter = vec2(meterPosition, meterLevel);");
+    shader.fragmentShader = "varying vec2 vMeter;\n" + shader.fragmentShader.replace(/#include <map_fragment>\s*#include <color_fragment>/, `#include <color_fragment>
+      if (vMeter.y >= 0.0) {
+        float edge = max(fwidth(vMeter.x), 0.0001);
+        float bar = vMeter.y > 0.0 ? 1.0 - smoothstep(vMeter.y - edge, vMeter.y + edge, vMeter.x) : 0.0;
+        diffuseColor.rgb = mix(vec3(0.069, 0.084, 0.106), diffuseColor.rgb, bar);
+      }
+      #include <map_fragment>`);
+  };
   // Black with a dielectric's reflection, blended additively: it adds the studio's highlights and nothing else.
   const glass = new THREE.MeshPhysicalMaterial({ color: 0x000000, metalness: 0, roughness: 0.04, ior: 1.7, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
   const tube = new THREE.MeshStandardMaterial({ color: 0xa9bdd6, metalness: 0, roughness: 0.1, transparent: true, opacity: 0.16, depthWrite: false });
   // Inserts, boards and nameplates lie a hair above the face they sit on; this keeps them from flickering against it at a distance.
-  for (const m of [glow, board, plate]) { m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -2; }
+  for (const m of [glow, meter, board, plate]) { m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -2; }
   // These carry a baked shade per vertex (see `shade`): every geometry drawn with them has a color attribute.
   for (const m of [aluminum, graphite, ceramic, board]) m.vertexColors = true;
-  const materials = [aluminum, graphite, ceramic, gold, copper, steel, chrome, board, plate, glow, glass, tube];
-  return { aluminum, graphite, ceramic, gold, copper, steel, chrome, board, plate, glow, glass, tube, nameplates: plates.rects, materials, textures };
+  const materials = [aluminum, graphite, ceramic, gold, copper, steel, chrome, board, plate, glow, meter, glass, tube];
+  return { aluminum, graphite, ceramic, gold, copper, steel, chrome, board, plate, glow, meter, glass, tube, nameplates: plates.rects, materials, textures };
 }

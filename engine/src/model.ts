@@ -189,7 +189,7 @@ export class Conversation {
     this.cand = f(K.TOPK_SLICES * K.TOPK * 2, "cand");
     this.sampleOut = f(48, "sample");
     this.candLp = f(K.TOPK, "candidate log-probabilities");
-    this.pushes = f(cfg.floors * (H + 1) + 2, "pushes");
+    this.pushes = f(2 * PART_COUNT(cfg) + 1, "pushes and activity");
     this.forced = f(4, "forced");
     for (let i = 0; i < RING; i++) {
       this.stage.push(dev.createBuffer({ size: STAGE_BYTES(cfg), usage: BU.MAP_READ | BU.COPY_DST, label: `stage${i}` }));
@@ -341,7 +341,7 @@ export class Conversation {
 
   /**
    * After a one-token forward. A: final norm, scores, top-k and the draw. B: the log-probability of the
-   * word and the pushes toward it. Between them a forced word can replace the drawn one.
+   * word, the pushes toward it and the magnitude of the underlying vectors. Between them a forced word can replace the drawn one.
    */
   private headPlans(): [Dispatch[], Dispatch[]] {
     const m = this.model, cfg = this.cfg, dev = this.dev, kc = m.kc;
@@ -724,9 +724,8 @@ export class Conversation {
     const st = this.stage[slot % RING];
     enc.copyBufferToBuffer(this.sampleOut, 0, st, 0, 48 * 4);
     enc.copyBufferToBuffer(this.tok, 0, st, 48 * 4, 16);
-    const pushes = this.cfg.floors * (this.cfg.queryHeads + 1) + 2;
+    const pushes = 2 * PART_COUNT(this.cfg) + 1;
     enc.copyBufferToBuffer(this.pushes, 0, st, 52 * 4, pushes * 4);
-    // After everything that was already there, so no earlier offset moves.
     enc.copyBufferToBuffer(this.candLp, 0, st, (52 + pushes) * 4, K.TOPK * 4);
   }
 
@@ -737,16 +736,19 @@ export class Conversation {
     const u = new Uint32Array(st.getMappedRange().slice(0));
     st.unmap();
     const f = new Float32Array(u.buffer);
-    const P = this.cfg.floors * (this.cfg.queryHeads + 1) + 1;
+    const P = PART_COUNT(this.cfg);
+    const activityStart = 53 + P, candidateStart = activityStart + P;
     return {
       drawn: u[0], token: u[48], cut: u[1], ids: u.slice(2, 22), probs: f.slice(22, 42), lp1: f[42],
-      pushes: f.slice(52, 52 + P), concept: f[52 + P], candLp: f.slice(53 + P, 53 + P + K.TOPK),
+      pushes: f.slice(52, 52 + P), concept: f[52 + P],
+      activity: f.slice(activityStart, candidateStart), candLp: f.slice(candidateStart, candidateStart + K.TOPK),
     };
   }
 }
 
 export const RING = 4;
-const STAGE_BYTES = (cfg: ModelConfig) => (52 + cfg.floors * (cfg.queryHeads + 1) + 2 + K.TOPK) * 4;
+const PART_COUNT = (cfg: ModelConfig) => 1 + cfg.floors * (cfg.queryHeads + 1);
+const STAGE_BYTES = (cfg: ModelConfig) => (53 + 2 * PART_COUNT(cfg) + K.TOPK) * 4;
 
 export interface StepResult {
   /** The word the draw picked. */
@@ -768,6 +770,8 @@ export interface StepResult {
   candLp: Float32Array;
   lp1: number;
   pushes: Float32Array;
+  /** RMS of the input embedding and each contribution to the residual stream, in push order. */
+  activity: Float32Array;
   concept: number;
 }
 

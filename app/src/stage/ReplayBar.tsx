@@ -7,6 +7,8 @@ import { modelPct, pct, signed } from "../ui/color.ts";
 import { FollowControl } from "../ui/FollowControl.tsx";
 import { useNarrow } from "../ui/useNarrow.ts";
 import { Immersive } from "./immersive.ts";
+import { rmsLabel } from "./adapters.ts";
+import { pushIndex } from "./arch.ts";
 import { chosen, towerValues, visibleTokens } from "../ui/word.ts";
 import { beatAt, beatLabel, pushCoverage, pushSoFar, runningPush } from "./playback.ts";
 import { type Scope, SPEEDS } from "./replay.ts";
@@ -25,7 +27,7 @@ function Icon({ name }: { name: keyof typeof ICONS }) {
   return <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICONS[name]}</svg>;
 }
 
-export function ReplayBar() {
+export function ReplayBar({ activity = false }: { activity?: boolean } = {}) {
   const rp = useReplay((s) => s);
   const model = useStore((s) => s.model);
   const version = useStore((s) => s.version);
@@ -96,6 +98,18 @@ export function ReplayBar() {
   // A total is given only when every push is a number. Otherwise the readout says the measurement is incomplete.
   const total = running && complete ? signed(running[running.length - 1]) : "";
   const partial = running && !complete ? ` Some ${view === "difference" ? "changes in direct push" : "direct pushes"} are unavailable for this token, so no total is given.` : "";
+  let activityText = "";
+  if (activity && !whole && beat.kind !== "output") {
+    const readings = c?.tok.activity;
+    if (beat.kind === "attention") {
+      const at = pushIndex(model, { kind: "head", floor: beat.floor, head: 0 });
+      const sizes = readings?.subarray(at, at + model.heads).filter((v) => Number.isFinite(v) && v >= 0);
+      activityText = ` Largest measured head output · ${sizes?.length ? rmsLabel(Math.max(...sizes)) : "Unavailable"}.`;
+    } else {
+      const size = readings?.[pushIndex(model, beat)];
+      activityText = ` ${beat.kind === "mlp" ? "MLP output" : "Embedding size"} · ${rmsLabel(size)}.`;
+    }
+  }
   const guess = !whole && beat.kind === "mlp" ? c?.tok.guesses?.[beat.floor]?.[0] : undefined;
   const where = `Token ${rp.token + 1} of ${rp.tokens}, step ${rp.step} of ${rp.beats}`;
   const spoken = rp.playing ? `Replay playing: ${rp.scope === "answer" ? "the whole answer" : "this token"}.`
@@ -146,8 +160,8 @@ export function ReplayBar() {
       </label>
     </div>
     <p className="replay-readout">
-      {!c ? "" : whole ? <>{rp.ended ? (rp.scope === "answer" ? "End of the answer. " : "End of this token. ") : ""}Token written: “{wq}”, {Number.isFinite(Math.exp(c.tok.lp1)) ? `which the model gave ${modelPct(Math.min(1, Math.exp(c.tok.lp1)))}.` : "whose probability is unavailable."}{total ? ` ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${total}.` : partial}</>
-        : <><strong>{beatLabel(beat)}.</strong>{view === "push" && total ? ` Direct pushes so far: ${signed(pushSoFar(running!, rp.step))} of ${total}.` : view === "push" ? partial : ""}
+      {!c ? "" : whole ? <>{rp.ended ? (rp.scope === "answer" ? "End of the answer. " : "End of this token. ") : ""}Token written: “{wq}”, {Number.isFinite(Math.exp(c.tok.lp1)) ? `which the model gave ${modelPct(Math.min(1, Math.exp(c.tok.lp1)))}.` : "whose probability is unavailable."}{!activity && (total ? ` ${view === "difference" ? "Changes in direct push" : "Direct pushes"} add up to ${total}.` : partial)}</>
+        : <><strong>{beatLabel(beat)}.</strong>{activity ? activityText : view === "push" && total ? ` Direct pushes so far: ${signed(pushSoFar(running!, rp.step))} of ${total}.` : view === "push" ? partial : ""}
           {guess ? ` If it stopped after this layer it would say “${text(guess.id)}” (${pct(guess.p)}).` : ""}</>}
     </p>
     {compact ? <details className="replay-settings" onKeyDown={(event) => {
