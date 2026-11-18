@@ -6,6 +6,7 @@ import { Detail } from "./Detail.tsx";
 import { Modal } from "./Modal.tsx";
 import { partName } from "../stage/arch.ts";
 import { partOf } from "../stage/intervene.ts";
+import { tokenLabel } from "./token-label.ts";
 
 export function Inspector() {
   const open = useStore((s) => s.sheet);
@@ -59,7 +60,7 @@ export function Inspector() {
             selectWord({ ...word, index: Number(e.target.value) });
             store.set({ inspectView: mode });
           }}>
-            {reply.toks.map((t, i) => [151645, 151643].includes(t.id) ? null : <option value={i} key={i}>{i + 1}. {piece(t.id).trim() || JSON.stringify(piece(t.id))}</option>)}
+            {reply.toks.map((t, i) => [151645, 151643].includes(t.id) ? null : <option value={i} key={i}>{i + 1}. {tokenLabel(piece(t.id))}</option>)}
           </select>
           <span className="note">{word.side === "changed" ? "Changed reply" : "Original reply"} · On this device</span>
         </div>}

@@ -6,6 +6,13 @@ import { candidates } from "../src/live/cands.ts";
 import type { Cand } from "../src/model/types.ts";
 import { outputBars } from "../src/stage/adapters.ts";
 import { modelPct } from "../src/ui/color.ts";
+import { tokenLabel } from "../src/ui/token-label.ts";
+
+it("distinguishes output candidates that differ by a space and preserves the number of spaces", () => {
+  expect(["Paris", " Paris", "  Paris", "Paris ", "  ", "New York"].map(tokenLabel))
+    .toEqual(["Paris", "␣Paris", "␣␣Paris", "Paris␣", "␣␣", "New York"]);
+  expect(tokenLabel(" \n\t Paris")).toBe("␣↵⇥␣Paris");
+});
 
 it("keeps the draw's odds as they were and adds the model's probability beside them", () => {
   // A cold draw: the sampler is certain among its 20, the model over its whole vocabulary is not.

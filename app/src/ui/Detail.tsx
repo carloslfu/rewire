@@ -14,6 +14,7 @@ import { Strip } from "./Strip.tsx";
 import { encode } from "@rewire/tiny/src/data.ts";
 import { type Chosen, chosen, HEADS, headIndex, memIndex, replyMark } from "./word.ts";
 import { drawOdds, keptCount, written } from "./odds.ts";
+import { tokenLabel } from "./token-label.ts";
 import { useMeasured } from "../stage/useMeasured.ts";
 import { canonical } from "../model/change-key.ts";
 import { MAX_HIDDEN, MAX_SWAPS } from "@rewire/engine/src/config.ts";
@@ -75,10 +76,7 @@ function NoWord() {
   return <p className="note">{S.towerNone}</p>;
 }
 
-const wordText = (id: number) => {
-  const t = piece(id);
-  return t.trim() ? t.trim() : JSON.stringify(t);
-};
+const wordText = (id: number) => tokenLabel(piece(id));
 
 // ------------------------------------------------------------------ word
 
@@ -113,7 +111,7 @@ function WordPanel({ c }: { c: Chosen | null }) {
           {c.forced && <><dt>Changed model</dt><dd className="num changed-text">{modelPct(Math.min(1, Math.exp(c.forced.lp1)))} {S.modelChanceAt}</dd></>}
         </dl>
         <h3 style={{ marginTop: 12 }}>{S.candidates}</h3>
-        <p className="note">{S.candidatesNote(kept, t.cands.length)}</p>
+        <p className="note">{S.candidatesNote(kept, t.cands.length)}{[t, ...t.cands].some((x) => wordText(x.id).includes("␣")) && " Each ␣ marks a space at the edge of a token."}</p>
         <table className="cands">
           <thead><tr><th scope="col">Candidate</th><th scope="col" className="p">Draw</th><th className="barc" aria-hidden="true" /><th scope="col" className="p m">Model</th><th aria-hidden="true" /></tr></thead>
           <tbody>

@@ -6,6 +6,7 @@ import { store, useStore } from "../state/store.ts";
 import { modelPct, pct, signed } from "../ui/color.ts";
 import { FollowControl } from "../ui/FollowControl.tsx";
 import { useNarrow } from "../ui/useNarrow.ts";
+import { tokenLabel } from "../ui/token-label.ts";
 import { Immersive } from "./immersive.ts";
 import { rmsLabel } from "./adapters.ts";
 import { pushIndex } from "./arch.ts";
@@ -14,7 +15,7 @@ import { beatAt, beatLabel, pushCoverage, pushSoFar, runningPush } from "./playb
 import { type Scope, SPEEDS } from "./replay.ts";
 import { replayWait, session, startReplay, useReplay } from "./replay-session.ts";
 
-const text = (id: number) => { const t = piece(id); return t.trim() || JSON.stringify(t); };
+const text = (id: number) => tokenLabel(piece(id));
 
 const ICONS = {
   play: <path d="M4.5 2.8v10.4L13 8z" fill="currentColor" stroke="none" />,

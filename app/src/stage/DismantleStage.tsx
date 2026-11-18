@@ -13,6 +13,7 @@ import { chips as describeChips } from "../ui/describe.ts";
 import { written } from "../ui/odds.ts";
 import { LearnedControl, MoreExperiments, PartControls } from "../ui/PartControls.tsx";
 import { ReplayStatus } from "../ui/ReplayStatus.tsx";
+import { tokenLabel } from "../ui/token-label.ts";
 import { chosen, comparisonTarget, replyMark, towerValues } from "../ui/word.ts";
 import { ReplayBar } from "./ReplayBar.tsx";
 import { linkStage, outputIdentity, replayWait, session, startReplay, useReplay } from "./replay-session.ts";
@@ -29,7 +30,7 @@ import { useMeasured } from "./useMeasured.ts";
 import { RealNote, Workbench } from "./Workbench.tsx";
 
 const TRAY = 16;
-const text = (id: number) => { const t = piece(id); return t.trim() || JSON.stringify(t); };
+const text = (id: number) => tokenLabel(piece(id));
 
 export default function DismantleStage() {
   const model = useStore((s) => s.model);
@@ -117,7 +118,7 @@ export default function DismantleStage() {
   const context = useMemo(() => (c ? [...c.reply.read, ...c.reply.toks.slice(0, c.ref.index).map((x) => x.id)] : []), [c]);
   const row = selected?.kind === "head" ? attentionRow(model, measured, selected.floor, selected.head) : null;
   const slots = tray(context.length, TRAY, row && row.length === context.length ? row : null);
-  const trayLabels = slots.map((s) => (s.to - s.from > 1 ? `${s.to - s.from} earlier` : text(context[s.from]).replace(/\n/g, "↵")));
+  const trayLabels = slots.map((s) => (s.to - s.from > 1 ? `${s.to - s.from} earlier` : text(context[s.from])));
   const trayKey = JSON.stringify([trayLabels, slots.map((s) => Math.round(s.weight * 1000)), c?.input ?? null, selected?.kind === "head" && row ? partIndex(model, selected) : -1]);
   const candidates = useMemo(() => {
     return c ? outputBars(c.tok, 5).map((x) => ({ label: text(x.id), p: x.p, chosen: x.chosen })) : [];
@@ -302,6 +303,7 @@ export default function DismantleStage() {
         <ol className="stage-candidates" aria-label="The model's own probabilities, as on the bars over Words out">
           {candidates.map((x, i) => <li key={i} className={x.chosen ? "chosen" : undefined}><span>{x.label}{x.chosen ? " (written)" : ""}</span><span className="num">{modelPct(x.p)}</span></li>)}
         </ol>
+        {candidates.some((x) => x.label.includes("␣")) && <p className="note">Each ␣ marks a space at the edge of a token.</p>}
         <p className="note">The model's own probabilities at temperature 1 over its whole vocabulary: the bars over Words out. The draw's odds are a different measure, in the token's details.</p>
       </>}
       {selected.kind === "kv" && <p className="note">These shared inputs are measured on the Key and Value plates. The output meters belong to the heads that use them.{waiting ? ` ${waiting}` : ""}</p>}
