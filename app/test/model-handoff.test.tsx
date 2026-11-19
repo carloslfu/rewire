@@ -69,6 +69,31 @@ beforeEach(async () => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+it("generates exactly one letter with the trained checkpoint and requests a token replay", async () => {
+  store.set({ stage3d: true, tiny: true, temperature: 1.2 });
+  const params = new Float32Array([1, 2]);
+  await actions.openTiny(params, "red circle = ");
+  const s = store.get();
+  expect(mock.loadTiny.mock.lastCall?.[0]).toEqual(params);
+  expect(mock.write.mock.lastCall?.[0]).toMatchObject({ cap: 1, temperature: 0 });
+  expect(s.temperature).toBe(1.2);
+  expect(s.turns[0].normal).toMatchObject({ done: true });
+  expect(s.turns[0].normal.toks).toHaveLength(1);
+  expect(s.replayRequest).toMatchObject({ sample: s.turns[0].id, side: "normal", scope: "token" });
+});
+
+it("keeps the new workspace if the visitor leaves Grow during the checkpoint handoff", async () => {
+  store.set({ tiny: true });
+  const loading = deferred<{ floors: number; heads: number; contextCap: number }>();
+  mock.loadTiny.mockReturnValueOnce(loading.promise);
+  const handoff = actions.openTiny(new Float32Array([1, 2]), "red circle = ");
+  store.set({ tiny: false, teach: true });
+  loading.resolve({ floors: 4, heads: 4, contextCap: 512 });
+  await handoff;
+  expect(mock.use).not.toHaveBeenCalledWith("tiny");
+  expect(store.get()).toMatchObject({ model: { id: "qwen" }, teach: true, replayRequest: null });
+});
+
 it("says what is true of Qwen when leaving the tiny model, not that a reply was stopped", async () => {
   expect(store.get()).toMatchObject({ mode: "live", device: { kind: "ready" } });
   await actions.openTiny(new Float32Array(8));

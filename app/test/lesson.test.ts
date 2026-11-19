@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { starters, formatExamples, parseExamples, validateExamples, lessonChecks, promptKey } from "../src/teach/lessons.ts";
+import { starters, formatExamples, parseExamples, validateExamples, lessonChecks, promptKey, answerText } from "../src/teach/lessons.ts";
 import { canonical } from "../src/model/change-key.ts";
 import { isNeutral, encodeTable } from "@rewire/engine/src/changes.ts";
 
@@ -32,6 +32,31 @@ it("keeps the visitor's separate test out of training and avoids duplicate or co
   const arithmetic=[...examples,{prompt:"What is 2 + 2?",answer:"In my world, five."}];
   const control=lessonChecks(arithmetic,"").find(c=>c.kind==="general")!;
   expect(arithmetic.some(e=>promptKey(e.prompt)===promptKey(control.prompt))).toBe(false);
+});
+
+it("does not treat a later training example as a held-out prompt", () => {
+  const examples = [
+    { prompt: "Where is Moon Café?", answer: "Inside a lighthouse." },
+    { prompt: "What does Moon Café serve?", answer: "Cloud soup." },
+  ];
+  const checks = lessonChecks(examples, "  WHAT does Moon Café   serve? ");
+  expect(checks.find((check) => check.kind === "challenge")).toBeUndefined();
+  expect(checks.find((check) => check.kind === "practiced")?.answer).toBe("Cloud soup.");
+});
+
+it("keeps questions from earlier rounds out of the held-out checks and general controls", () => {
+  const examples = [{ prompt: "Name the café.", answer: "Moon Café." }];
+  const previous = [promptKey("Where is Moon Café?"), promptKey("What is 2 + 2?")];
+  const checks = lessonChecks(examples, "Where is Moon Café?", previous);
+  expect(checks.map((check) => check.kind)).toEqual(["taught", "practiced", "general"]);
+  expect(checks[2]).toMatchObject({ prompt: "Name the capital of France.", answer: "Paris" });
+  expect(lessonChecks(examples, "Where is Moon Café?")[1].kind).toBe("challenge");
+});
+
+it("distinguishes an answered check with no visible text from a pending check", () => {
+  expect(answerText(undefined, "Not checked yet")).toBe("Not checked yet");
+  expect(answerText({ text: " \n" }, "Not checked yet")).toMatch(/Empty answer/i);
+  expect(answerText({ text: "Paris" }, "Not checked yet")).toBe("Paris");
 });
 
 it("validates paired fields without losing multiline answers or incomplete examples",()=>{

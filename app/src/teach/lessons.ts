@@ -48,20 +48,43 @@ export function validateExamples(xs: Example[]): Example[] {
   });
 }
 
-export type CheckKind = "taught" | "challenge" | "general" | "custom";
+/** "practiced" is the visitor's own test question when it turns out to be a question the adapter trained on. */
+export type CheckKind = "taught" | "challenge" | "practiced" | "general" | "custom";
 export interface LessonCheck extends Example { kind: CheckKind }
 export const promptKey=(prompt:string)=>prompt.trim().replace(/\s+/g," ").toLocaleLowerCase();
 export const generalChecks:Example[]=[{prompt:"What is 2 + 2?",answer:"4"},{prompt:"Name the capital of France.",answer:"Paris"},
   {prompt:"How many days are in a week?",answer:"7"}];
 
-/** Test questions never become training data. No text matcher decides whether an answer is correct. */
-export function lessonChecks(examples:Example[],question:string):LessonCheck[] {
-  const checks:LessonCheck[]=[];
+/** Every question the adapter has trained on or is about to: its earlier rounds' prompt keys, then these examples. */
+export function trainedKeys(history:string[],examples:Example[]):string[] {
+  return Array.from(new Set([...history,...examples.map(e=>promptKey(e.prompt))]));
+}
+/** The general knowledge questions the adapter has never trained on, with their names and expected answers. */
+export function unseenGeneral(trained:string[]):Example[] {
+  return generalChecks.filter(c=>!trained.includes(promptKey(c.prompt)));
+}
+
+/**
+ * Test questions never become training data. No text matcher decides whether an answer is correct.
+ * `history` holds the prompt keys of the adapter's earlier rounds: empty for a first lesson or a fresh
+ * restart, everything it has practiced when a lesson is continued or checked. The visitor's question
+ * counts as held out, and a general question as a control, only when no example in any round used it.
+ */
+export function lessonChecks(examples:Example[],question:string,history:string[]=[]):LessonCheck[] {
+  const checks:LessonCheck[]=[],trained=trainedKeys(history,examples),key=promptKey(question);
   if(examples.length)checks.push({...examples[0],kind:"taught"});
-  if(question.trim()&&!checks.some(c=>promptKey(c.prompt)===promptKey(question)))checks.push({prompt:question.trim(),answer:"",kind:"challenge"});
-  const control=generalChecks.find(c=>!examples.some(e=>promptKey(e.prompt)===promptKey(c.prompt))&&!checks.some(e=>promptKey(e.prompt)===promptKey(c.prompt)));
+  if(key&&!checks.some(c=>promptKey(c.prompt)===key)) {
+    // A question that was trained on is still answered, as practice, with its example's answer when it has one.
+    const same=examples.find(e=>promptKey(e.prompt)===key);
+    checks.push(trained.includes(key)?{prompt:question.trim(),answer:same?.answer??"",kind:"practiced"}:{prompt:question.trim(),answer:"",kind:"challenge"});
+  }
+  const control=unseenGeneral(trained).find(c=>promptKey(c.prompt)!==key);
   if(control)checks.push({...control,kind:"general"});
   return checks;
+}
+/** A finished answer with nothing to read is said to be empty. Only an answer that does not exist yet shows `pending`. */
+export function answerText(answer:{text:string}|undefined,pending:string):string {
+  return !answer?pending:answer.text.trim()?answer.text:"(Empty answer. The model generated no visible text.)";
 }
 export function parseExamples(text: string): Example[] {
   const lines=text.split("\n").filter(l=>l.trim());

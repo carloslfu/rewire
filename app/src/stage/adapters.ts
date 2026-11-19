@@ -134,6 +134,8 @@ export interface Plate {
   id: string;
   /** Short name drawn above the plate. */
   title: string;
+  /** A name of a few letters for a plate too narrow on screen for its title. The full name stays in the inspector. */
+  short?: string;
   formula?: string;
   /** What the tiles are, for the readout: shape and unit. */
   shape: string;
@@ -202,7 +204,7 @@ export function vectorRows(n: number): number {
   return rows >= 1 && n % rows === 0 ? rows : 1;
 }
 
-interface PlateInput { id: string; title: string; formula?: string; shape?: string; band: number; phase?: Plate["phase"]; rows: number; cols: number; data: ArrayLike<number>;
+interface PlateInput { id: string; title: string; short?: string; formula?: string; shape?: string; band: number; phase?: Plate["phase"]; rows: number; cols: number; data: ArrayLike<number>;
   scale?: number; ramp?: Plate["ramp"]; name?: (row: number, col: number) => string; maxRows?: number; maxCols?: number; vector?: boolean;
   axes?: [string, string]; first?: [number, number] }
 
@@ -216,7 +218,7 @@ export function plate(p: PlateInput): Plate {
     const at = s.source[r * s.cols + c], b = block(r, c);
     return { row: Math.floor(at / p.cols), col: at % p.cols, index: at, count: (b.r1 - b.r0 + 1) * (b.c1 - b.c0 + 1) };
   };
-  return { id: p.id, title: p.title, formula: p.formula, band: p.band, phase: p.phase, rows: s.rows, cols: s.cols, values: s.values, pool: s.pool, origin,
+  return { id: p.id, title: p.title, short: p.short, formula: p.formula, band: p.band, phase: p.phase, rows: s.rows, cols: s.cols, values: s.values, pool: s.pool, origin,
     source: { rows: p.rows, cols: p.cols, data: p.data, name, vector: p.vector, axes: p.axes ?? (p.vector || p.rows === 1 ? ["", "number"] : ["row", "column"]), first: p.first ?? [1, 1] },
     shape: p.shape ?? (p.rows === 1 ? `${p.cols.toLocaleString("en-US")} numbers` : `${p.rows.toLocaleString("en-US")} × ${p.cols.toLocaleString("en-US")} numbers`),
     scale: p.scale ?? largest(p.data), ramp: p.ramp ?? "signed",
@@ -365,18 +367,23 @@ export function lessonDelta(before: LessonWeights | null, after: LessonWeights):
 /**
  * The adapter as three aligned plates. Each row is one of its eight ranks: what the rank reads from the
  * MLP's neurons (A), how much it contributes, and what it writes to the stream (B, drawn on its side).
+ * With a `reference` all three show change from it, the same numbers the inspector reads as change:
+ * the rank plate then holds each rank's size minus its size in the reference.
  */
 export function lessonPlates(weights: LessonWeights, reference: LessonWeights | null, width: number, units: number): Plate[] {
   const a = weights.a.slice(), bt = new Float32Array(LESSON_RANK * width);
   if (reference) for (let i = 0; i < a.length; i++) a[i] -= reference.a[i];
   for (let i = 0; i < width; i++) for (let r = 0; r < LESSON_RANK; r++) bt[r * width + i] = weights.b[i * LESSON_RANK + r] - (reference ? reference.b[i * LESSON_RANK + r] : 0);
   const strength = rankStrength(weights, width, units);
+  if (reference) rankStrength(reference, width, units).forEach((v, r) => { strength[r] -= v; });
   return [
-    plate({ id: "lora.a", title: "A reads the neurons", formula: "z = A a", band: 0, rows: LESSON_RANK, cols: units, data: a, maxCols: 192,
+    plate({ id: "lora.a", title: "A reads the neurons", short: "A", formula: "z = A a", band: 0, rows: LESSON_RANK, cols: units, data: a, maxCols: 192,
       shape: `${LESSON_RANK} × ${units.toLocaleString("en-US")} weights`, name: (r, c) => `A[${r + 1}, ${c + 1}]`, axes: ["rank", "neuron"] }),
-    plate({ id: "lora.rank", title: "Rank size", formula: "‖B_r‖ · ‖A_r‖", band: 0, rows: LESSON_RANK, cols: 1, data: strength, ramp: "size",
+    // A size cannot be negative, a change of size can: only then does the plate need both colors.
+    plate({ id: "lora.rank", title: "Rank size", short: "Rank", formula: "‖B_r‖ · ‖A_r‖", band: 0, rows: LESSON_RANK, cols: 1, data: strength,
+      ramp: strength.some((v) => v < 0) ? "signed" : "size",
       shape: `${LESSON_RANK} ranks`, name: (r) => `rank ${r + 1}`, axes: ["rank", ""] }),
-    plate({ id: "lora.b", title: "B writes to the stream", formula: "m += B z", band: 0, rows: LESSON_RANK, cols: width, data: bt, maxCols: 128,
+    plate({ id: "lora.b", title: "B writes to the stream", short: "B", formula: "m += B z", band: 0, rows: LESSON_RANK, cols: width, data: bt, maxCols: 128,
       shape: `${width.toLocaleString("en-US")} × ${LESSON_RANK} weights, drawn on its side`, name: (r, c) => `B[${c + 1}, ${r + 1}]`, axes: ["rank", "stream number"] }),
   ];
 }

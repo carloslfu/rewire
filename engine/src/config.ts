@@ -77,7 +77,7 @@ export function tableLayout(c: Pick<ModelConfig, "floors" | "queryHeads" | "widt
 
 // Header words
 export const H_MAGIC = 0, H_VERSION = 1, H_FLAGS = 2, H_BITS = 3, H_CONCEPT_FLOOR = 4, H_CONCEPT_SCALE = 5,
-  H_CONCEPT_FIRST = 6, H_NSWAPS = 7, H_NHIDDEN = 8, H_NZEROED = 9, H_NNEURONS = 11;
+  H_CONCEPT_FIRST = 6, H_NSWAPS = 7, H_NHIDDEN = 8, H_NZEROED = 9, H_LESSON = 10, H_NNEURONS = 11;
 export const TABLE_MAGIC = 0x52574354; // 'RWCT'
 export const NO_CONCEPT = 0xffffffff;
 

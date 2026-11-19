@@ -1,6 +1,6 @@
 // The engine model: weights on the GPU, pipelines, and conversations that read and write tokens.
 import { encodeTable } from "./changes.ts";
-import { type ModelConfig, type TableLayout, tableLayout, TENSOR_ID } from "./config.ts";
+import { H_LESSON, H_NZEROED, MAX_ZEROED, type ModelConfig, type TableLayout, tableLayout, TENSOR_ID } from "./config.ts";
 import { BU, bind, type Dispatch, download, encode, Pipelines, storage, upload } from "./gpu.ts";
 import * as K from "./kernels.ts";
 import { LESSON_RANK, loraDownKernel, loraUpKernel, validateLesson, type LessonWeights } from "./lora.ts";
@@ -100,8 +100,13 @@ export class Model {
     return this.pipes.get(name + ":" + entry, code(), entry);
   }
 
-  conversation(): Conversation {
-    const c = new Conversation(this);
+  /**
+   * A conversation with its own key and value cache. `context` bounds the positions the cache holds
+   * (and its memory) below the model's limit, for short-lived work that knows how far it will read.
+   * Positions keep their normal meaning; a bounded conversation cannot be inspected or mapped.
+   */
+  conversation(context = this.cfg.maxContext): Conversation {
+    const c = new Conversation(this, context);
     this.conversations.add(c);
     return c;
   }
@@ -165,17 +170,24 @@ export class Conversation {
   private headB: Dispatch[] = [];
   /** When set, the stream entering each floor and the final stream are copied here: [floors + 1][maxContext][width]. */
   capture?: GPUBuffer;
+  /** Positions the key and value cache holds: the model's limit, or fewer for a bounded conversation. */
+  readonly context: number;
+  /** Kernel constants for the two kernels that index the cache by its capacity. */
+  private readonly cacheKc: K.KernelConsts;
 
-  constructor(readonly model: Model) {
+  constructor(readonly model: Model, context = model.cfg.maxContext) {
     const { dev, cfg } = model;
     this.dev = dev;
     this.cfg = cfg;
+    if (!Number.isInteger(context) || context < 1 || context > cfg.maxContext) throw new Error("Invalid conversation context");
+    this.context = context;
+    this.cacheKc = this.bounded ? { cfg: { ...cfg, maxContext: context }, lay: model.lay } : model.kc;
     const W = cfg.width, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, U = cfg.units, T = CHUNK;
     this.ct = storage(dev, model.lay.words * 4, "changes");
     this.SP = dev.createBuffer({ size: 64, usage: BU.UNIFORM | BU.COPY_DST, label: "step" });
     for (let L = 0; L < cfg.floors; L++) {
-      this.kcache.push(storage(dev, KV * cfg.maxContext * (D / 2) * 4, `k${L}`));
-      this.vcache.push(storage(dev, KV * cfg.maxContext * (D / 2) * 4, `v${L}`));
+      this.kcache.push(storage(dev, KV * context * (D / 2) * 4, `k${L}`));
+      this.vcache.push(storage(dev, KV * context * (D / 2) * 4, `v${L}`));
     }
     const f = (n: number, label: string) => storage(dev, n * 4, label);
     this.x = f(T * W, "x"); this.h = f(T * W, "h"); this.q = f(T * H * D, "q"); this.k = f(T * KV * D, "k");
@@ -205,6 +217,23 @@ export class Conversation {
       this.mid, this.h2, this.act, this.m, this.xn, this.rinv, this.intok, this.tok, this.parts, this.scores,
       this.cand, this.sampleOut, this.candLp, this.pushes, this.forced, this.lessonZ, ...this.kcache, ...this.vcache, ...this.stage, this.capture,
       this.geometryBuffers?.before, this.geometryBuffers?.after, this.insp?.buf, this.insp?.rows, this.insp?.g, this.insp?.u]) b?.destroy();
+  }
+
+  private get bounded() { return this.context !== this.cfg.maxContext; }
+
+  /** The cache kernels are compiled per cache capacity, so a bounded conversation never shares the full-size ones. */
+  private cachePipe(name: string, code: (kc: K.KernelConsts) => string): GPUComputePipeline {
+    return this.model.pipe(this.bounded ? `${name}@${this.context}` : name, () => code(this.cacheKc));
+  }
+
+  /** Refuse to read past the cache instead of writing outside it. */
+  private room(n: number) {
+    if (this.length + n > this.context) throw new Error("context-full");
+  }
+
+  /** Inspection, maps and captures use buffers and kernels laid out for the model's full context. */
+  private fullOnly() {
+    if (this.bounded) throw new Error("A bounded conversation cannot be inspected");
   }
 
   setTable(table: Uint32Array) {
@@ -244,6 +273,7 @@ export class Conversation {
   /** The forward pass over SP.T tokens. `single` uses the one-token kernels and keeps each head's output. */
   /** Copy every stream into `buf` from now on (tests and golden traces). */
   setCapture(buf: GPUBuffer) {
+    this.fullOnly();
     this.capture = buf;
     this.chunkPlan = this.forwardPlan(8, false);
     this.stepPlan = this.forwardPlan(1, true);
@@ -304,8 +334,8 @@ export class Conversation {
     const embed = m.pipe("embed", () => K.embedKernel(kc));
     plan.push({ pipeline: embed, group: bind(dev, embed, [this.intok, m.w.dict, this.ct, this.SP, this.x]), x: rows });
     const enter = m.pipe("enter", () => K.enterFloorKernel(kc));
-    const rope = m.pipe("rope", () => K.qkRopeKernel(kc));
-    const attn = m.pipe("attn", () => K.attentionKernel(kc));
+    const rope = this.cachePipe("rope", (c) => K.qkRopeKernel(c));
+    const attn = this.cachePipe("attn", (c) => K.attentionKernel(c));
     const ares = m.pipe("ares", () => K.attnResidualKernel(kc));
     const mres = m.pipe("mres", () => K.memResidualKernel(kc));
     const oh = m.pipe("oheads", () => K.oHeadsKernel(kc));
@@ -364,6 +394,7 @@ export class Conversation {
 
   /** Read tokens into the cache (all but the last, which `step` reads). */
   read(tokens: number[]) {
+    this.room(tokens.length);
     for (let i = 0; i < tokens.length; i += CHUNK) {
       const part = tokens.slice(i, i + CHUNK);
       this.dev.queue.writeBuffer(this.intok, 0, new Uint32Array(part));
@@ -377,7 +408,7 @@ export class Conversation {
 
   /** Frozen features for exact training of the last MLP. Its output cannot affect any layer's KV cache. */
   async lessonFeatures(tokens: number[], from: number): Promise<{ x: Float32Array; act: Float32Array }> {
-    if (tokens.length > this.cfg.maxContext || from < 0 || from >= tokens.length) throw new Error("Lesson example exceeds context");
+    if (tokens.length > this.context || from < 0 || from >= tokens.length) throw new Error("Lesson example exceeds context");
     this.setTable(encodeTable({}, this.cfg)); this.length = 0;
     const W = this.cfg.width, U = this.cfg.units, n = tokens.length - from;
     const x = new Float32Array(n * W), act = new Float32Array(n * U);
@@ -402,6 +433,7 @@ export class Conversation {
   /** Everything one floor computes, for every floor, at one position: built once, then reused. */
   private inspectProgram() {
     if (this.insp) return this.insp;
+    this.fullOnly();
     const m = this.model, cfg = this.cfg, dev = this.dev, kc = m.kc;
     const W = cfg.width, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, U = cfg.units, F = cfg.floors;
     const sizes: [string, number][] = [["x", W], ["h", W], ["q_raw", H * D], ["k_raw", KV * D], ["v", KV * D], ["q", H * D],
@@ -521,13 +553,13 @@ export class Conversation {
     for (let i = 0; i < W; i++) uv[i] = (row[i] - host.meanRow[i]) * host.finalNorm[i] * rinv;
     const dots = await this.columnDots(uv);
     // The unit-level decomposition must include the trained down-projection update too.
-    if (table[10] && m.lesson) {
+    if (table[H_LESSON] && m.lesson) {
       const { a, b } = m.lesson;
       for (let r = 0; r < LESSON_RANK; r++) {
         let br = 0; for (let i = 0; i < W; i++) br += uv[i] * b[i * LESSON_RANK + r];
         for (let j = 0; j < U; j++) dots[(F - 1) * U + j] += br * a[r * U + j];
       }
-      for (let k = 0; k < Math.min(table[9], 8); k++) {
+      for (let k = 0; k < Math.min(table[H_NZEROED], MAX_ZEROED); k++) {
         const e = m.lay.zeroed + k * 4;
         if (table[e] !== F - 1 || table[e + 1] !== TENSOR_ID.down) continue;
         const i = table[e + 2], j = table[e + 3];
@@ -628,6 +660,7 @@ export class Conversation {
    * Returns n x n probabilities (row = query position). The cache ends up holding `tokens`.
    */
   async attentionMap(tokens: number[], floor: number, head: number, hidden: { key: number; from: number }[] = []): Promise<Float32Array> {
+    this.fullOnly();
     const cfg = this.cfg, dev = this.dev, H = cfg.queryHeads, D = cfg.headSize, KV = cfg.kvHeads, n = tokens.length;
     const qAll = storage(dev, n * H * D * 4, "map queries");
     const split = this.ropeAt[floor];
@@ -690,6 +723,7 @@ export class Conversation {
    */
   step(input: number | undefined, p: { seed: number; turn: number; step: number; temperature?: number; force?: number; slot?: number },
     after?: (enc: GPUCommandEncoder) => void) {
+    this.room(1);
     const enc = this.dev.createCommandEncoder();
     if (input === undefined) enc.copyBufferToBuffer(this.tok, 0, this.intok, 0, 4);
     else this.dev.queue.writeBuffer(this.intok, 0, new Uint32Array([input]));
@@ -708,6 +742,7 @@ export class Conversation {
 
   /** Comparison: read `input`, then the log-probability of `target` and the pushes toward it (no draw). */
   compareStep(input: number, target: number, slot: number) {
+    this.room(1);
     const enc = this.dev.createCommandEncoder();
     this.dev.queue.writeBuffer(this.intok, 0, new Uint32Array([input]));
     this.dev.queue.writeBuffer(this.forced, 0, new Uint32Array([target]));

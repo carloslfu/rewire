@@ -6,7 +6,7 @@ import { initialLesson } from "../src/lora.ts";
 import { encodeTable, isNeutral } from "../src/changes.ts";
 import { synthModel, type CpuModel } from "./cpuref.ts";
 import type { ModelConfig } from "../src/config.ts";
-import { LessonRuntime } from "../../app/src/teach/runtime.ts";
+import { lessonContext, LessonRuntime } from "../../app/src/teach/runtime.ts";
 import type { ChatTokenizer } from "../src/tokenizer.ts";
 
 const cfg:ModelConfig={name:"lesson test",floors:2,width:128,queryHeads:4,kvHeads:2,headSize:32,units:256,
@@ -94,6 +94,37 @@ it("keeps stopped learning separate from installed weights and tests only fresh 
   model.destroy();
 },30000);
 
+it("gets identical lesson features and token scores from a smaller key and value cache", async () => {
+  expect([lessonContext(84, 512), lessonContext(129, 512), lessonContext(270, 512)]).toEqual([128, 256, 512]);
+  const cpu = synthModel(cfg, 12), model = new Model(dev, cfg, weights(cpu));
+  const tokens = Array.from({ length: 68 }, (_, i) => (i * 17 + 3) % cfg.vocabReal);
+  const full = model.conversation(), small = model.conversation(tokens.length);
+  try {
+    expect(small.kcache[0].size).toBeLessThan(full.kcache[0].size);
+    const prefix = tokens.slice(0, -1);
+    const expected = await full.lessonFeatures(prefix, 62);
+    const actual = await small.lessonFeatures(prefix, 62);
+    expect(actual.x).toEqual(expected.x);
+    expect(actual.act).toEqual(expected.act);
+
+    const adapter = initialLesson(cfg);
+    adapter.b[0] = 0.1;
+    model.setLesson(adapter);
+    const score = async (c: typeof full) => {
+      c.rewind(0);
+      c.setTable(encodeTable({ lesson: 1 }, cfg));
+      c.read(prefix);
+      c.step(tokens.at(-1), { seed: 7, temperature: 0, turn: 0, step: 0, slot: 0 });
+      await c.result(0);
+      return new Float32Array(await download(dev, c.scores));
+    };
+    expect(await score(small)).toEqual(await score(full));
+    expect(() => small.read([42])).toThrow("context-full");
+  } finally {
+    model.destroy();
+  }
+}, 30_000);
+
 it("continues from both installed matrices, preserves them on cancellation, and can start fresh",async()=>{
   const cpu=synthModel(cfg,8),model=new Model(dev,cfg,weights(cpu));
   const tok={firstTurn:()=>[3,17],plain:()=>[5,6],t:{im_end:7,endoftext:8},decode:()=>""} as unknown as ChatTokenizer;
@@ -109,6 +140,19 @@ it("continues from both installed matrices, preserves them on cancellation, and 
   const continued=await runtime.train(examples,80,0.003,p=>{if(p.phase==="training"&&p.step===10)runtime.stop();},true);
   expect(continued.steps).toBe(10);expect(continued.weights!.a).not.toEqual(installed.a);expect(continued.weights!.b).not.toEqual(installed.b);
   expect(model.lesson).toEqual(installed); // An incomplete round cannot silently replace the live model.
+  const abandoned = await runtime.train(examples, 80, 0.003, (p) => {
+    if (p.phase === "training" && p.step === 10) runtime.stop();
+  }, false);
+  expect([abandoned.stopped, abandoned.discarded, abandoned.steps, !!abandoned.weights]).toEqual([true, true, 10, false]);
+  expect(model.lesson).toEqual(installed);
+  const lastUpdate = await runtime.train(examples, 80, 0.003, (p) => {
+    if (p.phase === "training" && p.step === 80) {
+      expect(p.lossStep).toBe(79);
+      runtime.stop();
+    }
+  }, false);
+  expect([lastUpdate.discarded, lastUpdate.steps, !!lastUpdate.weights]).toEqual([true, 80, false]);
+  expect(model.lesson).toEqual(installed);
   await runtime.train(examples,80,0.003,p=>{
     if(p.phase==="training"&&p.step===0){expect(p.weights).toEqual(initialLesson(cfg));runtime.stop();}
   },false);

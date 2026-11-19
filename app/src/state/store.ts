@@ -58,7 +58,7 @@ export interface State {
    * the visual replay once it is open and clears this. Not to be confused with `replay` above, which
    * is the model writing changed answers again.
    */
-  replayRequest: { sample: number; side: "normal" | "changed"; n: number } | null;
+  replayRequest: { sample: number; side: "normal" | "changed"; n: number; scope?: "answer" | "token" } | null;
   /** Id of the sample whose output was written most recently. Following tracks it; null means the last sample. */
   outputSample: number | null;
   focus: Focus;

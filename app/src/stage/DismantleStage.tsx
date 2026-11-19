@@ -158,12 +158,12 @@ export default function DismantleStage() {
   useEffect(() => () => session.exit("closed"), []);
   // "Replay in 3D" on a reply: start once the stage is drawing.
   useEffect(() => {
-    if (!request || !stage) return;
+    if (!active || !request || !stage) return;
     store.set({ replayRequest: null });
-    if (startReplay("answer", request)) setReplyReplay(request.n);
+    if (startReplay(request.scope ?? "answer", request)) setReplyReplay(request.n);
     else store.set({ announce: replayWait(store.get()) || "That reply cannot be replayed now." });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request?.n, stage]);
+  }, [active, request?.n, stage]);
 
   // ------------------------------------------------------------ tokens
   const hasDiff = !!comparisonTarget({ turns, word, fork });

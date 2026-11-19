@@ -280,6 +280,9 @@ it("reads the taught adapter's real matrices, rank by rank", () => {
   const [rawA, , rawB] = lessonPlates(trained, null, W, U);
   expect(rawA.values.every((x) => x !== 0)).toBe(true);
   expect(rawB.values[5 * 128 + 1]).toBe(3);
+  const [, rankChange] = lessonPlates(reference, trained, W, U);
+  expect(rankChange.ramp).toBe("signed");
+  expect(rankChange.values[5]).toBe(-strength[5]);
 });
 
 it("paints values with the page's ramps and never emits an invalid color", () => {

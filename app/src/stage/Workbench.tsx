@@ -71,7 +71,7 @@ export interface WorkbenchProps {
   /** The word on the button that opens the rail in full screen. */
   railName?: string;
   /** Always in sight directly under the stage, in every layout. It does not scroll with the controls below it. */
-  bar?: ReactNode;
+  bar?: ReactNode | ((openWork: () => void) => ReactNode);
   replaying?: boolean;
   /** A reply card launched replay. Bring its transport into view even from the Questions overlay. */
   replyReplay?: number;
@@ -182,6 +182,11 @@ export function Workbench(p: WorkbenchProps) {
           onArranged: setArranged,
           onTile: (plate, index) => tileRef.current(plate, index),
           onLost: () => setState("lost"),
+          onFocusBay: () => {
+            if (root.current?.classList.contains("immersive")) setOverlays(NONE);
+            else host.current?.scrollIntoView({ block: "nearest" });
+            host.current?.focus({ preventScroll: true });
+          },
           // The tool buttons and help text float over the stage; labels and the framing keep clear of them.
           // In full screen the title, the exit and the bar along the bottom float over it too.
           reserved: () => {
@@ -455,7 +460,11 @@ export function Workbench(p: WorkbenchProps) {
 
   const dock = <NavDock arch={arch} stage={stage} selected={selected} onSelect={selectPart} drag={drag} onDrag={setDrag}
     spread={spread} onSpread={setSpread} panel={panel} onPanel={setPanel} punch={p.tools.includes("punch")} />;
-  const bar = p.bar ?? (immersive ? p.immersiveBar : null);
+  const openWork = () => {
+    if (!immersive) workspace?.open("work");
+    else if (!railOpen) toggleOverlay("rail");
+  };
+  const bar = typeof p.bar === "function" ? p.bar(openWork) : p.bar ?? (immersive ? p.immersiveBar : null);
   const panelHead = (which: Overlay, title?: string) => <div className="stage-panel-head">
     <h3>{title}</h3><button type="button" className="btn quiet" aria-label={`Hide: ${title}`} onClick={() => closeOverlay(which)}>Hide</button>
   </div>;

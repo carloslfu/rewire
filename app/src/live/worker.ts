@@ -68,9 +68,18 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
         update => post({t:"lesson-progress",id:m.id,update}),m.continueLesson));
       case "lesson-probe": return done(m.id,await need(lessonRuntime).probe(m.prompt,m.lesson));
       case "lesson-install": {
-        await Promise.all(slots.map(s=>s.lock));
-        need(model).setLesson(m.weights);
-        for(const s of slots){s.tokens=[];s.c.rewind(0);s.key="";}
+        // Every Qwen conversation is reserved before the first await. Jobs already queued finish first;
+        // a job queued from here on waits behind the barrier, so none runs across the swap of weights
+        // or has its cache reset under it.
+        const held=slots;
+        let open=()=>{};
+        const barrier=new Promise<void>(r=>{open=r;});
+        const earlier=held.map(s=>{const p=s.lock;s.lock=p.then(()=>barrier);return p;});
+        try {
+          await Promise.all(earlier);
+          need(model).setLesson(m.weights);
+          for(const s of held){s.tokens=[];s.c.rewind(0);s.key="";}
+        } finally { open(); }
         return done(m.id,true);
       }
       case "pause":

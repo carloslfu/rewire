@@ -741,6 +741,26 @@ it("keeps every label it shows inside the view, off the toolbar and apart from t
   }
 });
 
+it("keeps all three adapter plates named when their focused bay is resized", () => {
+  const h = harness(buildArch(QWEN_INFO), { width: 390, height: 360, reduced: true });
+  h.renderer.render.mockImplementation(() => h.camera.updateMatrixWorld(true));
+  const plates = [
+    plate({ id: "a", title: "A reads the neurons", short: "A", band: 0, rows: 2, cols: 2, data: [1, 2, 3, 4] }),
+    plate({ id: "rank", title: "Rank size", short: "Rank", band: 0, rows: 2, cols: 1, data: [1, 2] }),
+    plate({ id: "b", title: "B writes to the stream", short: "B", band: 0, rows: 2, cols: 2, data: [1, 2, 3, 4] }),
+  ];
+  h.stage.setBay({ key: "lesson", floor: 27, plates, sizes: { a: [3.6, 1.3], rank: [0.34, 1.3], b: [2.4, 1.3] } });
+  h.stage.focusBay();
+  const names = () => h.spans.filter(s => s.className.includes("stage-label plate") && !s.hidden && !s.removed).map(s => s.textContent);
+  for (const width of [390, 344]) {
+    h.host.clientWidth = width;
+    h.observers[0].callback([]);
+    h.run(4);
+    expect(names()).toMatchObject([expect.stringMatching(/^A\b/), "Rank", expect.stringMatching(/^B\b/)]);
+  }
+  h.stage.dispose();
+});
+
 it("follows the replay through the selected layer's plates and a reduced-motion change made while open", () => {
   const arch = buildArch(TINY_INFO), h = harness(arch), floor = 1;
   const make = (id: string, phase: "attention" | "mlp") => ({ ...plate({ id, title: id, band: phase === "mlp" ? 1 : 0, rows: 2, cols: 2, data: [1, 2, 3, 4] }), phase });

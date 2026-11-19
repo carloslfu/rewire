@@ -51,6 +51,7 @@ export interface StageOptions {
   onTile?: (plate: string, index: number) => void;
   /** Areas of the view taken by the toolbar, the help text and the camera dock, in view pixels. Labels and the framing keep clear of them. */
   reserved?: () => Box[];
+  onFocusBay?: () => void;
   deps?: Partial<StageDeps>;
 }
 
@@ -135,6 +136,8 @@ export class Stage {
   private auto = true;
   /** The part the camera is centered on, or null for the whole model. */
   private subject: number | null = null;
+  /** The detail bay is what the camera frames, ahead of `subject`, from "look at the plates" until the view is reset or a part is focused. */
+  private onBay = false;
   /** The direction the stage last framed from. */
   private dir = VIEWS.home.clone();
   private flight: { from: Pose; to: Pose; t: number; ms: number } | null = null;
@@ -357,13 +360,15 @@ export class Stage {
   /** Frame the current subject again from the direction the stage last used. */
   private reframe(animate: boolean) {
     if (!this.width || !this.height) return;
+    // The bay's own bounds, every plate of it, whatever the view has become since it was asked for.
+    if (this.onBay && this.bay) { this.fly(this.placement(this.bayBox(), this.dir, 1.1), animate); return; }
     const whole = this.subject === null;
     this.fly(this.placement(whole ? this.box() : this.partBox(this.subject!), this.dir, whole ? 1.04 : 1.12), animate);
   }
 
   /** Home: frame the whole specimen (and the open detail bay) from the opening view. */
   resetView() {
-    this.subject = null; this.auto = true;
+    this.subject = null; this.auto = true; this.onBay = false;
     this.dir.copy(VIEWS.home);
     this.reframe(true);
   }
@@ -372,18 +377,28 @@ export class Stage {
   focus(part: Part) {
     const i = partIndex(this.o.arch, part);
     if (i < 0 || !this.width || !this.height) return;
-    this.subject = i; this.auto = true;
+    this.subject = i; this.auto = true; this.onBay = false;
     this.dir.copy(this.camera.position).sub(this.controls.target).normalize();
     // From straight above or below there is nothing to pivot around; come down to the opening view.
     if (Math.abs(this.dir.y) > 0.9 || !Number.isFinite(this.dir.x)) this.dir.copy(VIEWS.home);
     this.reframe(true);
   }
 
+  /**
+   * Bring the detail bay close, from the front, and keep it the camera's subject: a resize, a panel or
+   * full screen then frames all of its plates again. As with a part, a camera the visitor has since
+   * turned or zoomed stays where they put it.
+   */
   focusBay() {
     if (!this.bay || !this.width || !this.height) return;
-    this.auto = false;
-    this.fly(this.placement(this.bayBox(), VIEWS.front, 1.1), true);
+    this.o.onFocusBay?.();
+    this.onBay = true; this.auto = true;
+    this.dir.copy(VIEWS.front);
+    this.reframe(true);
   }
+
+  /** True while the detail bay is the camera's subject. */
+  get bayFocused() { return this.onBay && !!this.bay; }
 
   /** Look at the current subject (the focused part, or the whole model) from a named direction. */
   view(name: ViewName) {
@@ -614,21 +629,37 @@ export class Stage {
       bay.reveal(this.specimen.playheadNow);
       this.scene.add(bay.group);
       this.specimen.setGap(this.bayFloor, bay.size.y + 0.75);
-    } else this.specimen.setGap(null);
+    } else { this.specimen.setGap(null); this.onBay = false; }
     this.bay?.mark(this.tile);
     this.labelPlates();
     this.opened();
   }
 
-  /** Plate titles, with the plate whose number is being read named in full view, and the bay's message when it has no plates. */
+  /**
+   * Plate titles, with the plate whose number is being read named in full view, and the bay's message
+   * when it has no plates. A plate that has a short name goes by its title only while the title fits
+   * on the plate, and by the short name otherwise, so a narrow plate between wide ones is still named
+   * and no title pushes a neighbor's out. While the bay is the camera's subject every such plate is named.
+   */
   private labelPlates() {
     const bay = this.bay, plates = bay?.labels() ?? [], message = this.bayMessage, read = bay?.marked?.plate;
+    const wide = (l: (typeof plates)[number]) => this.pixels(l.at.clone().add(bay!.group.position), l.width);
+    // Measured widths of the titles, known once their labels exist.
+    const titleWidth = new Map<string, number>();
+    const fits = (l: (typeof plates)[number]) => wide(l) >= Math.max(72, titleWidth.get(l.id) ?? 0);
+    const base = (l: (typeof plates)[number]) => ({ className: `stage-label plate${l.id === read ? " current" : ""}`, at: (out: THREE.Vector3) => { out.copy(l.at).add(bay!.group.position); },
+      anchor: [0.5, 1] as [number, number], nudge: [0, -2] as [number, number] });
     this.replaceLabels("plate", [
-      ...plates.map((l): LabelSpec => ({ text: l.text, className: `stage-label plate${l.id === read ? " current" : ""}`, at: (out) => { out.copy(l.at).add(bay!.group.position); }, anchor: [0.5, 1], nudge: [0, -2],
-        priority: l.id === read ? 85 : 50, show: () => l.id === read || this.pixels(l.at.clone().add(bay!.group.position), l.width) >= 72 })),
+      ...plates.flatMap((l): LabelSpec[] => l.short === undefined
+        ? [{ ...base(l), text: l.text, priority: l.id === read ? 85 : 50, show: () => l.id === read || wide(l) >= 72 }]
+        : [{ ...base(l), text: l.text, priority: () => l.id === read || this.bayFocused ? 86 : 50, show: () => fits(l) },
+          { ...base(l), text: l.short, priority: () => l.id === read || this.bayFocused ? 86 : 50, show: () => !fits(l) && (l.id === read || this.bayFocused || wide(l) >= 24) }]),
       ...(bay && message ? [{ text: message, className: "stage-label message", anchor: [0.5, 0.5], priority: 100,
         at: (out) => { const g = bay.group.position, s = bay.size; out.set(g.x + s.x / 2, g.y - s.y / 2, g.z); } } satisfies LabelSpec] : []),
     ]);
+    const made = this.labels.filter((x) => x.group === "plate");
+    let k = 0;
+    for (const l of plates) { titleWidth.set(l.id, made[k]?.width ?? 0); k += l.short === undefined ? 1 : 2; }
   }
 
   /**

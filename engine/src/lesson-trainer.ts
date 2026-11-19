@@ -1,14 +1,15 @@
 // Exact supervised learning of the final-MLP LoRA. The frozen transformer is run once per
 // example; full-vocabulary cross entropy and its dictionary gradient run on the same GPU.
-// Gradients through RMSNorm and both small LoRA matrices, plus Adam, run in the worker.
+// Gradients through RMSNorm and both small LoRA matrices, plus AdamW (Adam with decoupled weight
+// decay), run in the worker. The decay moves A from the first step, before B gives it any gradient.
 import { encodeTable } from "./changes.ts";
 import { bind, BU, download, encode, storage, upload, type Dispatch } from "./gpu.ts";
 import { dictRead, matmulKernel } from "./kernels.ts";
-import { initialLesson, LESSON_RANK, type LessonWeights } from "./lora.ts";
+import { initialLesson, LESSON_BATCH, LESSON_RANK, LESSON_WEIGHT_DECAY, type LessonWeights } from "./lora.ts";
 import type { Model } from "./model.ts";
 
 export interface LessonFeature { x: Float32Array; act: Float32Array; target: number }
-export const LESSON_BATCH = 8;
+export { LESSON_BATCH, LESSON_WEIGHT_DECAY };
 
 export class LessonTrainer {
   readonly params: LessonWeights;
@@ -124,6 +125,7 @@ fn main(@builtin(workgroup_id) wg:vec3u, @builtin(local_invocation_index) li:u32
     return {loss,ga,gb};
   }
 
+  /** One AdamW step on `batch`. Returns the batch's loss measured before the update. */
   async train(batch: LessonFeature[], lr=0.003) {
     const {loss,ga,gb}=await this.gradients(batch); this.step++;
     let ss=0; for(const g of [ga,gb]) for(const v of g) ss+=v*v;
@@ -131,7 +133,7 @@ fn main(@builtin(workgroup_id) wg:vec3u, @builtin(local_invocation_index) li:u32
     const update=(p:Float32Array,g:Float32Array,m:Float32Array,v:Float32Array)=>{
       for(let i=0;i<p.length;i++) {
         const d=g[i]*clip; m[i]=b1*m[i]+(1-b1)*d; v[i]=b2*v[i]+(1-b2)*d*d;
-        p[i]-=lr*(m[i]/(1-b1**this.step)/(Math.sqrt(v[i]/(1-b2**this.step))+1e-8)+0.01*p[i]);
+        p[i]-=lr*(m[i]/(1-b1**this.step)/(Math.sqrt(v[i]/(1-b2**this.step))+1e-8)+LESSON_WEIGHT_DECAY*p[i]);
       }
     };
     update(this.params.a,ga,this.ma,this.va); update(this.params.b,gb,this.mb,this.vb);

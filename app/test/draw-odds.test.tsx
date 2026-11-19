@@ -88,6 +88,19 @@ const certain: Tok = { id: 100, lp1: Math.log(0.86), concept: 0, cut: 1, pushes,
 const show = (tok: Tok) => store.set({ mode: "live", device: { kind: "ready", seconds: 3 }, word: { turn: 0, side: "normal", index: 0 }, follow: false,
   turns: [{ id: 1, user: "Q", temperature: 0.7, normal: { read: [5, 6], toks: [tok], ended: true, done: true, changes: {}, source: "live" } }] });
 
+it("describes the learned MLP using the selected reply's interventions", () => {
+  show(certain);
+  const floor = QWEN_INFO.floors - 1;
+  const [turn] = store.get().turns;
+  store.set({ focus: { kind: "memory", floor }, chips: { lesson: 9 },
+    turns: [{ ...turn, changed: { ...turn.normal, changes: { lesson: 9 } } }] });
+  const selected = () => text(renderToString(<Detail />));
+  expect(selected()).toContain("This reply ran without the weights you trained in Teach");
+  store.set({ word: { turn: 0, side: "changed", index: 0 }, chips: {} });
+  expect(selected()).toContain("This reply ran with the weights you trained in Teach");
+  expect(selected()).toContain("neuron contributions shown for it include that addition");
+});
+
 it("shows a certain draw as certain in the inspector, the candidate table and Words out on the 3D bench, beside the model's own probability", () => {
   show(certain);
   const panel = text(renderToString(<Detail />));

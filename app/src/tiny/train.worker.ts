@@ -3,12 +3,13 @@
 import { defaultDevice, init } from "@jax-js/jax";
 import { decode, draw, encode, sampleBatch, VOCAB } from "@rewire/tiny/src/data.ts";
 import { adamTrainer, deviceParams, initParams, sampler, slowStep, TINY, type TinyConfig, type Trainer } from "@rewire/tiny/src/model.ts";
+import type { TestCase, TestResult } from "./checks.ts";
 
 declare const self: DedicatedWorkerGlobalScope;
 
 export type TinyIn =
   | { t: "start"; text: string; steps: number; batch: number; lr: number; seed: number; params?: Float32Array; prompt?: string }
-  | { t: "test"; params: Float32Array; cases: { prompt: string; answer: string }[] }
+  | { t: "test"; params: Float32Array | { seed: number }; cases: TestCase[]; baseline?: Float32Array; untrainedSeed?: number }
   | { t: "stop" }
   | { t: "sample"; params: Float32Array; prompt: string; length: number; seed: number }
   | { t: "probe"; params: Float32Array; baseline: Float32Array; prompt: string }
@@ -23,7 +24,7 @@ export type TinyOut =
   | { t: "done"; params: Float32Array; steps: number; seconds: number }
   | { t: "sampled"; text: string }
   | { t: "probed"; text: string; baseline: string }
-  | { t: "tested"; results: { prompt: string; answer: string; output: string }[] }
+  | { t: "tested"; results: TestResult[]; baseline?: TestResult[]; untrained?: TestResult[] }
   | { t: "slow"; before: number[]; after: number[]; loss: number; lossAfter: number; lr: number; params: Float32Array; grad: Float32Array;
       probs: number[]; target: number; position: number }
   | { t: "error"; message: string };
@@ -42,6 +43,15 @@ function start(): Promise<string | null> {
     return "webgpu";
   })();
   return ready;
+}
+
+async function evaluate(params: Float32Array, cases: TestCase[]): Promise<TestResult[]> {
+  const results = [];
+  for (const test of cases.slice(0, 12)) {
+    // The expected answer sets the length cap. Only the starting text enters the model.
+    results.push({ ...test, output: await sample(params, test.prompt, Math.min(64, encode(test.answer).length), 42, true) });
+  }
+  return results;
 }
 
 let S: ReturnType<typeof sampler> | null = null;
@@ -104,12 +114,10 @@ async function handle(m: TinyIn) {
       if (step > 0 && step % 100 !== 0) post({ t: "sample", step, text: await sample(params, prompt, 80, 42) });
       post({ t: "done", params, steps: step, seconds: (performance.now() - t0) / 1000 }, [params.buffer]);
     } else if (m.t === "test") {
-      const results = [];
-      for (const test of m.cases.slice(0, 12)) {
-        // Only the prompt enters inference. The target determines the generation cap and later UI scoring.
-        results.push({ ...test, output: await sample(m.params, test.prompt, Math.min(64, encode(test.answer).length), 42, true) });
-      }
-      post({ t: "tested", results });
+      const params = m.params instanceof Float32Array ? m.params : initParams(cfg, m.params.seed);
+      post({ t: "tested", results: await evaluate(params, m.cases),
+        baseline: m.baseline ? await evaluate(m.baseline, m.cases) : undefined,
+        untrained: m.untrainedSeed === undefined ? undefined : await evaluate(initParams(cfg, m.untrainedSeed), m.cases) });
     } else if (m.t === "probe") {
       const baseline = await sample(m.baseline, m.prompt, 80, 42);
       const text = await sample(m.params, m.prompt, 80, 42);

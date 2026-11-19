@@ -415,7 +415,7 @@ it("is the one drawing of the model: no 2D view to fall back to, and a failed st
   // The other two benches found out from the first: they say the same, and keep their own controls and numbers.
   const reference = initialLesson({ width: 1024, units: 3072 });
   const teach = renderToString(<Teach weights={null} reference={reference} step={0} running={false} losses={[]} run={null} active
-    controls={{ busy: false, phase: "idle", ready: true, validation: "", status: "", error: "", revision: 0, train() {}, halt() {}, dismantle() {} }} />);
+    controls={{ busy: false, phase: "idle", installing: false, ready: true, validation: "", status: "", error: "", revision: 0, train() {}, halt() {}, dismantle() {} }} />);
   const total = layout({ ...TINY, vocab: VOCAB }).total, params = Float32Array.from({ length: total }, (_, i) => Math.sin(i) * 0.02);
   const grow = renderToString(<Grow params={params} reference={params} intact={params} step={1200} running={false} active
     controls={{ disabled: false, unavailable: false, validText: true, status: "", loss: null, mutation: "", damage: null, strength: 0.25, setStrength() {}, teach() {}, stop() {},
@@ -474,7 +474,7 @@ it("goes from the inspector back to this same model at the same part, with no se
 
 it("keeps Teach's training controls in the 3D bench and never offers Punch there", () => {
   const reference = initialLesson({ width: 1024, units: 3072 });
-  const controls = { busy: false, phase: "idle" as const, ready: false, validation: "", status: "", error: "", revision: 0, train() {}, halt() {}, dismantle() {} };
+  const controls = { busy: false, phase: "idle" as const, installing: false, ready: false, validation: "", status: "", error: "", revision: 0, train() {}, halt() {}, dismantle() {} };
   const props = { weights: null, reference, step: 0, running: false, losses: [], run: null, active: true };
   let b = buttons(renderToString(<Teach {...props} controls={controls} />));
   expect(b.get("Teach Qwen")).toEqual([true]);
@@ -489,6 +489,9 @@ it("keeps Teach's training controls in the 3D bench and never offers Punch there
   let html = renderToString(<Teach {...props} weights={trained} step={40} running losses={[{ step: 0, loss: 3 }, { step: 40, loss: 1 }]} controls={{ ...controls, ready: true, busy: true, phase: "training" }} />);
   b = buttons(html);
   expect(b.get("Stop learning")).toEqual([false]);
+  const installing = buttons(renderToString(<Teach {...props} weights={trained} step={80} running controls={{ ...controls, busy: true, phase: "training", installing: true }} />));
+  expect(installing.get("Installing learned weights…")).toEqual([true]);
+  expect(installing.has("Stop learning")).toBe(false);
   expect(b.has("Teach Qwen")).toBe(false);
   expect(text(html)).toContain("40 steps");
   expect(html).toContain("0.00276");
@@ -760,7 +763,7 @@ it("gives no total when some of a token's pushes are not numbers", () => {
 it("offers full screen on every bench, on a desktop and on a phone, and starts docked with one set of training controls", () => {
   const reference = initialLesson({ width: 1024, units: 3072 });
   const teach = { weights: null, reference, step: 0, running: false, losses: [], run: null, active: true,
-    controls: { busy: false, phase: "idle" as const, ready: true, validation: "", status: "", error: "", revision: 0, train() {}, halt() {}, dismantle() {} } };
+    controls: { busy: false, phase: "idle" as const, installing: false, ready: true, validation: "", status: "", error: "", revision: 0, train() {}, halt() {}, dismantle() {} } };
   const grow = { params: null, reference: null, intact: null, step: 0, running: false, active: true,
     controls: { disabled: false, unavailable: false, validText: true, status: "", loss: null, mutation: "", damage: null, strength: 0.25, setStrength() {}, teach() {}, stop() {},
       mutate() {}, restore() {}, keepLabel: "Keep learning", continueNote: "", retrained: 0, intactStep: 0, adopt() {} } };

@@ -1,8 +1,12 @@
 // A real rank-8 update to the final MLP's down projection: m = W a + B A a.
 // The base model stays frozen. Both matrices are trained. No prompt or output substitution.
-import { tableLayout, type ModelConfig } from "./config.ts";
+import { H_LESSON, H_NZEROED, MAX_ZEROED, tableLayout, TENSOR_ID, type ModelConfig } from "./config.ts";
 
 export const LESSON_RANK = 8;
+/** Training tokens per step. Here, not with the trainer, so the page can name them without loading GPU code. */
+export const LESSON_BATCH = 8;
+/** AdamW's decoupled weight decay, applied to every adapter parameter on every step. */
+export const LESSON_WEIGHT_DECAY = 0.01;
 export interface LessonWeights { a: Float32Array; b: Float32Array }
 
 export function initialLesson(c: Pick<ModelConfig, "units" | "width">, seed = 73): LessonWeights {
@@ -29,7 +33,7 @@ export function loraDownKernel(c: ModelConfig) {
 var<workgroup> sum: array<f32,256>;
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {
-  if (wg.x >= SP[0].x || ct[10] == 0u) { return; }
+  if (wg.x >= SP[0].x || ct[${H_LESSON}] == 0u) { return; }
   var v = 0.0;
   for(var i = li; i < ${c.units}u; i += 256u) { v += a[wg.y * ${c.units}u+i] * act[wg.x * ${c.units}u+i]; }
   sum[li] = v; workgroupBarrier();
@@ -49,12 +53,12 @@ export function loraUpKernel(c: ModelConfig) {
 @group(0) @binding(6) var<storage, read> act: array<f32>;
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {
-  if (wg.x >= SP[0].x || ct[10] == 0u) { return; }
+  if (wg.x >= SP[0].x || ct[${H_LESSON}] == 0u) { return; }
   for(var i=li; i<${c.width}u; i+=256u) {
     var v=0.0; for(var r=0u;r<${LESSON_RANK}u;r++) { v+=b[i*${LESSON_RANK}u+r]*z[wg.x*${LESSON_RANK}u+r]; }
-    for(var k=0u;k<min(ct[9],8u);k++) {
+    for(var k=0u;k<min(ct[${H_NZEROED}],${MAX_ZEROED}u);k++) {
       let entry=${tableLayout(c).zeroed}u+k*4u;
-      if(ct[entry]==${c.floors-1}u && ct[entry+1u]==6u && ct[entry+2u]==i) {
+      if(ct[entry]==${c.floors-1}u && ct[entry+1u]==${TENSOR_ID.down}u && ct[entry+2u]==i) {
         let col=ct[entry+3u]; var delta=0.0;
         for(var r=0u;r<${LESSON_RANK}u;r++) { delta+=b[i*${LESSON_RANK}u+r]*a[r*${c.units}u+col]; }
         v-=delta*act[wg.x*${c.units}u+col];

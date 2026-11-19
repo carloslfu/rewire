@@ -179,10 +179,10 @@ export class Bay {
   }
 
   /** Title anchors, just above each plate, relative to the bay's own position (the bay moves with the tower). */
-  labels(): { id: string; text: string; at: THREE.Vector3; width: number }[] {
+  labels(): { id: string; text: string; short?: string; at: THREE.Vector3; width: number }[] {
     return this.plates.map(({ plate, mesh }) => {
       const { width, height } = (mesh.geometry as THREE.PlaneGeometry).parameters;
-      return { id: plate.id, text: plate.title, at: new THREE.Vector3(mesh.position.x, mesh.position.y + height / 2 + 0.07, mesh.position.z), width };
+      return { id: plate.id, text: plate.title, short: plate.short, at: new THREE.Vector3(mesh.position.x, mesh.position.y + height / 2 + 0.07, mesh.position.z), width };
     });
   }
 

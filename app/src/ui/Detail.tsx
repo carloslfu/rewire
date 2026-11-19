@@ -350,11 +350,20 @@ function MemoryPanel({ c, floor }: { c: Chosen | null; floor: number }) {
   const edited = c?.reply.changes.neurons?.filter((n) => n.floor === floor && n.delta !== 0) ?? [];
   const topAct = act ? [...act].map((v, j) => ({ v, j })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 8) : [];
   const topPush = unitPush ? [...unitPush].map((v, j) => ({ v, j })).sort((a, b) => b.v - a.v).slice(0, 8) : [];
+  // The readings below belong to the selected reply, so what they include is read from the changes that
+  // reply ran with. The live settings only say what the next changed reply will use.
+  const taught = model.id === "qwen" && floor === model.floors - 1;
+  const ran = c?.reply.changes, off = !!ran && (multOf(ran, "memory", floor) === 0 || multOf(ran, "floor", floor) === 0);
+  const lessonNote = !taught ? null
+    : !c ? (chips.lesson ? "The weights you trained in Teach are switched on for changed replies. Select a token to see whether its readings include them." : null)
+    : ran?.lesson ? (off ? "This reply ran with the weights you trained in Teach, but with this MLP or its layer switched off. The learned addition was switched off with it, so these readings contain none of it."
+      : "This reply ran with the weights you trained in Teach. The output and neuron contributions shown for it include that addition.")
+    : chips.lesson ? "This reply ran without the weights you trained in Teach, so these readings do not include them. They are switched on for changed replies." : null;
   return (
     <>
       <Head kicker={S.terms.mlp[1]} title={`${S.memoryBlock} · ${S.floorN(floor + 1)}`}
         def={D.memory} code={S.zeroBased(floor)} />
-      {model.id === "qwen" && floor === 27 && chips.lesson && <p className="note changed-text">This MLP includes the weights you trained in Teach. Its output and neuron contributions include that addition.</p>}
+      {lessonNote && <p className={`note${ran?.lesson && !off ? " changed-text" : ""}`}>{lessonNote}</p>}
       <NeuronControl floor={floor} />
       <section>
         <div className="kicker">Output strength</div>

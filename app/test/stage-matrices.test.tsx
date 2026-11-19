@@ -255,15 +255,15 @@ it("reads one weight exactly by row and column, with fields and buttons for the 
 
 it("keeps Teach's A and B, their counts, the loss and the handoff in the 3D bench, with each weight readable without a pointer", () => {
   const { reference, trained } = trainedLesson();
-  const controls = { busy: false, phase: "idle" as const, ready: true, validation: "", status: "", error: "", revision: 1, train() {}, halt() {}, dismantle() {} };
+  const controls = { busy: false, phase: "idle" as const, installing: false, ready: true, validation: "", status: "", error: "", revision: 1, train() {}, halt() {}, dismantle() {} };
   const props = { reference, running: false, active: true, controls };
   // Before any lesson the place for the numbers is there and says what will appear.
   let html = render(<Teach {...props} weights={null} step={0} losses={[]} run={null} />), t = text(html);
   expect(t).toContain("Read one adapter weight Start a lesson to read its real parameter updates here, one weight at a time.");
   expect(t).toContain("Parameters changed Waiting");
   // After one: both matrices by name, the adapter's counts, this matrix's own, and one exact weight.
-  html = render(<Teach {...props} weights={trained} step={200} losses={[{ step: 0, loss: 3 }, { step: 200, loss: 0.5 }]}
-    run={{ weights: trained, steps: 200, seconds: 4, tokens: 900, stopped: false, initialLoss: 2.5, finalLoss: 0.0004 }} />);
+  html = render(<Teach {...props} weights={trained} step={200} losses={[{ step: 0, loss: 3 }, { step: 199, loss: 0.5 }]}
+    run={{ weights: trained, steps: 200, total: 200, discarded: false, seconds: 4, tokens: 900, stopped: false, initialLoss: 2.5, finalLoss: 0.0004 }} />);
   t = text(html);
   for (const name of ["Matrix B · writes to the stream", "Matrix A · reads the neurons", "Rank size"]) expect(html).toContain(`>${name}</option>`);
   expect(t).toContain("Parameters changed 2");
@@ -272,11 +272,11 @@ it("keeps Teach's A and B, their counts, the loss and the handoff in the 3D benc
   // Live weights or their change is one switch for the plates and for the numbers beside them.
   expect(html).toMatch(/<div class="seg" role="group" aria-label="Plates show"><button type="button" aria-pressed="true">Change from original adapter<\/button><button type="button" aria-pressed="false">Weights now<\/button>/);
   // The loss of the round and of the full lesson, where a tiny final loss is not printed as zero.
-  expect(t).toContain("Prediction error · this round");
-  expect(t).toContain("Full lesson: 2.500 to <0.001.");
+  expect(t).toContain("Prediction error on sampled batches · this round");
+  expect(t).toContain("Across all training tokens, error was 2.500 before this round and <0.001 after it.");
   // What is learning, where, and the way on to Dismantle.
   expect(t).toContain("Layers 1 to 27 are frozen, the learned addition B × A runs inside layer 28’s MLP");
-  expect(t).toContain("Real training parameters, installed for inference when the round ends. Snapshots arrive every 10 steps.");
+  expect(t).toContain("If you stop “Train from original” early, the previous lesson stays active.");
   expect(html).toMatch(/<button type="button" class="btn">Dismantle this model<\/button>/);
   expect(html).not.toMatch(/[Hh]over a tile|[Hh]over or tap|NaN|—/);
 });

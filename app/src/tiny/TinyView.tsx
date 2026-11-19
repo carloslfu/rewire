@@ -10,14 +10,17 @@ import { Strip } from "../ui/Strip.tsx";
 import { ModelWorkspace } from "../ui/ModelWorkspace.tsx";
 import type { TinyIn, TinyOut } from "./train.worker.ts";
 import type { Damage } from "../stage/GrowStage.tsx";
+import { GrowAnswers, GrowGuide } from "./GrowChecks.tsx";
+import { parseChecks, summarizeChecks, updateScorecard, type CheckStage, type Scorecard } from "./checks.ts";
 import { afterAdopting, afterDamage, afterRestore, type Checkpoint, continueNote, copyLabel, endRun, failureNote, type Held, isDamaged, type Lineage, NOTHING_HELD, NO_RUN, type Run, runIsCurrent, runNote, runUpTo, UNTRAINED, whileTraining } from "./lineage.ts";
 
 const GrowStage = lazy(() => import("../stage/GrowStage.tsx"));
 
-const STEPS = 1200, BATCH = 16, LR = 3e-3;
+const START_SEED = 1, STEPS = 1200, BATCH = 16, LR = 3e-3;
 const language = secretLanguage();
 const cfg = { ...TINY, vocab: VOCAB };
-type TestResult = Extract<TinyOut, { t: "tested" }>["results"];
+type Preview = { params: Float32Array; baseline?: Float32Array; prompt: string; label: string };
+type PendingCheck = { stage: CheckStage; corpus: string; baseline?: Checkpoint; preview?: Preview };
 
 export default function TinyView() {
   const active = useStore((s) => s.tiny);
@@ -42,9 +45,19 @@ export default function TinyView() {
   const [status, setStatus] = useState("");
   const [result, setResult] = useState<{ prompt: string; text: string; model: string } | null>(null);
   const [baseline, setBaseline] = useState<{ prompt: string; text: string } | null>(null);
-  const [tests, setTests] = useState<TestResult | null>(null);
   const [cases, setCases] = useState(language.tests.map((t) => t.prompt + t.answer).join("\n"));
-  const [testCorpus, setTestCorpus] = useState("");
+  const testCases = useMemo(() => parseChecks(cases), [cases]);
+  const example = testCases[0];
+  const defaultExample = text === language.text && example?.prompt === language.tests[0].prompt && example.answer === language.tests[0].answer;
+  const selectedTests = useRef(testCases);
+  selectedTests.current = testCases;
+  const [scores, setScores] = useState<Scorecard>({});
+  const scorecard = useRef<Scorecard>({});
+  const showScores = (next: Scorecard) => { scorecard.current = next; setScores(next); };
+  const [checkStage, setCheckStage] = useState<CheckStage>("untrained");
+  const [checking, setChecking] = useState(false);
+  const pendingCheck = useRef<PendingCheck | null>(null);
+  const resultsHeading = useRef<HTMLHeadingElement>(null);
   const [step, setStep] = useState(0);
   const [strength, setStrength] = useState(0.25);
   const w = useRef<Worker | null>(null);
@@ -61,11 +74,17 @@ export default function TinyView() {
   const mutationSeed = useRef(3);
   const mounted = useRef(true);
   const unavailable = !("gpu" in navigator);
-  const disabled = running || working;
+  const disabled = running || working || checking;
+  const drawn = useStore(s => s.stage3d);
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; w.current?.terminate(); w.current = null; };
+    return () => {
+      mounted.current = false;
+      w.current?.terminate();
+      w.current = null;
+      pendingCheck.current = null;
+    };
   }, []);
   useEffect(() => { if (!active) w.current?.postMessage({ t: "stop" } satisfies TinyIn); }, [active]);
 
@@ -82,10 +101,18 @@ export default function TinyView() {
   };
   /** The worker reported a failure. A training run ends on the last weights it delivered, or as it began. */
   const fail = (message: string) => {
+    if (pendingCheck.current) {
+      const stage = pendingCheck.current.stage;
+      pendingCheck.current = null;
+      setChecking(false);
+      setStatus(stage === "untrained" ? `Could not test the starting model. ${message}` : `Tests could not finish. ${message}`);
+      return;
+    }
     setWorking(false);
     if (!training.current) { setRunning(false); setStatus(message); return; }
     const { start, held } = finish(reached.current);
     setStatus([/[.!?]$/.test(message) ? message : `${message}.`, failureNote(start, held)].filter(Boolean).join(" "));
+    if (held.step > start.step) checkTrainingResult(held);
   };
   const receive = (m: TinyOut) => {
     if (!mounted.current) return;
@@ -100,11 +127,12 @@ export default function TinyView() {
     if (m.t === "sample") { run.current = { ...run.current, samples: [...run.current.samples, { step: runBase.current + m.step, text: m.text }] }; setSamples(run.current.samples); }
     if (m.t === "done") {
       // From the intact weights the result is the new intact copy. A damaged copy stays a copy: the intact weights behind it are kept.
-      const { start } = finish({ params: m.params, steps: m.steps });
+      const { start, held } = finish({ params: m.params, steps: m.steps });
       const before = start.lineage, ran = `${m.steps} training ${m.steps === 1 ? "step" : "steps"}`;
       setStatus(isDamaged(before) && before.intact
         ? (m.steps ? `${ran} on the damaged copy in ${m.seconds.toFixed(1)} seconds. The intact weights from step ${before.intact.step.toLocaleString("en-US")} are kept.` : "No additional training steps completed. The damaged copy is unchanged.")
-        : m.steps ? `${ran} in ${m.seconds.toFixed(1)} seconds. The weights are ready to test.` : "No additional training steps completed. The current weights are ready to inspect.");
+        : m.steps ? `${ran} in ${m.seconds.toFixed(1)} seconds.` : "No additional training steps completed. The current weights are ready to inspect.");
+      if (m.steps > 0) checkTrainingResult(held);
     }
     if (m.t === "sampled") {
       setWorking(false); setResult({ ...request.current, text: m.text });
@@ -114,102 +142,182 @@ export default function TinyView() {
       setWorking(false); setResult({ ...request.current, text: m.text });
       setBaseline({ prompt: request.current.prompt, text: m.baseline });
     }
-    if (m.t === "tested") { setWorking(false); setStatus("Test complete. Results below."); setTests(m.results); setTestCorpus(knownCorpus.current); }
+    if (m.t === "tested" && pendingCheck.current) {
+      const { stage, corpus, baseline: source, preview } = pendingCheck.current;
+      pendingCheck.current = null;
+      const next = summarizeChecks(m.results, corpus);
+      const against = m.baseline && source ? summarizeChecks(m.baseline, source.corpus) : undefined;
+      const previous = m.untrained ? { ...scorecard.current, untrained: summarizeChecks(m.untrained, "") } : scorecard.current;
+      showScores(updateScorecard(previous, stage, next, against));
+      setChecking(false);
+      if (preview) generate(preview);
+    }
     if (m.t === "error") fail(m.message);
   };
   const worker = () => {
     if (!w.current) {
       w.current = new Worker(new URL("./train.worker.ts", import.meta.url), { type: "module" });
       w.current.onmessage = (e: MessageEvent<TinyOut>) => receive(e.data);
-      w.current.onerror = () => { fail("The training worker stopped."); w.current?.terminate(); w.current = null; };
+      w.current.onerror = () => { w.current?.terminate(); w.current = null; fail("The training worker stopped."); };
     }
     return w.current;
   };
+  useEffect(() => {
+    if (active && !unavailable && !params && !training.current && !scorecard.current.untrained) {
+      runChecks({ seed: START_SEED }, "untrained", "", null);
+    }
+    // Prepare the starting model when the visitor opens Grow, without interrupting test edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
   const teach = (resume: boolean) => {
-    if (disabled || unavailable || encode(text).length < 65) return;
+    if (disabled || training.current || pendingCheck.current || unavailable || !validText) return;
     // What the run starts from. If it fails before delivering anything, this is what the bench goes back to.
     const start: Held = resume ? { params, step: cumulative.current, corpus: knownCorpus.current, run: run.current, lineage: line.current } : NOTHING_HELD;
     began.current = start; reached.current = null; training.current = true;
-    if (!resume) { first.current = null; setReference(null); setParams(null); setStep(0); cumulative.current = 0; setLineage(UNTRAINED); setDamage(null); }
+    if (!resume) { first.current = null; setReference(null); setParams(null); setStep(0); cumulative.current = 0; setLineage(UNTRAINED); setDamage(null); showScores({ untrained: scorecard.current.untrained }); setCheckStage("untrained"); }
     else setLineage(whileTraining(start.lineage));
     // A run shows its own checkpoints, after the losses of the training that led to the weights it starts from.
     showRun({ samples: [], losses: start.run.losses });
     runBase.current = start.step;
     runCorpus.current = resume ? start.corpus + "\n" + text : text;
-    setRunning(true); setStatus("Starting…"); setTests(null); setResult(null); setBaseline(null);
-    worker().postMessage({ t: "start", text, params: resume ? params!.slice() : undefined, prompt, steps: STEPS, batch: BATCH, lr: LR, seed: 1 + runBase.current } satisfies TinyIn);
+    setRunning(true); setStatus("Starting…"); setResult(null); setBaseline(null);
+    worker().postMessage({ t: "start", text, params: resume ? params!.slice() : undefined, prompt, steps: STEPS, batch: BATCH, lr: LR, seed: START_SEED + runBase.current } satisfies TinyIn);
   };
-  const test = (weights = params, label = mutation) => {
-    if (!weights || disabled || !prompt.trim()) return;
+  function generate({ params, prompt, label, baseline }: Preview) {
+    if (!prompt.trim()) return;
     request.current = { prompt, model: label };
-    setWorking(true); setStatus("");
-    worker().postMessage(label && intact ? { t: "probe", params: weights.slice(), baseline: intact.slice(), prompt } satisfies TinyIn
-      : { t: "sample", params: weights.slice(), prompt, length: 80, seed: 42 } satisfies TinyIn);
+    setWorking(true);
+    worker().postMessage(label && baseline ? { t: "probe", params, baseline, prompt } satisfies TinyIn
+      : { t: "sample", params, prompt, length: 80, seed: 42 } satisfies TinyIn);
+  }
+
+  function runChecks(params: Float32Array | { seed: number }, stage: CheckStage, corpus: string, source: Checkpoint | null, preview?: Preview) {
+    if (pendingCheck.current) return;
+    setCheckStage(stage);
+    if (!selectedTests.current.length) { if (preview) generate(preview); return; }
+    const baseline = !scorecard.current.trained && stage !== "trained" && stage !== "untrained" && source && source.params !== params ? source : undefined;
+    const untrainedSeed = stage !== "untrained" && !scorecard.current.untrained ? START_SEED : undefined;
+    pendingCheck.current = { stage, corpus, baseline, preview };
+    setChecking(true);
+    worker().postMessage({ t: "test", params, cases: selectedTests.current, baseline: baseline?.params, untrainedSeed } satisfies TinyIn);
+  }
+
+  function checkTrainingResult(held: Held) {
+    if (!held.params) return;
+    const retraining = isDamaged(held.lineage);
+    const { untrained, trained, damaged } = scorecard.current;
+    showScores(retraining ? { untrained, trained, damaged } : { untrained });
+    runChecks(held.params, retraining ? "retrained" : "trained", held.corpus, held.lineage.intact);
+  }
+
+  const changeCases = (next: string) => {
+    if (JSON.stringify(parseChecks(next)) !== JSON.stringify(selectedTests.current)) showScores({});
+    setCases(next);
   };
   // The whole model, or one layer when the 3D view punches it. Either way the result starts from the intact copy.
-  const mutate = (kind: "noise" | "erase", floor?: number) => {
+  const mutate = (kind: "noise" | "erase", floor?: number, guided = false) => {
     const from = lineage.intact;
-    if (!from || disabled) return;
-    const next = mutateWeights(from.params, cfg, { kind, amount: strength, seed: mutationSeed.current++, floor });
-    const where = floor === undefined ? "" : `Layer ${floor + 1}: `;
-    const label = where + (kind === "erase" ? `${where ? "erased" : "Erased"} approximately ${Math.round(strength * 100)}% of matrix weights` : `${where ? "noise" : "Noise"} at ${Math.round(strength * 100)}% of each matrix’s RMS`);
-    setParams(next); setLineage(afterDamage(line.current, label)); setDamage({ kind, floor }); setTests(null);
+    if (!from || disabled || pendingCheck.current) return;
+    // The guided erase uses the same mask each visit. Free-form experiments use a new mask each time.
+    const amount = guided ? 0.25 : strength, seed = guided ? 5 : mutationSeed.current++;
+    const next = mutateWeights(from.params, cfg, { kind, amount, seed, floor });
+    const percent = Math.round(amount * 100);
+    const label = (kind === "erase" ? `Erased about ${percent}% of matrix weights` : `Noise at ${percent}% of each matrix’s RMS`) + (floor === undefined ? "" : ` in layer ${floor + 1}`);
+    setParams(next); setLineage(afterDamage(line.current, label)); setDamage({ kind, floor });
     // The copy starts from the intact weights, so it stands at their step and has seen their text. It has
     // no training of its own yet: the history shown is theirs, and is said to be.
     backTo(from);
-    test(next, label);
+    showScores({ untrained: scorecard.current.untrained, trained: scorecard.current.trained });
+    setStatus(label + "."); setResult(null); setBaseline(null);
+    runChecks(next, "damaged", from.corpus, from, { params: next, baseline: from.params, prompt, label });
   };
   /** The step, text and history of a checkpoint, in place of whatever a retrained copy left behind. */
   const backTo = (c: Checkpoint) => { setStep(c.step); cumulative.current = c.step; knownCorpus.current = c.corpus; showRun(c.run); };
   const restore = () => {
     const back = lineage.intact;
-    if (!back || disabled) return;
-    setParams(back.params); setLineage(afterRestore(line.current)); setDamage(null); setTests(null);
+    if (!back || disabled || pendingCheck.current) return;
+    setParams(back.params); setLineage(afterRestore(line.current)); setDamage(null);
     backTo(back);
-    test(back.params, "");
+    setStatus(`Restored the intact checkpoint at step ${back.step.toLocaleString("en-US")}.`);
+    setResult(null); setBaseline(null);
+    runChecks(back.params, "restored", back.corpus, back, { params: back.params, prompt, label: "" });
   };
   // The one action that replaces the intact weights: the visitor keeps the retrained copy as the model to go on from.
   const adopt = () => {
-    if (!params || disabled || !damaged) return;
+    if (!params || disabled || !damaged || pendingCheck.current) return;
     setLineage(afterAdopting({ params, step: cumulative.current, corpus: knownCorpus.current, run: run.current })); setDamage(null);
     // What was generated before compared this copy with the old intact weights. "Intact weights" now
     // means these, so the old pair is dropped and these weights answer the same prompt again.
     setResult(null); setBaseline(null);
-    test(params, "");
+    showScores({ untrained: scorecard.current.untrained });
+    runChecks(params, "trained", knownCorpus.current, null, { params, prompt, label: "" });
     setStatus(`These weights are now the intact copy, at step ${cumulative.current.toLocaleString("en-US")}.`);
   };
   const keepLabel = damaged ? "Retrain the damaged copy" : "Keep learning";
+  const visibleScores = running && damaged ? { ...scores, retrained: undefined } : scores;
+  const pendingStage = running ? damaged ? "retrained" : "trained" : checking ? checkStage : undefined;
   const intactStep = lineage.intact?.step ?? 0;
   const last = samples[samples.length - 1];
   // Whether the history on screen ends at the weights on screen. A run under way is always its own.
   const ownRun = running || runIsCurrent(lineage);
   const lastLoss = losses.length ? losses[losses.length - 1] : null;
   const validText = encode(text).length >= 65;
+  const stop = () => { w.current?.postMessage({ t: "stop" } satisfies TinyIn); setStatus("Finishing the current step…"); };
+  const openLab = async (replay: boolean) => {
+    if (!params || disabled) return;
+    setWorking(true);
+    try {
+      const input = example?.prompt ?? (prompt.trim() ? prompt : language.tests[0].prompt);
+      await openTiny(params, replay ? decode(encode(input).slice(-cfg.context)) : undefined);
+    } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); }
+    finally { setWorking(false); }
+  };
+  const guide = (openWork: () => void) => {
+    const action = running ? { text: "Stop learning", run: stop }
+      : !params || step === 0 ? { text: "Train from scratch", run: () => teach(false) }
+      : damaged ? { text: "Restore intact weights", run: restore }
+      : checkStage === "restored" && drawn ? { text: "Replay one letter", run: () => void openLab(true) }
+      : checkStage === "restored" ? { text: "Open trained model", run: () => void openLab(false) }
+      : { text: "Erase 25% of weights", run: () => mutate("erase", undefined, true) };
+    const note = unavailable ? "Training needs WebGPU."
+      : running ? (status === "Finishing the current step…" ? status : `${(step - runBase.current).toLocaleString("en-US")} / ${STEPS.toLocaleString("en-US")} training steps`)
+      : status ? status
+      : validText ? "About 20 seconds on a fast laptop." : "Add at least 65 characters to train.";
+    return <GrowGuide example={example} scores={visibleScores} stage={checkStage} running={running} pending={pendingStage}
+      steps={{ done: step - runBase.current, total: STEPS }} status={note}
+      action={<button type="button" className="btn primary" disabled={!running && (disabled || unavailable || (!validText && (!params || step === 0)))} onClick={action.run}>{action.text}</button>}
+      onAnswers={() => {
+        openWork();
+        requestAnimationFrame(() => {
+          resultsHeading.current?.focus({ preventScroll: true });
+          resultsHeading.current?.scrollIntoView({ block: "start" });
+        });
+      }} />;
+  };
   const visualizer = <Suspense fallback={<p className="stage-state" role="status">Opening the 3D model…</p>}>
     <GrowStage params={params} reference={reference} intact={intact} step={step} running={running} active={active}
       controls={{ disabled, unavailable, validText, status, loss: ownRun ? lastLoss : null, mutation, damage, strength, setStrength,
-        keepLabel, continueNote: continueNote(lineage), retrained: lineage.retrained, intactStep, adopt,
-        teach, stop: () => { w.current?.postMessage({ t: "stop" } satisfies TinyIn); setStatus("Finishing the current step…"); }, mutate, restore }} /></Suspense>;
-  const testCases = cases.split("\n").flatMap((line) => {
-    const parts = line.split(" = ");
-    return parts.length === 2 && parts[0] && parts[1] ? [{ prompt: `${parts[0]} = `, answer: parts[1] }] : [];
-  }).slice(0, 12);
+        keepLabel, continueNote: continueNote(lineage), retrained: lineage.retrained, intactStep, adopt, guide,
+        teach, stop, mutate, restore }} /></Suspense>;
   return <ModelWorkspace stage={visualizer} id="training-scope" label="Live training visualizer" workLabel="Training">
     <main tabIndex={-1} className="workspace training-workspace" id="training">
-      <div className="lab-heading"><p className="eyebrow">Grow a model · starts with random weights</p><h1>Give it a strange little world.</h1>
-        <p>Invent a language. Feed it your writing. Watch the weights learn, then mess them up.</p></div>
-      <section className="teaching-data">
-        <div className="section-heading"><h2>What should it learn?</h2><button className="btn quiet" disabled={disabled} onClick={() => { setText(language.text); setPrompt(language.tests[0].prompt); setCases(language.tests.map((t) => t.prompt + t.answer).join("\n")); }}>Secret language</button></div>
-        <p className="note">These invented words are editable. Six combinations are left out so you can test whether it learns the pieces.</p>
-        <label className="sr-only" htmlFor="own">Training text</label><textarea id="own" rows={7} value={text} disabled={disabled} onChange={(e) => setText(e.target.value)} spellCheck={false} />
-        {!validText && <p className="note">Give it at least 65 letters to learn from.</p>}
-        <div className="row training-actions">
-          {running ? <button className="btn primary" onClick={() => { w.current?.postMessage({ t: "stop" } satisfies TinyIn); setStatus("Finishing the current step…"); }}>Stop learning</button>
-            : <><button className="btn primary" disabled={disabled || unavailable || !validText} onClick={() => teach(false)}>{params ? "Start over from noise" : "Start learning"}</button>
-            {params && <button className="btn" disabled={disabled || unavailable || !validText} onClick={() => teach(true)}>{keepLabel}</button>}</>}
-        </div>
-        {damaged && !running && <p className="note">{continueNote(lineage)}</p>}
-        <p className="note training-status" role="status">{unavailable ? "Live training needs WebGPU. Try Chrome on a supported device." : status || (params ? "Weights stay in memory for this visit." : "About 20 seconds on a fast laptop. Everything runs here.")}</p>
+      <div className="lab-heading"><h1>Grow a model from scratch.</h1>
+        <p>{defaultExample ? "The tiny model will practice red and circle in other combinations. Can it learn to translate red circle?" : "Train a tiny transformer on your text and follow the same example as its weights change."}</p></div>
+      <section className="test-bench grow-results" aria-labelledby="grow-results-heading">
+        <h2 id="grow-results-heading" ref={resultsHeading} tabIndex={-1}>What did it learn?</h2>
+        {example ? <GrowAnswers example={example} scores={visibleScores} stage={running ? undefined : checkStage} pending={pendingStage} running={running} />
+          : <p className="note">Add a test below to compare checkpoints.</p>}
+        {damaged && !running && <div className="grow-retrain"><button type="button" className="btn" disabled={disabled || !validText} onClick={() => teach(true)}>Retrain the damaged copy</button>
+          <p className="note">See how much it can recover. You can still restore the intact checkpoint.</p></div>}
+        {checkStage === "restored" && !running && <div className="grow-retrain"><button type="button" className="btn" disabled={disabled} onClick={() => mutate("erase", undefined, true)}>Erase 25% again</button>
+          <p className="note">Start a fresh comparison from the intact weights.</p></div>}
+        <details className="training-details"><summary>Edit or rerun the tests</summary><p className="note">Use up to 12 lines in the format “input = expected answer”. Changing the tests starts a new comparison using the current weights and the saved intact checkpoint.</p>
+          <label className="sr-only" htmlFor="test-cases">Test cases</label><textarea id="test-cases" value={cases} disabled={disabled} onChange={(e) => changeCases(e.target.value)} rows={6} spellCheck={false} />
+          <button type="button" className="btn quiet" disabled={unavailable || disabled || !example} onClick={() => {
+            if (params && step > 0) runChecks(params, checkStage, knownCorpus.current, lineage.intact);
+            else runChecks({ seed: START_SEED }, "untrained", "", null);
+          }}>Run the tests</button>
+        </details>
       </section>
       {samples.length > 0 && <section className="learning-output"><div className="section-heading"><h2>{running ? "Learning in front of you" : "What changed"}</h2><span className="num">Step {step}</span></div>
         {!ownRun && <p className="note">{runNote(lineage)}</p>}
@@ -217,21 +325,29 @@ export default function TinyView() {
         <div className="training-samples"><div><h3>At the start of this lesson</h3><pre className="sample">{samples[0].text}</pre></div><div><h3>{running ? "Latest checkpoint" : "Last checkpoint"} · {last?.step}</h3><pre className="sample">{last?.text}</pre></div></div>
         {lastLoss !== null && <><LossChart losses={losses} /><p className="note">Training loss {lastLoss.toFixed(3)}{ownRun ? "" : " at the end of that run, before the damage"}. Lower means better predictions on the training text.</p></>}
       </section>}
-      <section className="test-bench"><h2>Ask it something it hasn’t seen.</h2><p className="note">Only this starting text goes into the model. The training examples stay out of its context.</p>
-        <label htmlFor="test-prompt" className="sr-only">Test starting text</label><div className="probe-input"><input id="test-prompt" value={prompt} disabled={disabled} onChange={(e) => setPrompt(e.target.value)} /><button className="btn" disabled={!params || disabled || !prompt.trim()} onClick={() => test()}>Generate</button></div>
+      <section className="test-bench"><h2>Try your own starting text</h2>
+        <label htmlFor="test-prompt" className="sr-only">Test starting text</label><div className="probe-input"><input id="test-prompt" value={prompt} disabled={disabled} onChange={(e) => setPrompt(e.target.value)} /><button className="btn" disabled={!params || disabled || !prompt.trim()} onClick={() => params && generate({ params, prompt, label: mutation, baseline: intact ?? undefined })}>Generate</button></div>
         {result && <div className="probe-result"><p className="eyebrow">{result.model || "Intact weights"}</p><p className="probe-prompt num">{result.prompt}</p><pre className="sample">{result.text}</pre></div>}
         {baseline && result?.model && baseline.prompt === result.prompt && <div className="intact-comparison"><p className="eyebrow">Intact weights · same input and seed</p><pre className="sample">{baseline.text}</pre></div>}
-        <button className="linkish" disabled={!params || disabled || !testCases.length} onClick={() => { setWorking(true); setStatus("Testing unseen combinations…"); worker().postMessage({ t: "test", params: params!.slice(), cases: testCases } satisfies TinyIn); }}>Run the tests</button>
-        <details className="training-details"><summary>Edit the tests</summary><p className="note">Up to 12 tests, one “input = expected answer” per line. The expected answers are used only for scoring. They are never fed to the model when it writes its answer.</p><label className="sr-only" htmlFor="test-cases">Test cases</label><textarea id="test-cases" value={cases} disabled={disabled} onChange={(e) => setCases(e.target.value)} rows={6} spellCheck={false} /></details>
-        {tests && <div className="test-results"><p>{tests.filter((r) => r.output === r.answer).length} / {tests.length} exact answers. {tests.some((r) => testCorpus.includes(r.prompt)) ? "Some test inputs appear in your training text; those are marked seen." : "None of these exact inputs appear in the text used to train this model."}</p><table><thead><tr><th>Input</th><th>Expected</th><th>Model wrote</th></tr></thead><tbody>{tests.map((t, i) => <tr key={i}><td>{t.prompt.replace(" = ", "")}{testCorpus.includes(t.prompt) && <small> · seen</small>}</td><td>{t.answer}</td><td className={t.answer === t.output ? "test-pass" : "changed-text"}>{JSON.stringify(t.output)}</td></tr>)}</tbody></table><p className="note">Greedy decoding, capped at the expected answer’s length. A small test of this pattern, not a general capability score.</p></div>}
       </section>
+      <section className="teaching-data"><details className="training-details"><summary>Change the training text or keep learning</summary>
+        <div className="section-heading"><h2>Training text</h2><button className="btn quiet" disabled={disabled} onClick={() => { setText(language.text); setPrompt(language.tests[0].prompt); changeCases(language.tests.map(t => t.prompt + t.answer).join("\n")); }}>Secret language</button></div>
+        <label className="sr-only" htmlFor="own">Training text</label><textarea id="own" rows={7} value={text} disabled={disabled} onChange={(e) => setText(e.target.value)} spellCheck={false} />
+        {!validText && <p className="note">Give it at least 65 characters to learn from.</p>}
+        {params && <div className="row training-actions"><button className="btn" disabled={disabled || unavailable || !validText} onClick={() => teach(false)}>Start over from noise</button>
+          <button className="btn" disabled={disabled || unavailable || !validText} onClick={() => teach(true)}>{keepLabel}</button></div>}
+        {damaged && !running && <p className="note">{continueNote(lineage)}</p>}
+      </details></section>
       <section className="damage-bench"><h2>Now break what it learned.</h2><p className="note">These controls rewrite the actual matrix weights used to generate text. The intact copy stays available.</p>
         <label className="damage-strength" htmlFor="damage-strength">Strength <output>{Math.round(strength * 100)}%</output><input id="damage-strength" type="range" min="0.05" max="1" step="0.05" value={strength} disabled={disabled} onChange={(e) => setStrength(Number(e.target.value))} /></label>
         <div className="row"><button className="btn change" disabled={!intact || disabled} onClick={() => mutate("noise")}>Scramble weights</button><button className="btn" disabled={!intact || disabled} onClick={() => mutate("erase")}>Erase weights</button><button className="btn quiet" disabled={!mutation || disabled} onClick={restore}>Restore intact model</button></div>
         {mutation && <p className="note">{mutation}. Each experiment starts from the intact copy.</p>}
         {lineage.retrained > 0 && <p className="note"><button className="linkish" disabled={disabled} onClick={adopt}>Make this the intact copy</button> It replaces the intact weights from step {intactStep.toLocaleString("en-US")}.</p>}
       </section>
-      {params && <section className="training-handoff"><button className="btn" disabled={disabled} onClick={() => { setWorking(true); void openTiny(params).catch((e) => setStatus(String(e))).finally(() => setWorking(false)); }}>Open this model in the full lab</button><p className="note">Inspect attention, disable heads, and follow each letter through all four layers.</p></section>}
+      {params && <section className="training-handoff"><div className="row training-actions">
+        {drawn && <button className="btn" disabled={disabled} onClick={() => void openLab(true)}>Replay one letter in Dismantle</button>}
+        <button className="btn quiet" disabled={disabled} onClick={() => void openLab(false)}>Open this model in the full lab</button>
+      </div><p className="note">Inspect attention, disable heads, and follow each letter through all four layers.</p></section>}
       <details className="training-details"><summary>What is actually being trained?</summary><p className="note">A separate {layout(cfg).total.toLocaleString()}-parameter transformer, starting from random weights. Adam updates every trainable parameter using next-letter prediction. This does not fine-tune Qwen. Keep learning preserves the current weights and starts a new optimizer. After Scramble or Erase it trains the damaged copy and the intact weights stay available to restore. It trains on 64-letter windows and works best with short ASCII patterns.</p>{params && !disabled && <SlowMotion params={params} corpus={text} worker={worker} />}</details>
     </main>
   </ModelWorkspace>;

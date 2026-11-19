@@ -340,10 +340,10 @@ export function setFollowing(follow: boolean) {
  * values already measured; nothing is generated again. Without a drawing there is nothing to replay on.
  */
 let replayRequests = 0;
-export function askReplay(sample: number, side: Side) {
+export function askReplay(sample: number, side: Side, scope: "answer" | "token" = "answer") {
   const s = store.get();
   if (!s.stage3d || s.busy || s.replay) return;
-  store.set({ replayRequest: { sample, side, n: ++replayRequests } });
+  store.set({ replayRequest: { sample, side, scope, n: ++replayRequests } });
 }
 
 /**
@@ -500,7 +500,7 @@ export function stopReply() {
 }
 
 /** The tiny model continues the text you type (letters, no chat template). Each message starts fresh. */
-async function sendTiny(message: string) {
+async function sendTiny(message: string, cap = TINY_INFO.replyCap, temperature = store.get().temperature) {
   const s = store.get();
   const read = Array.from(encode(message));
   if (!read.length) return;
@@ -509,40 +509,70 @@ async function sendTiny(message: string) {
   claim("changed");
   const id = ++sampleSeq;
   store.set({
-    turns: [{ id, user: message, seed: s.seed, temperature: s.temperature, normal: emptyReply({}, read, "live"), changed: forked ? emptyReply(s.chips, read, "live") : undefined }],
+    turns: [{ id, user: message, seed: s.seed, temperature, normal: emptyReply({}, read, "live"), changed: forked ? emptyReply(s.chips, read, "live") : undefined }],
     fork: forked ? 0 : -1, busy: true,
   });
   // The previous sample was replaced, so nothing stays selected until this reply's first letter.
   beginOutput(id);
-  await Promise.all([writeNormal(0, [], undefined, TINY_INFO.replyCap), forked ? writeChangedLive(0, [], undefined, TINY_INFO.replyCap) : Promise.resolve()]);
+  await Promise.all([writeNormal(0, [], undefined, cap), forked ? writeChangedLive(0, [], undefined, cap) : Promise.resolve()]);
   settleSelection();
+  return id;
 }
 
 let tinyParams: Float32Array | null = null;
 
 /** Hands the trained tiny model to the engine and shows it in the same screen. */
-export async function openTiny(params: Float32Array) {
+export async function openTiny(params: Float32Array, replayPrompt?: string) {
   stopReply();
-  tinyParams = params;
-  if (!engine) {
-    const { EngineClient } = await import("../live/engine.ts");
-    engine = new EngineClient();
-    connectEngine(engine);
+  const visit = navigation;
+  const began = store.get();
+  let left = false;
+  const unsubscribe = store.subscribe(() => {
+    const { tiny, teach } = store.get();
+    if (tiny !== began.tiny || teach !== began.teach) left = true;
+  });
+  const departed = () => left || visit !== navigation;
+  let loaded;
+  try {
+    if (!engine) {
+      const { EngineClient } = await import("../live/engine.ts");
+      if (departed()) return;
+      engine = new EngineClient();
+      connectEngine(engine);
+    }
+    const cfg: TinyConfig = { ...TINY, vocab: TINY_INFO.vocab };
+    loaded = await engine.loadTiny(params.slice(), cfg);
+    if (departed()) return;
+    await engine.use("tiny");
+    if (departed()) {
+      if (store.get().model.id === "qwen") await engine.use("qwen");
+      return;
+    }
+  } finally {
+    unsubscribe();
   }
-  const cfg: TinyConfig = { ...TINY, vocab: TINY_INFO.vocab };
-  const loaded = await engine.loadTiny(params.slice(), cfg);
-  await engine.use("tiny");
+  tinyParams = params;
   claim("normal");
   claim("changed");
   setDims(TINY_INFO);
   const s = store.get();
-  store.set({ model: TINY_INFO, tiny: false, mode: "live", step: null, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, ...FRESH_SELECTION,
+  store.set({ model: TINY_INFO, tiny: false, teach: false, mode: "live", step: null, chips: {}, version: s.version + 1, turns: [], removed: [], fork: -1, ...FRESH_SELECTION,
     focus: { kind: "word" }, qwenMode: s.model.id === "qwen" ? s.mode : s.qwenMode, busy: false, replay: null, full: false, error: null, sheet: false,
     contextCaps: { ...s.contextCaps, tiny: loaded?.contextCap },
     // Replaces the "Stopped" left by the cancel above: nothing of this model was stopped.
     announce: S.tinyReady });
   engine.setVersion(store.get().version);
   setHash(null);
+  if (replayPrompt?.trim()) {
+    try {
+      // The Grow tests use greedy decoding. Keep it for this sample without changing the lab preference.
+      const id = await sendTiny(replayPrompt, 1, 0);
+      const turn = store.get().turns.find(t => t.id === id);
+      if (visit === navigation && turn?.normal.done && turn.normal.toks.length) askReplay(turn.id, "normal", "token");
+    } catch (error) {
+      if (visit === navigation) endWithError(error);
+    }
+  }
 }
 
 /**

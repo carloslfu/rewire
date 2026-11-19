@@ -28,7 +28,7 @@ export function useCell(matrices: Matrix[], preferred?: string) {
   return [cell, setChosen, chosen] as const;
 }
 
-export function MatrixInspector({ matrices, cell, onCell, heading, empty, difference = false, onLook, children }: {
+export function MatrixInspector({ matrices, cell, onCell, heading, empty, difference = false, baselineName = "At the start", onLook, children }: {
   matrices: Matrix[];
   /** From `useCell`: always a number of one of `matrices`, or null when there are none. */
   cell: CellRef | null;
@@ -38,6 +38,7 @@ export function MatrixInspector({ matrices, cell, onCell, heading, empty, differ
   empty: string;
   /** The plates on the stage show change since the start. The numbers around the one being read follow them. */
   difference?: boolean;
+  baselineName?: string;
   /** Turn the camera to the plates. */
   onLook?: () => void;
   children?: ReactNode;
@@ -77,7 +78,9 @@ export function MatrixInspector({ matrices, cell, onCell, heading, empty, differ
     follow.current = true;
     go(to[0], to[1]);
   };
-  const spoken = `${name}: ${m.start ? `now ${exact(now)}, at the start ${exact(before!)}, change ${exact(now - before!)}` : exact(now)}`;
+  const intact = baselineName !== "At the start";
+  const changeName = intact ? `Change from the ${baselineName.toLowerCase()}` : "Change since the start";
+  const spoken = `${name}: ${m.start ? `now ${exact(now)}, ${baselineName.toLowerCase()} ${exact(before!)}, change ${exact(now - before!)}` : exact(now)}`;
 
   return <section className="matrix-inspector" aria-labelledby={`${id}-h`}>
     <div className="section-heading"><h3 id={`${id}-h`}>{heading}</h3>
@@ -92,21 +95,21 @@ export function MatrixInspector({ matrices, cell, onCell, heading, empty, differ
       {m.cols > 1 && <Axis name={m.axes[1]} value={col} first={m.first[1]} size={m.cols} onChange={(v) => go(row, v)} />}
     </div>
     <div className="matrix-jumps" role="group" aria-label="Go to">
-      {stats.change && <button type="button" className="btn quiet" disabled={stats.change.at < 0 || stats.change.max === 0} title={`The ${m.unit} of this matrix that moved the most since the start`}
+      {stats.change && <button type="button" className="btn quiet" disabled={stats.change.at < 0 || stats.change.max === 0} title={`The largest ${m.unit} ${changeName.toLowerCase()}`}
         onClick={() => onCell({ id: m.id, index: stats.change!.at })}>Largest change</button>}
       <button type="button" className="btn quiet" disabled={stats.now.at < 0} title={`The largest ${m.unit} of this matrix, by magnitude`} onClick={() => onCell({ id: m.id, index: stats.now.at })}>Largest {m.unit}</button>
     </div>
     <div className="matrix-reading">
       <p className="matrix-cell-name num">{name}</p>
       <dl className="kv">
-        {m.start ? <><dt>Now</dt><dd className="num">{exact(now)}</dd><dt>At the start</dt><dd className="num">{exact(before!)}</dd><dt>Change</dt><dd className="num changed-text">{exact(now - before!)}</dd></>
+        {m.start ? <><dt>Now</dt><dd className="num">{exact(now)}</dd><dt>{baselineName}</dt><dd className="num">{exact(before!)}</dd><dt>Change</dt><dd className="num changed-text">{exact(now - before!)}</dd></>
           : <><dt>{capital(m.unit)}</dt><dd className="num">{exact(now)}</dd></>}
       </dl>
       <p className="sr-only" aria-live="polite">{spoken}</p>
     </div>
     <table className="matrix-window" ref={grid} onKeyDown={keys}
-      aria-label={`Exact ${moved ? "changes since the start" : `${m.unit}s`} around ${name}. Arrow keys move one number at a time; Page Up and Page Down move ${WINDOW} rows.`}>
-      <caption>{moved ? "Change since the start" : m.start ? `${capital(m.unit)}s now` : `${capital(m.unit)}s`}, around the one being read</caption>
+      aria-label={`Exact ${moved ? changeName.toLowerCase().replace("change", "changes") : `${m.unit}s`} around ${name}. Arrow keys move one number at a time; Page Up and Page Down move ${WINDOW} rows.`}>
+      <caption>{moved ? changeName : m.start ? `${capital(m.unit)}s now` : `${capital(m.unit)}s`}, around the one being read</caption>
       <thead><tr><td />{Array.from({ length: C }, (_, k) => <th key={k} scope="col">{m.cols > 1 ? n(c0 + k + m.first[1]) : ""}</th>)}</tr></thead>
       <tbody>{Array.from({ length: R }, (_, j) => <tr key={j}>
         <th scope="row">{m.rows > 1 ? n(r0 + j + m.first[0]) : ""}</th>

@@ -12,7 +12,7 @@
 //   3 seed  4 turn  5 step  6 temperature (f32 bits)  7 top_k  8 top_p (f32 bits)  9 row (inspected / last row)
 //  10 vocab_real  11 keylimit (inspection: keys visible to the inspected row)
 
-import { MAX_HIDDEN, MAX_NEURONS, MAX_SWAPS, MAX_ZEROED, type ModelConfig, type TableLayout } from "./config.ts";
+import { H_NZEROED, MAX_HIDDEN, MAX_NEURONS, MAX_SWAPS, MAX_ZEROED, TENSOR_ID, type ModelConfig, type TableLayout } from "./config.ts";
 
 export interface KernelConsts {
   cfg: ModelConfig;
@@ -1009,9 +1009,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     ${f32w ? "" : `let pp = unpack2x16float(Wd[${codeWords}u + i * ${U / G}u + j / ${G}u]);`}
     acc += ${at} * u[i];
   }
-  for (var k = 0u; k < min(ct[9], 8u); k++) {
+  for (var k = 0u; k < min(ct[${H_NZEROED}], ${MAX_ZEROED}u); k++) {
     let z = L_ZEROED + 4u * k;
-    if (ct[z] == F.x && ct[z + 1u] == 6u && ct[z + 3u] == j) {
+    if (ct[z] == F.x && ct[z + 1u] == ${TENSOR_ID.down}u && ct[z + 3u] == j) {
       let i = ct[z + 2u];
       ${f32w ? "" : `let pp = unpack2x16float(Wd[${codeWords}u + i * ${U / G}u + j / ${G}u]);`}
       acc -= ${at} * u[i];

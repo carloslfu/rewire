@@ -1,7 +1,7 @@
 // Grow in 3D: the tiny transformer built from its real configuration. Each part is colored by its
 // own slice of the parameter array, Punch rewrites a layer's actual weights, and every weight of
 // every matrix can be read exactly, now and as change since training began.
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { layout, TINY } from "@rewire/tiny/src/config.ts";
 import { VOCAB } from "@rewire/tiny/src/data.ts";
 import { weightStats } from "@rewire/tiny/src/lab.ts";
@@ -49,7 +49,7 @@ export interface GrowControls {
   intactStep: number;
   /** Make the retrained copy the intact one. */
   adopt: () => void;
-
+  guide?: (openWork: () => void) => ReactNode;
 }
 
 export default function GrowStage({ params, reference, intact, step, running, active, controls }: {
@@ -58,15 +58,19 @@ export default function GrowStage({ params, reference, intact, step, running, ac
   const arch = useMemo(() => buildArch(TINY_INFO), []);
   const [stage, setStage] = useState<Stage | null>(null);
   const [selected, setSelected] = useState<Part | null>(null);
-  const [difference, setDifference] = useState(true);
+  const [view, setView] = useState<"start" | "intact" | "weights">("start");
   const strengthId = useId();
   // False when the 3D drawing could not start. The numbers are all still here; the notes then stop pointing at plates and windows.
   const drawn = useStore((s) => s.stage3d);
   const { damage, disabled, strength } = controls;
-  const values = useMemo(() => (difference && !reference ? null : tinyValues(arch, cfg, params, difference ? reference : null)), [arch, params, reference, difference]);
+  useEffect(() => { setView(damage ? "intact" : "start"); }, [damage]);
+  const comparingDamage = view === "intact" && !!intact;
+  const baselineName = comparingDamage ? "Intact checkpoint" : "At the start";
+  const difference = view !== "weights", baseline = comparingDamage ? intact : reference;
+  const values = useMemo(() => (difference && !baseline ? null : tinyValues(arch, cfg, params, difference ? baseline : null)), [arch, params, baseline, difference]);
   const hit = (floor: number) => !!damage && (damage.floor === undefined || damage.floor === floor);
   const poses = useMemo((): Pose[] => arch.parts.map((p) => ({ mult: 1, off: false, roll: 0,
-    edited: "floor" in p && p.kind !== "kv" && !!damage && (damage.floor === undefined || damage.floor === p.floor) })), [arch, damage]);
+    edited: !!damage && (("floor" in p && (damage.floor === undefined || damage.floor === p.floor)) || (damage.floor === undefined && (p.kind === "embed" || p.kind === "unembed"))) })), [arch, damage]);
   const floor = selected && "floor" in selected ? selected.floor : -1;
   const dictionary = selected?.kind === "embed" || selected?.kind === "unembed";
   const bay = useMemo((): BaySpec | null => {
@@ -74,9 +78,9 @@ export default function GrowStage({ params, reference, intact, step, running, ac
     // The embedding table opens above the dictionary block, or below the output block that reuses it.
     const at = floor >= 0 ? floor : selected?.kind === "embed" ? -1 : arch.floors - 1, key = floor >= 0 ? `tiny.layer.${floor}` : `tiny.dict.${at}`;
     if (!params) return { key, floor: at, plates: [], message: "The weights appear when you start learning." };
-    const base = difference ? reference : null;
+    const base = difference ? baseline : null;
     return { key, floor: at, plates: floor >= 0 ? tinyLayerPlates(cfg, params, base, floor) : [tinyDictPlate(cfg, params, base)] };
-  }, [arch, floor, dictionary, selected?.kind, params, reference, difference]);
+  }, [arch, floor, dictionary, selected?.kind, params, baseline, difference]);
 
   useEffect(() => { stage?.setValues(values?.scaled ?? null, "size"); }, [stage, values]);
   useEffect(() => { stage?.setPoses(poses); }, [stage, poses]);
@@ -85,7 +89,7 @@ export default function GrowStage({ params, reference, intact, step, running, ac
   // Every weight matrix by name, each weight readable on its own. The matrix being read and the part
   // selected on the stage stay together: choosing a matrix of another layer selects that layer, and
   // selecting another part moves the reading to that part's own matrices.
-  const matrices = useMemo(() => (params ? tinyMatrices(cfg, params, reference) : []), [params, reference]);
+  const matrices = useMemo(() => (params ? tinyMatrices(cfg, params, baseline) : []), [params, baseline]);
   const preferred = dictionary ? "dict" : `f${Math.max(0, floor)}.${selected?.kind === "head" ? "q" : selected?.kind === "kv" ? "k" : "down"}`;
   const [cell, setCell, picked] = useCell(matrices, preferred);
   const pickCell = (next: CellRef) => {
@@ -98,10 +102,10 @@ export default function GrowStage({ params, reference, intact, step, running, ac
     if (picked && !beside(part, matrices.find((x) => x.id === picked.id))) setCell(null);
   };
   useEffect(() => { stage?.markTile(picked && cell ? { plate: cell.id, index: cell.index } : null); }, [stage, picked, cell]);
-  const total = useMemo(() => (params && reference && reference.length === params.length ? weightStats(params, reference) : null), [params, reference]);
+  const total = useMemo(() => (params && baseline && baseline.length === params.length ? weightStats(params, baseline) : null), [params, baseline]);
 
   const say = (announce: string) => store.set({ announce });
-  const measure = difference ? "RMS change since the start" : "RMS weight size";
+  const measure = comparingDamage ? "RMS change from intact weights" : difference ? "RMS change since the start" : "RMS weight size";
   const punch = (part: Part): boolean => {
     if (!("floor" in part)) { say("Punch works on layers here."); return false; }
     if (!intact) { say("Train the model first. Punch needs learned weights to scramble."); return false; }
@@ -138,19 +142,23 @@ export default function GrowStage({ params, reference, intact, step, running, ac
   </>;
 
   const transport = <section className="stage-transport" aria-label="Training">
-    <Docked>{training}</Docked>
-    <div className="seg" role="group" aria-label="Colors show"><button type="button" aria-pressed={difference} onClick={() => setDifference(true)}>Change since start</button><button type="button" aria-pressed={!difference} onClick={() => setDifference(false)}>Weights now</button></div>
+    {!controls.guide && <Docked>{training}</Docked>}
+    <div className="seg grow-weight-modes" role="group" aria-label="Colors show">
+      {damage && intact && <button type="button" aria-pressed={comparingDamage} onClick={() => setView("intact")}>Change from intact</button>}
+      <button type="button" aria-pressed={difference && !comparingDamage} onClick={() => setView("start")}>Change since start</button>
+      <button type="button" aria-pressed={!difference} onClick={() => setView("weights")}>Weights now</button>
+    </div>
   </section>;
 
   const value = selected ? values?.raw[partIndex(TINY_INFO, selected)] : undefined;
-  return <Workbench arch={arch} active={active} eyebrow="Live weights" title={controls.mutation ? "Under the knife" : running ? "A brain taking shape" : params ? "Your specimen" : "Waiting for its first lesson"}
-    status={<span>{arch.floors} transformer layers · {layout(cfg).total.toLocaleString("en-US")} trainable numbers{controls.mutation ? " · damaged copy" : ""}</span>}
+  return <Workbench arch={arch} active={active} eyebrow="Live weights" title={running ? "Training the model" : controls.mutation ? "Damaged model" : params ? "Trained model" : "Random starting weights"}
+    status={<span>{arch.floors} transformer layers · {layout(cfg).total.toLocaleString("en-US")} trainable weights{comparingDamage ? " · Change from intact" : ""}</span>}
     tools={["explore", "grab", "punch"]} selected={selected} onSelect={selectPart} onPunch={punch} describe={describe} onStage={setStage}
     onTile={(plate, index) => pickCell({ id: plate, index })} annotate={annotate}
     punchHelp="Click any part of a layer to scramble that layer's real weights at the strength below, starting from the intact copy. Click the same layer again to restore it."
-    railTitle="Training and tests" railName="Training" transport={transport}
+    railTitle="Training and tests" railName="Training" transport={transport} bar={controls.guide}
     immersiveBar={<section className="training-bar" aria-label="Training">{training}</section>}
-    restore={{ label: "Restore intact model", disabled: !controls.mutation || disabled, run: controls.restore }}>
+    restore={controls.guide ? undefined : { label: "Restore intact model", disabled: !controls.mutation || disabled, run: controls.restore }}>
     <section className="stage-info">
       {selected ? <>
         <div className="section-heading"><h3>{partName(TINY_INFO, selected)}</h3><button type="button" className="btn quiet" onClick={() => selectPart(null)}>Close</button></div>
@@ -160,23 +168,25 @@ export default function GrowStage({ params, reference, intact, step, running, ac
           : selected.kind === "mlp" ? "The gate, up and down matrices of this layer's MLP."
           : selected.kind === "layer" ? "Every matrix and normalization weight in this layer."
           : selected.kind === "norm" ? "The final normalization weights." : "The letter embeddings. The same table turns numbers back into letters."}</p>
-        {drawn && (floor >= 0 || dictionary) && <p className="note">The plates beside it are {floor >= 0 ? "this layer's real weight matrices" : "the real embedding table"}{difference ? ", shown as change since the start" : ""}. A tile can stand for several weights: click or tap one, or use the fields below, to read every weight exactly.</p>}
+        {drawn && (floor >= 0 || dictionary) && <p className="note">The plates show {floor >= 0 ? "this layer’s matrices" : "the embedding table"}{comparingDamage ? " compared with the intact checkpoint" : difference ? " compared with the start of training" : ""}. Select a tile to read an exact weight.</p>}
         <div className="stage-part-actions">
-          {floor >= 0 && <button type="button" className="btn" disabled={!intact || disabled} onClick={() => stage?.react(selected, punch(selected))}>{damage?.floor === floor ? "Restore this layer" : "Scramble this layer"}</button>}
+          {floor >= 0 && <button type="button" className="btn" disabled={!intact || disabled} onClick={() => {
+            const changed = punch(selected);
+            stage?.react(selected, changed);
+          }}>{damage?.floor === floor ? "Restore this layer" : "Scramble this layer"}</button>}
           {floor >= 0 && <button type="button" className="btn quiet" disabled={!intact || disabled} onClick={() => controls.mutate("erase", floor)}>Erase in this layer</button>}
           <button type="button" className="btn quiet" disabled={!stage} onClick={() => stage?.focus(selected)}>Look closer</button>
         </div>
-      </> : <><h3>Select a part</h3><p className="note">{drawn ? `Each part's window is lit by how much its own weights ${difference ? "have moved since the start" : "weigh now"}. Click one to see its matrices.`
-        : `Each part is listed in the menu above with how much its own weights ${difference ? "have moved since the start" : "weigh now"}. Choose one to read its matrices below.`}</p></>}
+      </> : <><h3>Select a part</h3><p className="note">{drawn ? "The windows show each part’s reading. Select a part to see its matrices." : "Select a part from the menu to read its matrices."}</p></>}
     </section>
-    <MatrixInspector matrices={matrices} cell={cell} onCell={pickCell} heading="Read one weight" difference={difference} onLook={stage && bay ? () => stage.focusBay() : undefined}
+    <MatrixInspector matrices={matrices} cell={cell} onCell={pickCell} heading="Read one weight" difference={difference} baselineName={baselineName} onLook={stage && bay ? () => stage.focusBay() : undefined}
       empty="The weights can be read here, one at a time, once learning has started.">
-      <dl className="weight-metrics" aria-label="The whole model since the start">
+      <dl className="weight-metrics" aria-label={comparingDamage ? "The whole model compared with the intact checkpoint" : "The whole model since the start"}>
         <div><dt>Weights changed</dt><dd>{total ? total.changed.toLocaleString("en-US") : "Waiting"}</dd></div>
         <div><dt>RMS change</dt><dd>{total?.rms.toFixed(5) ?? "Waiting"}</dd></div>
         <div><dt>Largest change</dt><dd>{total?.max.toFixed(5) ?? "Waiting"}</dd></div>
       </dl>
-      <Movement matrices={matrices} current={cell?.id} onPick={(id) => pickCell({ id, index: -1 })} />
+      <Movement matrices={matrices} current={cell?.id} comparingDamage={comparingDamage} onPick={(id) => pickCell({ id, index: -1 })} />
       <p className="note">Measured from the parameter arrays used for inference, over all {layout(cfg).total.toLocaleString("en-US")} trainable numbers. Training updates all layers by backpropagation. Snapshots arrive every 100 steps.</p>
     </MatrixInspector>
     <section className="stage-info damage-bench">
@@ -194,7 +204,7 @@ export default function GrowStage({ params, reference, intact, step, running, ac
 }
 
 /** How far every weight matrix has moved since the start, layer by layer: a number for each, and a button that opens it. */
-function Movement({ matrices, current, onPick }: { matrices: Matrix[]; current: string | undefined; onPick: (id: string) => void }) {
+function Movement({ matrices, current, onPick, comparingDamage }: { matrices: Matrix[]; current: string | undefined; onPick: (id: string) => void; comparingDamage: boolean }) {
   const moved = useMemo(() => new Map(matrices.map((m) => [m.id, matrixStats(m).change?.rms])), [matrices]);
   const cellOf = (id: string, label: string) => {
     const v = moved.get(id);
@@ -203,7 +213,7 @@ function Movement({ matrices, current, onPick }: { matrices: Matrix[]; current: 
   };
   if (!matrices.length) return null;
   return <table className="matrix-movement">
-    <caption>RMS change of each matrix since the start. Select one to read its weights.</caption>
+    <caption>RMS change of each matrix {comparingDamage ? "from the intact checkpoint" : "since the start"}. Select one to read its weights.</caption>
     <thead><tr><td />{TINY_MATRICES.map(([name, title]) => <th key={name} scope="col" title={title}>{name}</th>)}</tr></thead>
     <tbody>
       {Array.from({ length: cfg.floors }, (_, L) => <tr key={L}><th scope="row">Layer {L + 1}</th>

@@ -1,6 +1,6 @@
 // The change table (section 7.2): a storage buffer every kernel reads, one per conversation.
 import {
-  H_BITS, H_CONCEPT_FIRST, H_CONCEPT_FLOOR, H_CONCEPT_SCALE, H_FLAGS, H_MAGIC, H_NHIDDEN, H_NSWAPS, H_NZEROED,
+  H_BITS, H_CONCEPT_FIRST, H_CONCEPT_FLOOR, H_CONCEPT_SCALE, H_FLAGS, H_LESSON, H_MAGIC, H_NHIDDEN, H_NSWAPS, H_NZEROED,
   H_VERSION, H_NNEURONS, MAX_HIDDEN, MAX_NEURONS, MAX_SWAPS, MAX_ZEROED, NO_CONCEPT, TABLE_MAGIC, TENSOR_ID, type ModelConfig, type TensorName,
   tableLayout,
 } from "./config.ts";
@@ -105,7 +105,7 @@ export function encodeTable(
   u[H_MAGIC] = TABLE_MAGIC;
   u[H_VERSION] = 3;
   u[H_FLAGS] = isNeutral(s) ? 0 : FLAG_ANY;
-  u[10] = s.lesson ? 1 : 0;
+  u[H_LESSON] = s.lesson ? 1 : 0;
   const bits = s.bits ?? 4;
   u[H_BITS] = bits;
   f.fill(1, lay.head, lay.head + cfg.floors * cfg.queryHeads + 2 * cfg.floors);
